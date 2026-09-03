@@ -21,7 +21,7 @@ import {
 export type VisualQualityScreenshot = {
   route: string;
   viewport: "desktop" | "mobile";
-  frame: "top" | "middle" | "bottom";
+  frame: "top" | "middle" | "bottom" | "navigation";
   artifactKey: string;
   sourceUrl?: string;
 };
@@ -47,7 +47,7 @@ const responseCheckSchema = z.object({
   evidence: z.array(z.object({
     route: z.string().startsWith("/"),
     viewport: z.enum(["desktop", "mobile"]),
-    frame: z.enum(["top", "middle", "bottom"]),
+    frame: z.enum(["top", "middle", "bottom", "navigation"]),
     observation: z.string().min(1).max(1_000)
   }).strict()).max(3)
 }).strict();
@@ -292,7 +292,7 @@ function outputJsonSchema(routes: string[], viewports: string[]) {
                 properties: {
                   route: { type: "string", enum: routes },
                   viewport: { type: "string", enum: viewports },
-                  frame: { type: "string", enum: ["top", "middle", "bottom"] },
+                  frame: { type: "string", enum: ["top", "middle", "bottom", "navigation"] },
                   observation: { type: "string" }
                 },
                 required: ["route", "viewport", "frame", "observation"]

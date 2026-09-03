@@ -47,6 +47,11 @@ const staticReleasePreflight = workflowSource.indexOf("prepared.findings.some(is
 const releaseBrowserSweep = workflowSource.indexOf("const browserGate = await runArtifactBrowserGate", staticReleasePreflight);
 assert(staticReleasePreflight >= 0, "Release verification does not preflight deterministic blockers before browser capture.");
 assert(releaseBrowserSweep > staticReleasePreflight, "Release verification starts browser capture before deterministic blocker preflight.");
+assert.match(
+  workflowSource.slice(staticReleasePreflight),
+  /const selectedRoutes = selectedVisualRoutes[\s\S]*const releaseBrowserRoutePaths = \[\.\.\.new Set[\s\S]*routePaths: releaseBrowserRoutePaths/,
+  "Release verification does not retain every canonical visual-review route before evaluation."
+);
 
 const fixture = await mkdtemp(join(tmpdir(), "lodesta-generation-protocol-"));
 try {

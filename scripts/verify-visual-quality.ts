@@ -5,6 +5,7 @@ import {
   publiclyEligibleVisualQualityCheckIds,
   visualQualityCheckDefinitions,
   visualQualityMethodologyIdentity,
+  visualQualityPrompt,
   visualQualityPromptIdentity
 } from "../packages/website-assessment";
 
@@ -14,6 +15,7 @@ assert(visualQualityMethodologyIdentity.startsWith("visual-quality@sha256:"));
 assert(visualQualityPromptIdentity.startsWith("visual-prompt@sha256:"));
 assert(visualQualityCheckDefinitions.every((check) => ["major", "minor", "advisory"].includes(check.impact)), "Visual Quality cannot emit critical checks.");
 assert([...publiclyEligibleVisualQualityCheckIds].every((id) => ids.includes(id)), "The public Visual Quality allowlist contains an unknown check.");
+assert.match(visualQualityPrompt, /opened mobile navigation/, "Visual review can still pass navigation from a closed header alone.");
 
 const live = process.env.VISUAL_QUALITY_LIVE_CONFORMANCE === "true";
 const reports = [];
@@ -120,6 +122,57 @@ assert(
     limitation.includes("visual_evaluator_incomplete_evidence_coverage")
   ),
   "Incomplete route evidence was not retained as the visual-review failure reason."
+);
+const navigationStateReview = await evaluateVisualQuality({
+  contactSheets: [
+    { viewport: "desktop", bytes: Buffer.from("desktop-fixture"), mimeType: "image/png" },
+    { viewport: "mobile", bytes: Buffer.from("mobile-fixture"), mimeType: "image/png" }
+  ],
+  screenshots: [
+    { route: "/", viewport: "desktop", frame: "top", artifactKey: "fixture/home-desktop.png" },
+    { route: "/", viewport: "mobile", frame: "top", artifactKey: "fixture/home-mobile.png" },
+    { route: "/", viewport: "mobile", frame: "navigation", artifactKey: "fixture/home-navigation.png" }
+  ],
+  vertical: "plumber",
+  verticalConfidence: 1,
+  businessName: "Example Local Business",
+  primaryLocation: "Austin, TX",
+  services: ["Primary service"],
+  customerJourneys: ["Call for service"],
+  deterministicContext: {
+    navigationEvidence: { interactiveDisclosureObserved: true, openedStateCaptured: true }
+  },
+  hasMeaningfulImagery: true,
+  client: {
+    create: async () => ({
+      status: "completed",
+      output_text: JSON.stringify({
+        checks: visualQualityCheckDefinitions.map((check, index) => ({
+          id: check.id,
+          status: check.id === "visual.navigation.presentation" ? "warning" : "pass",
+          confidence: 1,
+          explanation: check.id === "visual.navigation.presentation"
+            ? "The opened disclosure artwork does not communicate a distinct close state."
+            : "The supplied composition supports this visual judgment.",
+          evidence: [{
+            route: "/",
+            viewport: check.id === "visual.navigation.presentation" || index % 2 ? "mobile" : "desktop",
+            frame: check.id === "visual.navigation.presentation" ? "navigation" : "top",
+            observation: check.id === "visual.navigation.presentation"
+              ? "The open panel is visible while the trigger retains its closed three-line artwork."
+              : "The cited frame supports this composition judgment."
+          }]
+        }))
+      })
+    })
+  }
+});
+assert.equal(navigationStateReview.evaluator.status, "completed", "Opened navigation evidence was rejected by the visual contract.");
+assert.equal(
+  navigationStateReview.groups.flatMap((group) => group.checks)
+    .find((check) => check.id === "visual.navigation.presentation")?.status,
+  "warning",
+  "Opened navigation evidence did not drive the navigation-presentation result."
 );
 if (live) {
   assert(process.env.OPENAI_API_KEY, "OPENAI_API_KEY is required for live Visual Quality conformance.");

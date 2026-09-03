@@ -25,7 +25,10 @@ import { sha256, stableJson } from "./hash";
 import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
 import { buildWebsiteSourceMirror, websiteMirrorManifestHash, type RetainedSourceResource } from "./source-mirror";
 import type { SourceSnapshotPage } from "@/packages/site-contracts";
-import { classifySourcePagePath } from "./source-page-classification";
+import {
+  classifySourcePagePath,
+  isLikelyCmsTemplateOrSystemSourcePage
+} from "./source-page-classification";
 
 export type WebsiteIngestionResult = {
   site: PlatformSiteRecord;
@@ -204,10 +207,10 @@ export async function ingestWebsite(input: {
   assertSourceSuitableForGeneration(crawl, generationIngestion);
 
   const retainedContacts = retainedContactConsensus(documents);
+  const scopedContactAndLocation = selectSourceContactAndLocation(crawl, retainedContacts);
   const facts = {
     ...crawl.extractedFacts,
-    phone: crawl.extractedFacts.phone ?? retainedContacts.phone,
-    email: crawl.extractedFacts.email ?? retainedContacts.email
+    ...scopedContactAndLocation
   };
   const crawlName = clean(crawl.extractedFacts.name) ?? clean(crawl.title)?.replace(/\s*[|\-–].*$/, "").trim();
   const sourceBackedName = preferBusinessNameCandidate(crawlName, undefined, new URL(sourceUrl).hostname);
@@ -318,10 +321,28 @@ export async function ingestWebsite(input: {
   );
 
   const crawlServiceAreas = verifiedServiceAreas(crawl, generationIngestion);
-  for (const service of selectSourceOfferingFacts(crawl, generationIngestion, crawlServiceAreas.map((area) => area.label))) {
-    addFact("offering", "Observed source service language", service.name, service.confidence, true, service.evidence);
-  }
-  const offerings: BusinessOffering[] = [];
+  const offerings: BusinessOffering[] = selectSourceOfferingFacts(
+    crawl,
+    generationIngestion,
+    crawlServiceAreas.map((area) => area.label)
+  ).flatMap((service) => {
+    const factId = addFact(
+      "offering",
+      "Canonical business offering",
+      service.name,
+      service.confidence,
+      true,
+      service.evidence
+    );
+    if (!factId) return [];
+    return [{
+      id: `offering_${sha256(service.name).slice(7, 19)}`,
+      name: service.name,
+      status: "confirmed" as const,
+      visibility: "public" as const,
+      sourceFactIds: [factId]
+    }];
+  });
   const eligibleAddress = addressFactId ? publicFacts.some((fact) => fact.id === addressFactId && fact.publicEligible) : false;
   const serviceAreas = crawlServiceAreas.slice(0, 50).map(({ label, evidence }, index) => {
     const factId = addFact("service_area", "Service area", label, 0.78, true, evidence)!;
@@ -472,7 +493,7 @@ export function sourceSnapshotIdForBusiness(businessId: string, contentHash: str
 
 export function selectBusinessCategories(values: string[], sourceHints: string[] = []) {
   const specific = unique(values.map((value) => clean(value)).filter((value): value is string => Boolean(value)))
-    .filter((value) => !/^(?:web ?page|profile ?page|collection ?page|item ?page|web ?site|breadcrumb ?list|thing|creative ?work|professional service|organization|local business)$/i.test(value));
+    .filter((value) => !/^(?:web ?page|profile ?page|collection ?page|item ?page|web ?site|breadcrumb ?list|site navigation element|thing|creative ?work|professional ?service|organization|local ?business)$/i.test(value));
   const hintText = normalizedText(sourceHints.join(" "));
   return unique([
     ...specific,
@@ -495,6 +516,59 @@ export function selectSourceOfferingFacts(
     [page.url, page.evidenceClass] as const,
     [(page.summary as CrawlPageSummary).url, page.evidenceClass] as const
   ]));
+  const routedOfferings = uniqueBy(crawl.pageSummaries.flatMap((page) => {
+    if (!sourceFactPageEligible(page, crawl.url)) return [];
+    const evidenceClass = evidenceClassByUrl.get(page.url) ?? "unknown";
+    if (evidenceClass !== "first_party") return [];
+    const path = new URL(page.url).pathname;
+    if (
+      page.purposeTags.includes("location")
+      || page.purposeTags.includes("blog")
+      || /\/(?:locations?|service-areas?|areas-we-serve|blog|news|articles?|resources?)(?:\/|$)/i.test(path)
+    ) return [];
+    const segment = path.split("/").filter(Boolean).at(-1)
+      ?.replace(/\.(?:html?|php|aspx?)$/i, "");
+    if (!segment || isUtilityOfferingRouteSegment(segment)) return [];
+    const name = canonicalOfferingName(segment.replace(/[-_]+/g, " "), serviceAreaIdentities);
+    if (!name || !isPlausibleOfferingName(name)) return [];
+    const serviceShapedPath = /\/(?:services?|solutions?)\//i.test(path)
+      || /\b(?:control|removal|extermination|exclusion|fumigation|inspection|management|repair|installation|replacement|testing|treatment|filtration|sanitizing|abandonment|trenching|drilling|service)s?\b/i.test(name);
+    if (!page.purposeTags.includes("service_detail") && !serviceShapedPath) return [];
+    const supporting = page.sourceTextBlocks.find((block) => normalizedText(block.displayText).includes(normalizedText(name)));
+    return [{
+      name,
+      confidence: 0.88,
+      evidence: {
+        ...(supporting ? { sourceBlockId: supporting.id } : {}),
+        sourceUrl: page.url,
+        evidenceClass
+      }
+    }];
+  }), (candidate) => offeringIdentity(candidate.name));
+  const explicitSectionOfferings = uniqueBy(crawl.pageSummaries.flatMap((page) => {
+    if (!sourceFactPageEligible(page, crawl.url)) return [];
+    const evidenceClass = evidenceClassByUrl.get(page.url) ?? "unknown";
+    if (evidenceClass !== "first_party") return [];
+    return explicitServiceSectionCandidates(page.sourceTextBlocks).flatMap(({ value, block }) => {
+      const name = canonicalOfferingName(value, serviceAreaIdentities);
+      if (!name || !isPlausibleOfferingName(name)) return [];
+      return [{
+        name,
+        confidence: 0.9,
+        evidence: {
+          sourceBlockId: block.id,
+          sourceUrl: page.url,
+          evidenceClass
+        }
+      }];
+    });
+  }), (candidate) => offeringIdentity(candidate.name));
+  const directlySupportedOfferings = uniqueBy(
+    [...routedOfferings, ...explicitSectionOfferings],
+    (candidate) => offeringIdentity(candidate.name)
+  );
+  if (directlySupportedOfferings.length) return directlySupportedOfferings.slice(0, 24);
+
   const candidates = new Map<string, {
     name: string;
     score: number;
@@ -502,9 +576,11 @@ export function selectSourceOfferingFacts(
     evidence: { sourceBlockId?: string; sourceUrl: string; evidenceClass: EvidenceClass };
   }>();
   for (const page of crawl.pageSummaries) {
+    if (!sourceFactPageEligible(page, crawl.url)) continue;
     const evidenceClass = evidenceClassByUrl.get(page.url) ?? "unknown";
     if (evidenceClass !== "first_party") continue;
     if (classifySourcePagePath(new URL(page.url).pathname) !== "customer_content") continue;
+    if (/\/(?:blog|news|articles?|resources?)(?:\/|$)/i.test(new URL(page.url).pathname)) continue;
     for (const rawName of page.extractedFacts.services) {
       const name = canonicalOfferingName(clean(rawName), serviceAreaIdentities);
       if (!name || !isPlausibleOfferingName(name)) continue;
@@ -557,19 +633,69 @@ export function selectSourceOfferingFacts(
     }));
 }
 
+function explicitServiceSectionCandidates(blocks: SourceTextBlock[]) {
+  const ordered = [...blocks].sort((left, right) => left.order - right.order);
+  const candidates: Array<{ value: string; block: SourceTextBlock }> = [];
+  for (let index = 0; index < ordered.length; index += 1) {
+    const heading = ordered[index];
+    const headingLevel = sourceBlockHeadingLevel(heading);
+    if (!headingLevel || !isExplicitServiceSectionHeading(heading.displayText)) continue;
+    for (let nextIndex = index + 1; nextIndex < ordered.length && nextIndex <= index + 24; nextIndex += 1) {
+      const block = ordered[nextIndex];
+      const blockHeadingLevel = sourceBlockHeadingLevel(block);
+      if (blockHeadingLevel && blockHeadingLevel <= headingLevel) break;
+      for (const value of splitExplicitServiceSectionValue(block.displayText)) {
+        candidates.push({ value, block });
+      }
+    }
+  }
+  return candidates;
+}
+
+function sourceBlockHeadingLevel(block: SourceTextBlock) {
+  const match = block.containerId.match(/(?:^|\s*>\s*)h([1-6])(?:[#.:]|$)/i);
+  return match ? Number(match[1]) : undefined;
+}
+
+function isExplicitServiceSectionHeading(value: string) {
+  return /^(?:(?:our|professional|commercial|residential)\s+)?(?:services|treatments|solutions|capabilities)|what we (?:do|offer|install|handle|help with)$/i.test(value.trim());
+}
+
+function splitExplicitServiceSectionValue(value: string) {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (!compact) return [];
+  const delimiter = (compact.match(/\*/g)?.length ?? 0) >= 2
+    ? /\s*\*\s*/
+    : (compact.match(/[•·|]/g)?.length ?? 0) >= 2
+      ? /\s*[•·|]\s*/
+      : undefined;
+  return (delimiter ? compact.split(delimiter) : [compact])
+    .map((candidate) => candidate.replace(/^[-–—:]\s*/, "").trim())
+    .filter(Boolean)
+    .filter((candidate) => !/^(?:commercial\s*(?:&|and)\s*residential|residential\s*(?:&|and)\s*commercial)$/i.test(candidate));
+}
+
 function isPlausibleOfferingName(value: string) {
   const normalized = normalizedText(value);
   const words = normalized.split(" ").filter(Boolean);
   if (words.length < 1 || words.length > 8 || value.length > 100) return false;
-  if (/\b(?:header|footer|slider?|slide|megamenu|option panel|tab content|portfolio|archive|category|infosurgepest|faq|blog|cost|price|pricing|online|20\d{2})\b/.test(normalized)) return false;
-  if (/^(?:areas?|explore|more frequent|start consultation|get your quote|consultations?|residential|commercial)$/i.test(value)) return false;
+  if (/^(?:\d+\s+)?(?:questions?|advantages?|benefits?|signs?|ways?|tips?|reasons?|things?)\b/.test(normalized)) return false;
+  if (/^(?:how|why|when|what|where|can|should|guide to|complete guide|difference between)\b/.test(normalized)) return false;
+  if (/\b(?:header|footer|slider?|slide|mega(?:menu)?|builder|off canvas|bootstrap|font awesome|index php|option panel|tab content|portfolio|archive|category|infosurgepest|faq|blog|cost|price|pricing|online|20\d{2})\b/.test(normalized)) return false;
+  if (/^(?:areas?|explore|more frequent|start consultation|get your quote|consultations?|residential|commercial|request(?: service)?|contact(?: us)?|call(?: now)?|email(?: us)?|submit|send|schedule|book|quote|get started|learn more|read more|view more)$/i.test(value)) return false;
+  if (/^(?:commercial and residential|residential and commercial)$/.test(normalized)) return false;
   if (/\b(?:family owned|locally owned|local and loved|environmentally friendly|safe for pets?|response times?|treatment around|foundation)\b/.test(normalized)) return false;
   return !/\b(?:artificial grass|gardening|hardscaping|landscaping|lawn care|lawn fertilization|tree surgery|waste removal|softscaping|mulching|lawn maintenance|plant health|gardens? and ponds|pruning|lawn aeration|hvac)\b/.test(normalized);
 }
 
 function canonicalOfferingName(value: string | undefined, serviceAreaIdentities: string[]) {
   if (!value) return undefined;
-  let normalized = normalizedText(value).replace(/^(?:your|our)\s+/, "").trim();
+  const possessiveMarker = "xqzpossessivexqz";
+  let normalized = normalizedText(value.normalize("NFKC").replace(/([A-Za-z])['’]s\b/g, `$1${possessiveMarker}`))
+    .replaceAll(possessiveMarker, "'s")
+    .replace(/\.(?:html?|php|aspx?)$/i, "")
+    .replace(/^(?:your|our)\s+/, "")
+    .trim();
   if (/\b(?:cost|price|pricing|online|20\d{2})\b/.test(normalized)) return undefined;
   const sortedAreas = [...serviceAreaIdentities].sort((left, right) => right.length - left.length);
   for (const area of sortedAreas) {
@@ -580,8 +706,42 @@ function canonicalOfferingName(value: string | undefined, serviceAreaIdentities:
       .trim();
   }
   normalized = normalized.replace(/\s+(?:nc|tx|fl|ga|va)$/i, "").trim();
+  if (isUtilityOfferingRouteSegment(normalized.replace(/\s+/g, "-"))) return undefined;
+  if (normalized === "animal wildlife trapping") normalized = "animal and wildlife trapping";
+  else if (normalized === "insect control") normalized = "insect and pest control";
+  else if (/^insect control\s+/.test(normalized)) {
+    const subject = canonicalPestSubject(normalized.replace(/^insect control\s+/, ""));
+    normalized = `${subject} control`;
+  } else if (/\s+control trapping removal$/.test(normalized)) {
+    normalized = `${normalized.replace(/\s+control trapping removal$/, "")} trapping and removal`;
+  }
   if (!normalized) return undefined;
-  return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
+  return normalized
+    .split(" ")
+    .map((word, index) => index > 0 && /^(?:and|or|of|the)$/.test(word)
+      ? word
+      : word.replace(/^\w/, (character) => character.toUpperCase()))
+    .join(" ");
+}
+
+function isUtilityOfferingRouteSegment(value: string) {
+  return /^(?:index|home|default|about(?:-us)?|contact(?:-us)?|image-credit|privacy(?:-policy)?|terms(?:-of-(?:use|service))?|cookies?|accessibility|sitemap|search|login|account)$/i.test(value.trim());
+}
+
+function canonicalPestSubject(value: string) {
+  const subjects: Record<string, string> = {
+    ants: "ant",
+    "bed bugs": "bed bug",
+    "bees and wasps": "bee and wasp",
+    fleas: "flea",
+    flies: "fly",
+    mosquitos: "mosquito",
+    mosquitoes: "mosquito",
+    roach: "cockroach",
+    roaches: "cockroach",
+    spiders: "spider"
+  };
+  return subjects[value] ?? value;
 }
 
 function offeringIdentity(value: string) {
@@ -706,19 +866,32 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
     label: string;
     evidence: { sourceBlockId?: string; sourceUrl: string; evidenceClass: EvidenceClass };
     pageUrls: Set<string>;
+    strongGeographicEvidence: boolean;
   }>();
   for (const page of crawl.pageSummaries) {
+    if (!sourceFactPageEligible(page, crawl.url)) continue;
+    const ingestionPage = ingestion.pages.find((candidate) => candidate.url === page.url || candidate.finalUrl === page.url);
     for (const rawLabel of page.extractedFacts.serviceAreas) {
       const label = normalizeServiceAreaCandidate(clean(rawLabel));
       if (!label || !isExplicitNamedServiceArea(label)) continue;
       const identity = serviceAreaIdentity(label);
-      const supporting = page.sourceTextBlocks.find((block) => normalizedText(block.displayText).includes(identity));
-      if (!serviceAreaHasGeographicEvidence(label, page, supporting?.displayText)) continue;
+      const matchingBlocks = page.sourceTextBlocks.filter((block) => normalizedText(block.displayText).includes(identity));
+      const supporting = matchingBlocks.find((block) =>
+        /\b(?:service areas?|areas? we serve|we (?:proudly )?serve|serving|services? in)\b/.test(normalizedText(block.displayText))
+      ) ?? matchingBlocks[0];
       const evidenceClass = evidenceClassByUrl.get(page.url) ?? "first_party";
       if (evidenceClass !== "first_party") continue;
+      if (!supporting) continue;
+      const strongGeographicEvidence = serviceAreaHasGeographicEvidence(
+        label,
+        page,
+        supporting.displayText,
+        ingestionPage?.internalLinks
+      );
       const existing = candidates.get(identity);
       if (existing) {
         existing.pageUrls.add(page.url);
+        existing.strongGeographicEvidence ||= strongGeographicEvidence;
         if (serviceAreaSpecificity(label) > serviceAreaSpecificity(existing.label)) {
           existing.label = label;
           existing.evidence = {
@@ -734,11 +907,16 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
           ...(supporting ? { sourceBlockId: supporting.id, sourceUrl: supporting.sourceUrl } : { sourceUrl: page.url }),
           evidenceClass
         },
-        pageUrls: new Set([page.url])
+        pageUrls: new Set([page.url]),
+        strongGeographicEvidence
       });
     }
   }
   return [...candidates.values()]
+    .filter((candidate) => candidate.strongGeographicEvidence
+      || (candidate.pageUrls.size >= 2
+        && isBroadServiceAreaLabel(candidate.label)
+        && !isBareUsStateName(candidate.label)))
     .sort((left, right) => right.pageUrls.size - left.pageUrls.size || left.label.localeCompare(right.label))
     .map(({ label, evidence }) => ({ label, evidence }));
 }
@@ -752,16 +930,26 @@ export function isExplicitNamedServiceArea(value: string) {
     && !/\d|[:;!?]/.test(value)
     && /(?:^|[\s-])[A-Z][A-Za-z'-]*/.test(value)
     && !/\b(?:surrounding|greater|metro(?:politan)?|radius|miles?|nearby)\b/.test(normalized)
-    && !/\b(?:homeowners?|customers?|clients?|residents?|restaurants?|businesses?|properties|communities|families|people|you|your|our|we|team|technicians?|including|anthem|climate|challenges?|solutions?|response|times?|insight|concerns?|activity|provides?|bring|understand|common|unique|housing|precise|fast|local|reviews?|reviewers?|apartments?|offices?|pets?|environment|more|include|microhab|corridors?|every|days?|across|not|bugs?|ants?|termites?|mosquitoes?|rodents?|cockroaches?)\b/.test(normalized)
+    && !/\b(?:homeowners?|customers?|clients?|residents?|restaurants?|businesses?|properties|communities|families|people|you|your|our|we|team|technicians?|including|anthem|climate|challenges?|solutions?|response|times?|insight|concerns?|activity|provides?|bring|understand|common|unique|housing|precise|fast|local|reviews?|reviewers?|apartments?|offices?|pets?|environment|more|include|microhab|corridors?|every|days?|across|not|services?|removal|trapping|control|exterminat(?:or|ion)|wildlife|pests?|bugs?|ants?|termites?|mosquitoes?|rodents?|cockroaches?|well|drilling)\b/.test(normalized)
     && !/&|\band\b/.test(normalized)
     && (!value.includes(",") || /,\s*[A-Z]{2}\s*$/i.test(value))
     && !/^(?:united states|usa|nationwide|everywhere|local area|surrounding areas?)$/.test(normalized);
 }
 
+function isBareUsStateName(value: string) {
+  return /^(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|district of columbia)$/i.test(value.trim());
+}
+
+function isBroadServiceAreaLabel(value: string) {
+  return /\b(?:county|parish|borough|region|valley|metro|metropolitan|area)\b/i.test(value)
+    || /^(?:central|north|south|east|west|northeast|northwest|southeast|southwest)\s+[A-Z][A-Za-z'-]+$/i.test(value.trim());
+}
+
 export function normalizeServiceAreaCandidate(value: string | undefined) {
   if (!value) return undefined;
   const stripped = value
-    .replace(/^\s*(?:(?:serving|throughout|across|near|in)\s+(?:the\s+)?|(?:all|rest)\s+of\s+(?:the\s+)?|(?:entire|wider)\s+)/i, "")
+    .replace(/^\s*(?:(?:serving|throughout|across|near|in)\s+(?:the\s+)?|(?:all|rest)\s+of\s+(?:the\s+)?|(?:entire|wider|broader)\s+)/i, "")
+    .replace(/\s+region\s*$/i, "")
     .trim();
   return isExplicitNamedServiceArea(stripped) ? stripped : undefined;
 }
@@ -779,35 +967,62 @@ function serviceAreaSpecificity(value: string) {
 function serviceAreaHasGeographicEvidence(
   label: string,
   page: CrawlPageSummary,
-  supportingText?: string
+  supportingText?: string,
+  internalLinks: string[] = []
 ) {
-  if (/(?:,\s*|\s)[A-Z]{2}\s*$/i.test(label)) return true;
   const identity = serviceAreaIdentity(label);
   const path = new URL(page.url).pathname.toLocaleLowerCase();
   const slug = identity.replace(/[^a-z0-9]+/g, "-");
-  if (new RegExp(`/(?:locations?|service-areas?)/${escapeRegExp(slug)}(?:-|/|$)`).test(path)) return true;
+  const escapedSlug = escapeRegExp(slug);
   const context = normalizedText(supportingText ?? "");
-  return Boolean(context)
+  if (isBareUsStateName(label)) {
+    const state = escapeRegExp(normalizedText(label));
+    const narrowerRegionalClaim = new RegExp(
+      `\\b(?:central|north|south|east|west|northeast|northwest|southeast|southwest)\\s+${state}\\b`
+    );
+    if (narrowerRegionalClaim.test(context)) return false;
+  }
+  const stateQualifiedLegacyPath = new RegExp(
+    `(?:^|[-/])${escapedSlug}-(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new-hampshire|new-jersey|new-mexico|new-york|north-carolina|north-dakota|ohio|oklahoma|oregon|pennsylvania|rhode-island|south-carolina|south-dakota|tennessee|texas|utah|vermont|virginia|washington|west-virginia|wisconsin|wyoming|district-of-columbia|al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc)(?:\\.(?:html?|php|aspx?))?/?$`
+  );
+  if (stateQualifiedLegacyPath.test(path)
     && context.includes(identity)
-    && /\b(?:service areas?|areas? we serve|we (?:proudly )?serve|serving)\b/.test(context);
+    && /\bservices?\s+in\b/.test(context)) {
+    return true;
+  }
+  if (new RegExp(`/(?:local-pest-control|locations?|service-areas?|areas-we-serve)/${escapedSlug}(?:-(?:pest-control|exterminators?|services?))?(?:/|$)`).test(path)) {
+    return true;
+  }
+  if (new RegExp(`/${escapedSlug}-(?:pest-control|exterminators?|service-area)(?:/|$)`).test(path)) {
+    return true;
+  }
+  if (/^\/(?:locations?|service-areas?|areas-we-serve)\/?$/.test(path)) {
+    const hasMatchingChildLocation = internalLinks.some((href) => {
+      const linkedPath = new URL(href).pathname.toLocaleLowerCase();
+      return new RegExp(`^/(?:locations?|service-areas?|areas-we-serve)/${escapedSlug}(?:-(?:pest-control|exterminators?|services?))?/?$`).test(linkedPath);
+    });
+    if (!hasMatchingChildLocation) return false;
+  }
+  if (!context
+    || !context.includes(identity)
+    || !/\b(?:service areas?|areas? we serve|we (?:proudly )?serve|serving|services? in|(?:install(?:s|ed|ing)?|provid(?:e|es|ed|ing)|offer(?:s|ed|ing)?|perform(?:s|ed|ing)?|work(?:s|ed|ing)?)\b.{0,180}\bin)\b/.test(context)) {
+    return false;
+  }
+  if (page.source === "primary") return true;
+  return /^\/(?:about(?:-us)?|contact(?:-us)?|locations?|service-areas?|areas-we-serve)(?:\/|$)/.test(path);
 }
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function observedProof(
+export function observedProof(
   crawl: CrawlAssessment,
   sourceSnapshotId: string,
   facts: BusinessFact[],
   now: string
 ): BusinessState["proof"] {
-  const testimonialCandidates = crawl.pageSummaries
-    .filter((page) => page.purposeTags.includes("reviews"))
-    .flatMap((page) => page.sourceTextBlocks)
-    .filter((block) => /^(?:blockquote|figcaption|li|p)(?:[#.:]|$)/.test(block.containerId))
-    .filter((block) => canonicalWordCount(block.displayText) >= 6 && block.displayText.length >= 30 && block.displayText.length <= 240)
-    .slice(0, 8);
+  const testimonialCandidates = selectObservedFirstPartyTestimonialBlocks(crawl.pageSummaries, crawl.url);
   const testimonials = testimonialCandidates.map((block, index) => {
     const factId = `fact_proof_${index + 1}_${sha256(block.displayText).slice(7, 17)}`;
     facts.push({
@@ -820,17 +1035,17 @@ function observedProof(
         sourceSnapshotId,
         sourceBlockId: block.id,
         sourceUrl: block.sourceUrl,
-        evidenceClass: "third_party",
+        evidenceClass: "first_party",
         observedAt: now,
         confidence: 0.65,
         ownerConfirmed: false
       },
-      publicEligible: false
+      publicEligible: true
     });
     return {
       id: `proof_${index + 1}`,
       kind: "testimonial" as const,
-      status: "observed" as const,
+      status: "confirmed" as const,
       publicText: block.displayText,
       verbatim: true,
       sourceFactIds: [factId]
@@ -870,6 +1085,39 @@ function observedProof(
   return [...testimonials, ...warranties];
 }
 
+export function selectObservedFirstPartyTestimonialBlocks(
+  pages: Array<Pick<CrawlPageSummary, "url" | "purposeTags" | "sourceTextBlocks">>,
+  sourceUrl: string
+): SourceTextBlock[] {
+  const sourceHost = new URL(sourceUrl).hostname.replace(/^www\./, "");
+  const seen = new Set<string>();
+  return pages
+    .filter((page) => page.purposeTags.includes("reviews"))
+    .filter((page) => sourceFactPageEligible(page, sourceUrl))
+    .filter((page) => {
+      try {
+        return new URL(page.url).hostname.replace(/^www\./, "") === sourceHost;
+      } catch {
+        return false;
+      }
+    })
+    .flatMap((page) => page.sourceTextBlocks)
+    .filter((block) => {
+      const blockquote = /^blockquote(?:[#.:]|$)/.test(block.containerId);
+      const visiblyQuoted = /(?:^|\s)[“"][^”"]{20,}[”"](?:\s|$)/u.test(block.displayText);
+      return blockquote || visiblyQuoted;
+    })
+    .filter((block) => canonicalWordCount(block.displayText) >= 6 && block.displayText.length >= 30 && block.displayText.length <= 600)
+    .filter((block) => !isPlaceholderOrTemplateCopy(block.displayText))
+    .filter((block) => {
+      const identity = normalizedText(block.displayText);
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    })
+    .slice(0, 8);
+}
+
 const freeReturnServicePattern = /\b(?:re[-\s]?(?:treat|service)|come back|we(?:'|’)ll return)\b.{0,180}\b(?:free of charge|at no (?:additional|extra) cost|at no additional charge|for free)\b/i;
 const guaranteedReturnServicePattern = /\bguarantee\b.{0,220}\b(?:re[-\s]?(?:treat|service)|come back|return)\b/i;
 
@@ -880,6 +1128,7 @@ export function selectObservedFirstPartyWarrantyBlocks(
   const sourceOrigin = new URL(sourceUrl).origin;
   const seen = new Set<string>();
   return pages
+    .filter((page) => sourceFactPageEligible(page, sourceUrl))
     .filter((page) => {
       try {
         return new URL(page.url).origin === sourceOrigin;
@@ -901,15 +1150,19 @@ export function selectObservedFirstPartyWarrantyBlocks(
 }
 
 export function selectSourceLinksForGeneration(sourceUrl: string, crawl: CrawlAssessment) {
-  const socialProfile = crawl.extractedFacts.socialLinks.find(isAccountLevelSocialProfile);
-  const customerPortalLinks = uniqueBy(crawl.pageSummaries
+  const eligiblePages = crawl.pageSummaries.filter((page) => sourceFactPageEligible(page, sourceUrl));
+  const socialProfile = unique(eligiblePages.flatMap((page) => page.extractedFacts.socialLinks))
+    .find((value) => isAccountLevelSocialProfile(value)
+      && isPlausiblyOwnedSocialProfile(value, crawl.extractedFacts.name, sourceUrl));
+  const customerPortalLinks = uniqueBy(eligiblePages
     .flatMap((page) => page.linkReferences)
     .filter((link) => isCustomerPortalLink(link.href, link.text))
     .map((link) => ({ kind: "other" as const, label: "Customer Login", url: link.href })), (item) => item.url);
   const values = [
     { kind: "website" as const, label: "Source website", url: sourceUrl },
     ...(socialProfile ? [{ kind: "social" as const, label: "Social profile", url: socialProfile }] : []),
-    ...crawl.extractedFacts.bookingLinks.map((url) => ({ kind: "booking" as const, label: "Booking", url })),
+    ...unique(eligiblePages.flatMap((page) => page.extractedFacts.bookingLinks))
+      .map((url) => ({ kind: "booking" as const, label: "Booking", url })),
     ...customerPortalLinks
   ];
   return uniqueBy(values.filter((item) => safeHttpUrl(item.url)), (item) => item.url).slice(0, 20);
@@ -926,23 +1179,52 @@ export function assertSourceSuitableForGeneration(
   const firstPartyUrls = new Set(ingestion.pages
     .filter((page) => page.evidenceClass === "first_party")
     .flatMap((page) => [page.url, (page.summary as CrawlPageSummary).url]));
-  const firstPartyText = crawl.pageSummaries
-    .filter((page) => firstPartyUrls.has(page.url))
+  const primaryFirstPartyText = crawl.pageSummaries
+    .filter((page) => page.source === "primary" && firstPartyUrls.has(page.url))
     .flatMap((page) => [page.title ?? "", page.metaDescription ?? "", ...page.sourceTextBlocks.map((block) => block.displayText)])
     .join("\n");
-  const closed = /\b(?:permanently closed|temporarily closed until further notice|no longer (?:open|operating|in business)|ceased operations|closed (?:our|its) doors|business has closed|location is permanently closed)\b/i.test(firstPartyText);
-  const parked = /\b(?:this domain is for sale|buy this domain|domain may be for sale|website is coming soon)\b/i.test(firstPartyText);
+  const closed = /\b(?:permanently closed|temporarily closed until further notice|no longer (?:open|operating|in business)|ceased operations|closed (?:our|its) doors|business has closed|location is permanently closed)\b/i.test(primaryFirstPartyText);
+  const parked = /\b(?:this domain is for sale|buy this domain|domain may be for sale|website is coming soon)\b/i.test(primaryFirstPartyText);
   const contradictory = hasContradictoryFirstPartyLocationHours(crawl, firstPartyUrls);
-  if (closed || parked || contradictory) {
+  const ambiguousLocationIndex = isAmbiguousLocationIndex(crawl, ingestion);
+  if (closed || parked || contradictory || ambiguousLocationIndex) {
     throw new WebsiteCrawlError(
       "source_unsuitable",
       closed
         ? "The first-party source indicates that the business or location is closed."
         : parked
           ? "The supplied address is a parked or placeholder website rather than an active first-party business source."
-          : "The first-party source gives contradictory hours for the same named street address."
+          : contradictory
+            ? "The first-party source gives contradictory hours for the same named street address."
+            : "The supplied URL is a multi-location directory. Use a specific first-party location URL or explicitly create a corporate multi-location project."
     );
   }
+}
+
+function isAmbiguousLocationIndex(crawl: CrawlAssessment, ingestion: WebsiteGenerationIngestion) {
+  let source: URL;
+  try {
+    source = new URL(crawl.finalUrl ?? crawl.url);
+  } catch {
+    return false;
+  }
+  const sourcePath = source.pathname.replace(/\/+$/, "") || "/";
+  if (!/(?:^|\/)(?:locations?|stores?|branches?|find-a-location|our-locations)$/.test(sourcePath.toLowerCase())) return false;
+  const prefix = sourcePath === "/" ? "/" : `${sourcePath}/`;
+  const childLocations = new Set(ingestion.pages.flatMap((page) => {
+    if (page.evidenceClass !== "first_party") return [];
+    try {
+      const candidate = new URL(page.finalUrl || page.url);
+      if (candidate.origin !== source.origin) return [];
+      const path = candidate.pathname.replace(/\/+$/, "") || "/";
+      if (!path.startsWith(prefix) || path === sourcePath) return [];
+      if (/\/(?:feed|page\/\d+)$/.test(path)) return [];
+      return [path];
+    } catch {
+      return [];
+    }
+  }));
+  return childLocations.size >= 2;
 }
 
 export function hasContradictoryFirstPartyLocationHours(
@@ -984,6 +1266,43 @@ function isAccountLevelSocialProfile(value: string) {
   }
 }
 
+function sourceFactPageEligible(
+  page: Pick<CrawlPageSummary, "url" | "title" | "sourceTextBlocks">,
+  sourceUrl: string
+) {
+  return !isLikelyCmsTemplateOrSystemSourcePage({
+    url: page.url,
+    sourceUrl,
+    title: page.title,
+    text: page.sourceTextBlocks.map((block) => block.displayText).join("\n")
+  });
+}
+
+function isPlaceholderOrTemplateCopy(value: string) {
+  return /\b(?:lorem ipsum|contrary to popular belief,? lorem ipsum|de finibus bonorum et malorum|richard mcclintock|astroid framework|joomdev)\b/i.test(value);
+}
+
+function isPlausiblyOwnedSocialProfile(value: string, businessName: string | undefined, sourceUrl: string) {
+  let profile: URL;
+  let source: URL;
+  try {
+    profile = new URL(value);
+    source = new URL(sourceUrl);
+  } catch {
+    return false;
+  }
+  const handle = profile.pathname.split("/").filter(Boolean).at(-1)?.replace(/^@/, "") ?? "";
+  const normalizedHandle = handle.normalize("NFKC").toLocaleLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (!normalizedHandle) return false;
+  const businessWords = `${businessName ?? ""} ${source.hostname.replace(/^www\./, "").split(".")[0] ?? ""}`
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 3)
+    .filter((word) => !/^(?:and|company|corp|corporation|inc|llc|service|services|official|the)$/.test(word));
+  return businessWords.some((word) => normalizedHandle.includes(word));
+}
+
 export function selectSupportingSourceBlock(
   blocks: SourceTextBlock[],
   value: string,
@@ -1015,6 +1334,49 @@ export function retainedContactConsensus(
       .filter((value) => !/^(?:no-?reply|donotreply)@/i.test(value))
       .filter((value) => !/@(?:example\.(?:com|org|net)|localhost)$/i.test(value)));
   return { phone, email };
+}
+
+/**
+ * Keeps physical-location fields from one first-party page. The crawl-wide
+ * aggregate is useful for broad service/category discovery, but combining its
+ * first phone, address fragments, and hours can create a fictional branch on a
+ * multi-location site.
+ */
+export function selectSourceContactAndLocation(
+  crawl: CrawlAssessment,
+  retainedContacts: { phone?: string; email?: string }
+) {
+  const primary = crawl.pageSummaries.find((page) => page.source === "primary");
+  const pagesByAddress = new Map<string, CrawlPageSummary[]>();
+  for (const page of crawl.pageSummaries) {
+    const formatted = formatAddress(page.extractedFacts.address);
+    if (!formatted) continue;
+    const key = normalizedText(formatted);
+    pagesByAddress.set(key, [...(pagesByAddress.get(key) ?? []), page]);
+  }
+  const primaryHasLocation = Boolean(
+    formatAddress(primary?.extractedFacts.address)
+    || primary?.extractedFacts.geo
+  );
+  const onlyAddressPages = pagesByAddress.size === 1 ? [...pagesByAddress.values()][0] : undefined;
+  const locationPage = primaryHasLocation
+    ? primary
+    : onlyAddressPages?.slice().sort((left, right) =>
+      locationEvidenceCompleteness(right) - locationEvidenceCompleteness(left))[0];
+  return {
+    phone: clean(primary?.extractedFacts.phone) ?? clean(locationPage?.extractedFacts.phone) ?? clean(retainedContacts.phone),
+    email: clean(primary?.extractedFacts.email) ?? clean(locationPage?.extractedFacts.email) ?? clean(retainedContacts.email),
+    address: locationPage?.extractedFacts.address,
+    geo: locationPage?.extractedFacts.geo,
+    hours: locationPage?.extractedFacts.hours
+  };
+}
+
+function locationEvidenceCompleteness(page: CrawlPageSummary) {
+  const address = page.extractedFacts.address;
+  return [address?.street, address?.city, address?.region, address?.postalCode, address?.country].filter(Boolean).length
+    + (page.extractedFacts.geo ? 2 : 0)
+    + (page.extractedFacts.hours ? Object.keys(page.extractedFacts.hours).length : 0);
 }
 
 function rankedDocumentConsensus(

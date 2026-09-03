@@ -7,10 +7,13 @@ import {
   createPublicBuildInput,
   decodeRetainedSourceResource,
   assertNoPrivateBuildInputFields,
+  researchGoogleAggregateRating,
+  retainedProspectGoogleAggregateRatingSnapshot,
   retainedContactConsensus,
   researchBusiness,
   sha256,
-  stableJson
+  stableJson,
+  type WebResearchUsage
 } from "@/packages/business-data";
 import { classifySourcePagePath } from "@/packages/business-data/source-page-classification";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
@@ -126,6 +129,7 @@ import {
   finalizePreparedArtifact,
   createArtifactContactSheet,
   createArtifactContactSheets,
+  createArtifactRouteFamilyContactSheets,
   createMediaContactSheet,
   createSourceMediaContactSheet,
   createArtifactThumbnail,
@@ -1390,6 +1394,34 @@ export class SiteAuthoringWorkflow {
       );
     }
 
+    const hasRetainedRating = retainedSnapshots.some(
+      (snapshot) => snapshot && snapshot.payload.kind === "google_aggregate_rating_research"
+    );
+    const retainedProspectRating = hasRetainedRating
+      ? undefined
+      : await this.retainedProspectRatingSnapshot({
+          businessId: site.businessId,
+          businessName: ingested.state.identity.name,
+          sourceUrl: site.sourceUrl
+        });
+    const ratingResearch = hasRetainedRating || retainedProspectRating
+      ? undefined
+      : await researchGoogleAggregateRating({
+          businessId: site.businessId,
+          businessName: ingested.state.identity.name,
+          locality: researchLocality(ingested.state),
+          phone: ingested.state.contacts.phone,
+          address: researchAddress(ingested.state),
+          sourceUrl: site.sourceUrl,
+          capturedAt: new Date().toISOString(),
+          signal
+        });
+    const preparedSourceSnapshots = [
+      ...ingested.sourceSnapshots,
+      ...(retainedProspectRating ? [retainedProspectRating] : []),
+      ...(ratingResearch ? [ratingResearch.snapshot] : [])
+    ];
+
     const {
       stateHash: _stateHash,
       revision: _revision,
@@ -1414,7 +1446,7 @@ export class SiteAuthoringWorkflow {
       forms: retainedInput.forms,
       sourceSnapshotIds: [
         ...retainedSnapshots.flatMap((snapshot) => snapshot ? [snapshot.id] : []),
-        ...ingested.sourceSnapshots.map((snapshot) => snapshot.id)
+        ...preparedSourceSnapshots.map((snapshot) => snapshot.id)
       ],
       runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
     });
@@ -1426,14 +1458,17 @@ export class SiteAuthoringWorkflow {
       updatedAt: now
     });
     const updatedRun = siteAgentRunSchema.parse({ ...run,
-      publicBuildInputId: buildInput.id
+      publicBuildInputId: buildInput.id,
+      usage: ratingResearch
+        ? addRunUsage(run.usage, webResearchUsageForRun(ratingResearch.usage))
+        : run.usage
     });
     let applied: boolean;
     try {
       applied = await this.repository.applyPreparedProvisionalContext({
         expectedPublicBuildInputId: retainedInput.id,
         expectedBusinessRevision: currentState.revision,
-        sourceSnapshots: ingested.sourceSnapshots,
+        sourceSnapshots: preparedSourceSnapshots,
         sourceSnapshotResources: ingested.retainedSourceResources.map((entry) => entry.resource),
         sourceSnapshotPages: ingested.sourceSnapshotPages,
         assetRevisions: ingested.canonicalSourceLogo ? [ingested.canonicalSourceLogo.revision] : [],
@@ -1460,6 +1495,55 @@ export class SiteAuthoringWorkflow {
       );
     }
     return updatedRun;
+  }
+
+  private async retainedProspectRatingSnapshot(input: {
+    businessId: string;
+    businessName: string;
+    sourceUrl: string;
+  }) {
+    const websiteIdentity = normalizedWebsiteEvidenceIdentity(input.sourceUrl);
+    if (!websiteIdentity) return undefined;
+    try {
+      const candidates = await this.operationsRepository.listProspectCandidates({
+        filters: [{
+          field: "website_url",
+          operator: "contains",
+          value: websiteIdentity.hostname
+        }],
+        limit: 20
+      });
+      const matches = candidates.filter((candidate) =>
+        candidate.websiteUrl
+        && normalizedWebsiteEvidenceIdentity(candidate.websiteUrl)?.key === websiteIdentity.key
+        && typeof candidate.googleRating === "number"
+      );
+      if (matches.length !== 1) return undefined;
+      const match = matches[0]!;
+      const locations = await this.operationsRepository.listProspectLocations(match.id);
+      const observedLocation = locations.find((location) =>
+        location.isPrimary
+        && location.googleRating === match.googleRating
+        && location.googleReviewCount === match.googleReviewCount
+      ) ?? locations.find((location) =>
+        location.googleRating === match.googleRating
+        && location.googleReviewCount === match.googleReviewCount
+      );
+      if (!observedLocation) return undefined;
+      const locality = [match.primaryLocality, match.primaryRegion].filter(Boolean).join(", ") || undefined;
+      return retainedProspectGoogleAggregateRatingSnapshot({
+        businessId: input.businessId,
+        businessName: input.businessName,
+        sourceUrl: input.sourceUrl,
+        rating: match.googleRating!,
+        reviewCount: match.googleReviewCount,
+        locality,
+        googleBusinessName: observedLocation.googleBusinessName ?? match.googleBusinessName,
+        observedAt: observedLocation.updatedAt
+      });
+    } catch {
+      return undefined;
+    }
   }
 
   private async prepareInitialArchitecture(input: {
@@ -1499,7 +1583,23 @@ export class SiteAuthoringWorkflow {
     });
     const startedAt = Date.now();
     try {
-      const result = await this.manager.architect({ inventory, architectureMode: input.architectureMode, signal: input.signal });
+      const result = await this.manager.architect({
+        inventory,
+        authorityContext: {
+          businessName: input.buildInput.business.name,
+          description: input.buildInput.business.description ?? null,
+          locations: input.buildInput.business.locations.map((location) => ({
+            label: location.label,
+            city: location.city ?? null,
+            region: location.region ?? null,
+            country: location.country
+          })),
+          serviceAreas: input.buildInput.business.serviceAreas.map((area) => area.label),
+          offerings: input.buildInput.business.offerings.map((offering) => offering.name)
+        },
+        architectureMode: input.architectureMode,
+        signal: input.signal
+      });
       const architecture = siteAgentArchitectureSchema.parse({
         schemaVersion: 1,
         producer: result.promptIdentity,
@@ -2482,9 +2582,11 @@ export class SiteAuthoringWorkflow {
         run,
         session: activeSession,
         buildInput: effectiveBuildInput,
+        sourceSnapshots: input.snapshots,
+        sourcePages: input.sourcePages,
         sandboxRevision,
         route: target.route,
-        defaultRoutes: input.releasePlan?.browserRoutePaths,
+        defaultRoutes: input.releasePlan?.visualReviewRoutePaths,
         imageDetail: activeAuthoringProfile?.visualInspectionImageDetail,
         selector: target.selector,
         selectionLabel: target.label,
@@ -2510,6 +2612,7 @@ export class SiteAuthoringWorkflow {
           run,
           session: activeSession,
           buildInput: effectiveBuildInput,
+          sourceSnapshots: input.snapshots,
           sourcePages: input.sourcePages,
           workspaceRevisionId,
           browserRoutePaths: input.releasePlan?.browserRoutePaths,
@@ -2528,6 +2631,7 @@ export class SiteAuthoringWorkflow {
               run,
               session: activeSession,
               buildInput: effectiveBuildInput,
+              sourceSnapshots: input.snapshots,
               sourcePages: input.sourcePages,
               workspaceRevisionId,
               browserRoutePaths: input.releasePlan?.browserRoutePaths,
@@ -2605,6 +2709,7 @@ export class SiteAuthoringWorkflow {
             warningCount: warnings.length,
             findings: finalized.artifact.qa.findings,
             routeSimilarity: finalized.qualityMetrics.routeSimilarity,
+            informationArchitecture: finalized.qualityMetrics.informationArchitecture,
             screenshotKeys: finalized.artifact.qa.screenshotKeys,
             verificationTimings: finalized.verificationTimings
           },
@@ -3102,6 +3207,8 @@ export class SiteAuthoringWorkflow {
     run: SiteAgentRun;
     session: SiteAgentSession;
     buildInput: SitePublicBuildInput;
+    sourceSnapshots?: SourceSnapshot[];
+    sourcePages?: SourceSnapshotPage[];
     sandboxRevision: string;
     route?: string;
     inspectAllBuiltRoutes?: boolean;
@@ -3129,13 +3236,19 @@ export class SiteAuthoringWorkflow {
     const prepared = prepareSiteArtifact({
       authoredArtifact: authored,
       buildInput: input.buildInput,
-      runtimeSeriesId
+      runtimeSeriesId,
+      sourceSnapshots: input.sourceSnapshots,
+      sourcePages: input.sourcePages
     });
     const hardChecksMs = Date.now() - hardChecksStartedAt;
     const browserStartedAt = Date.now();
     const capturePrefix = `site-inspections/${input.run.siteId}/${input.run.id}`;
     const representativeRoutes = selectedVisualRoutes(prepared.routes, input.buildInput);
     const preferredRoutes = [...new Set([
+      // The architecture retains the actual parent/child route family. Show
+      // that family first so the author can see repeated full-page treatment;
+      // fall back to the canonical artifact sample when no architecture is
+      // available (for example, a retained edit).
       ...(input.defaultRoutes ?? []),
       ...representativeRoutes
     ])];
@@ -3144,9 +3257,10 @@ export class SiteAuthoringWorkflow {
       requestedRoute: input.route,
       inspectAllBuiltRoutes: input.inspectAllBuiltRoutes,
       preferredRoutePaths: preferredRoutes,
-      // The author needs a fast visual feedback loop, not a second release
-      // gate. The broader gate still verifies its architecture-derived routes.
-      preferredRouteLimit: 4
+      // Five routes fit into two readable sheets: home, a material hub, two
+      // sibling details, and conversion. The broader gate still verifies all
+      // architecture-derived routes.
+      preferredRouteLimit: 5
     });
     const selectedRoutes = (retainedScope.length
       ? retainedScope
@@ -3154,7 +3268,7 @@ export class SiteAuthoringWorkflow {
         0,
         input.route || input.selector
           ? 1
-          : 4
+          : 5
       );
     const browserGate = await runArtifactBrowserGate({
       prepared,
@@ -3172,10 +3286,10 @@ export class SiteAuthoringWorkflow {
     input.onPhase?.("browser_navigation_capture", browserCaptureMs);
     const contactSheetStartedAt = Date.now();
     input.onPhase?.("contact_sheet_generation");
-    const contactSheets = [{
-      routes: selectedRoutes.slice(0, 3),
-      bytes: await createArtifactContactSheet(browserGate.captures, selectedRoutes)
-    }];
+    const contactSheets = await createArtifactRouteFamilyContactSheets(
+      browserGate.captures,
+      selectedRoutes
+    );
     const contactSheetMs = Date.now() - contactSheetStartedAt;
     input.onPhase?.("contact_sheet_generation", contactSheetMs);
     input.onPhase?.("persistence");
@@ -3238,6 +3352,7 @@ export class SiteAuthoringWorkflow {
     run: SiteAgentRun;
     session: SiteAgentSession;
     buildInput: SitePublicBuildInput;
+    sourceSnapshots?: SourceSnapshot[];
     sourcePages?: SourceSnapshotPage[];
     workspaceRevisionId: string;
     browserRoutePaths?: string[];
@@ -3255,7 +3370,16 @@ export class SiteAuthoringWorkflow {
         );
       }
       const runtimeSeriesId = input.buildInput.capabilityConfiguration.trustedRuntimeSeries;
-      const prepared = prepareSiteArtifact({ authoredArtifact: authored, buildInput: input.buildInput, runtimeSeriesId });
+      const sourceSnapshots = input.sourceSnapshots ?? (await Promise.all(
+        input.buildInput.sourceSnapshotIds.map((snapshotId) => this.repository.getSourceSnapshot(snapshotId))
+      )).filter((snapshot): snapshot is SourceSnapshot => Boolean(snapshot));
+      const prepared = prepareSiteArtifact({
+        authoredArtifact: authored,
+        buildInput: input.buildInput,
+        runtimeSeriesId,
+        sourceSnapshots,
+        sourcePages: input.sourcePages
+      });
       const hardChecksMs = Date.now() - hardChecksStartedAt;
       const runtime = await this.ensureRuntime(runtimeSeriesId);
       const runtimeSource = await this.readAuditedRuntimePatch(runtime.patch);
@@ -3299,12 +3423,17 @@ export class SiteAuthoringWorkflow {
         };
       }
       const browserStartedAt = Date.now();
+      const selectedRoutes = selectedVisualRoutes(prepared.routes, input.buildInput);
+      const releaseBrowserRoutePaths = [...new Set([
+        ...(input.browserRoutePaths ?? []),
+        ...selectedRoutes
+      ])];
       const browserGate = await runArtifactBrowserGate({
         prepared,
         buildInput: input.buildInput,
         blobStore: this.blobStore,
         capturePrefix,
-        routePaths: input.browserRoutePaths,
+        routePaths: releaseBrowserRoutePaths,
         captureMode: "verification",
         signal: input.signal,
         runtimeSource
@@ -3313,7 +3442,6 @@ export class SiteAuthoringWorkflow {
       // The hard browser gate may inspect a wider release-plan route set, but
       // the retained review sheets must use the same canonical representative
       // routes that the later visual evaluator labels.
-      const selectedRoutes = selectedVisualRoutes(prepared.routes, input.buildInput);
       const visualContactSheets = await createArtifactContactSheets(browserGate.captures, selectedRoutes);
       const contactSheet = await createArtifactContactSheet(browserGate.captures, selectedRoutes);
       const contactSheetKey = `${capturePrefix}/contact-sheet.png`;
@@ -5036,6 +5164,46 @@ function addRunUsage(base: SiteAgentRun["usage"], next: SiteAgentRun["usage"]): 
     upstreamInferenceCostUsd: base.upstreamInferenceCostUsd + next.upstreamInferenceCostUsd,
     durationMs: base.durationMs + next.durationMs
   };
+}
+
+function webResearchUsageForRun(usage: WebResearchUsage): SiteAgentRun["usage"] {
+  return {
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    reasoningTokens: 0,
+    outputTokens: usage.outputTokens,
+    costUsd: usage.estimatedCostUsd,
+    costSource: "catalog_estimate",
+    upstreamInferenceCostUsd: 0,
+    durationMs: usage.durationMs
+  };
+}
+
+function researchLocality(state: BusinessState) {
+  const location = state.locations[0];
+  const exact = [location?.city, location?.region].filter(Boolean).join(", ");
+  if (exact) return exact;
+  return state.serviceAreas.slice(0, 3).map((area) => area.label).join(", ") || undefined;
+}
+
+function researchAddress(state: BusinessState) {
+  const location = state.locations[0];
+  if (!location) return undefined;
+  return [location.street, location.city, location.region, location.postalCode]
+    .filter(Boolean)
+    .join(", ") || undefined;
+}
+
+function normalizedWebsiteEvidenceIdentity(value: string) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (!hostname) return undefined;
+    const pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return { hostname, key: `${hostname}${pathname.toLowerCase()}` };
+  } catch {
+    return undefined;
+  }
 }
 
 export function reusableActiveSourceAssetRef(input: {

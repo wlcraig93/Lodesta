@@ -44,6 +44,7 @@
     "maintenance:reset-prelaunch-site-authoring": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/reset-prelaunch-site-authoring.ts",
     "evidence:canonical-authoring": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/canonical-authoring-evidence.ts",
     "evidence:view-canonical-authoring": "node --env-file=.env.local --import tsx scripts/view-canonical-authoring-evidence.ts",
+    "assess:retained-site-version": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/assess-retained-site-version.ts",
     "install:browsers": "node --import tsx scripts/install-browsers.ts",
     "verify:deployment-config": "node --import tsx scripts/verify-deployment-config.ts",
     "verify:execution-authority": "node --import tsx scripts/verify-execution-authority.ts",

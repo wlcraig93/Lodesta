@@ -10,6 +10,6 @@ export function websiteAssessmentRecordIsCurrent(record: WebsiteAssessmentRecord
     && record.scannerIdentity === websiteAssessmentScannerIdentity
     && (record.status !== "completed"
       || Boolean(record.assessment
-        && record.assessment.schemaVersion === 2
+        && record.assessment.schemaVersion === 3
         && record.assessment.producer.routeSelectionIdentity === websiteHealthRouteSelectionIdentity));
 }

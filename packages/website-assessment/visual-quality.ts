@@ -64,6 +64,7 @@ export const visualQualityPrompt = [
   "Never predict what customers, visitors, or users will feel, think, prefer, trust, distrust, or do.",
   "Every pass, warning, or fail must cite at least one supplied route and viewport and describe the exact visible observation.",
   "Across the complete review, cite every labeled route and both labeled viewports at least once; a site-wide conclusion cannot be supported only by the homepage.",
+  "For visual.navigation.presentation, judge the opened mobile navigation whenever a navigation frame is supplied. When deterministic context says an interactive mobile disclosure exists but no opened-state frame is supplied, return unknown rather than passing from the closed header alone.",
   "Use unknown when the screenshots do not support a reliable judgment and not_applicable only when the supplied applicability context requires it.",
   "Use fail only for a clear, material visual problem; use warning for a defensible improvement opportunity.",
   "Never use vague or demeaning labels such as ugly, amateur, dated, bad, cheap, or unprofessional.",
@@ -130,7 +131,7 @@ export function currentVisualQualityEvaluatorIdentity(modelId = configuredVisual
       routeSelectionIdentity: websiteHealthRouteSelectionIdentity,
       semanticSlots: websiteHealthRouteSelectionPolicy.requestedSlots,
       assessedViewports: websiteHealthRouteSelectionPolicy.viewportPolicy,
-      frames: websiteHealthRouteSelectionPolicy.framePolicy.positions,
+      frames: websiteHealthRouteSelectionPolicy.framePolicy,
       fullPageOverviewUse: "rhythm-only",
       malformedNativeFramePolicy: "reject",
       maximumImageBytes: 20_000_000
@@ -240,7 +241,7 @@ export function visualEvidence(input: {
   observedAt: string;
   route?: string;
   viewport?: "desktop" | "tablet" | "mobile";
-  frame?: "top" | "middle" | "bottom" | "overview";
+  frame?: "top" | "middle" | "bottom" | "navigation" | "overview";
   artifactKey?: string;
   sourceUrl?: string;
 }): AssessmentEvidence {

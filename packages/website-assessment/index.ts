@@ -3,6 +3,7 @@ export * from "./agent-readiness-adapters";
 export * from "./agent-readiness-probes";
 export * from "./browser-evidence";
 export * from "./calibration";
+export * from "./comparability";
 export * from "./contracts";
 export * from "./destination-probes";
 export * from "./evidence-storage";

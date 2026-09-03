@@ -65,7 +65,7 @@ export default async function AssessmentsPage() {
                       ? "Stale schema — rebuild"
                       : "Pending"}
                   <small>{record.assessment?.grade
-                    ? `${record.assessment.grade.value} ${record.assessment.grade.band} · raw ${record.assessment.score.rawValue ?? "—"} · author ${record.assessment.score.scopes.siteAuthor.value ?? "—"}`
+                    ? `${record.assessment.grade.label}: ${record.assessment.grade.value}${record.assessment.grade.band ? ` ${record.assessment.grade.band}` : ` · band ${record.assessment.grade.bandStatus.replaceAll("_", " ")}`} · author-controlled health ${record.assessment.score.scopes.siteAuthor.value ?? "—"}`
                     : "No eligible composite"}</small>
                 </td>
                 <td>{record.rubricIdentity}<small>{record.scannerIdentity}</small></td>

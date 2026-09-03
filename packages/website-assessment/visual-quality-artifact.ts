@@ -1,5 +1,6 @@
 import type { SiteBuildArtifact, SitePublicBuildInput } from "@/packages/site-contracts";
 import { configuredArtifactBlobStore, type ArtifactBlobStore } from "@/packages/site-artifacts";
+import { createArtifactContactSheets, type BrowserGateCapture } from "@/packages/site-verification";
 import type { VisualQuality } from "./contracts";
 import {
   evaluateVisualQuality,
@@ -10,7 +11,7 @@ import {
 import { unavailableVisualQuality } from "./visual-quality";
 import { inferAssessmentVertical } from "./vertical";
 import {
-  selectArtifactVisualRoutes
+  selectArtifactReviewRoutePaths
 } from "./route-selection";
 
 export async function evaluateArtifactVisualQuality(input: {
@@ -27,44 +28,67 @@ export async function evaluateArtifactVisualQuality(input: {
       limitation: "Visual Quality was unavailable because the multimodal evaluator is not configured."
     });
   }
-  const contactSheetKeys = (["desktop", "mobile"] as const).map((viewport) => ({
-    viewport,
-    key: input.artifact.qa.screenshotKeys.find((key) =>
-      key.endsWith(`/contact-sheet-${viewport}.png`)
-    )
-  }));
-  if (contactSheetKeys.some((sheet) => !sheet.key)) {
-    return unavailableVisualQuality({
-      observedAt: input.observedAt,
-      limitation: "The retained artifact did not contain separate native-frame desktop and mobile visual-review sheets."
-    });
-  }
   const store = input.store ?? configuredArtifactBlobStore();
-  const retainedSheets = await Promise.all(contactSheetKeys.map(async (sheet) => ({
-    viewport: sheet.viewport,
-    blob: await store.get(sheet.key!).catch(() => undefined)
-  })));
-  if (retainedSheets.some((sheet) => !sheet.blob)) {
+  const selectedRoutes = selectArtifactReviewRoutePaths(
+    input.artifact.routes,
+    input.buildInput.intent.pageRequirements
+  );
+  const screenshots = artifactScreenshots(input.artifact, selectedRoutes);
+  const screenshotRoutes = new Set(screenshots.map((screenshot) => screenshot.route));
+  const missingRoutes = selectedRoutes.filter((route) => !screenshotRoutes.has(route));
+  if (missingRoutes.length) {
     return unavailableVisualQuality({
       observedAt: input.observedAt,
-      limitation: "One or more retained artifact visual-review sheets could not be read."
+      limitation: `Visual Quality was unavailable because exact retained frames were missing for: ${missingRoutes.join(", ")}.`
     });
   }
-  const routeSelection = artifactRouteSelection(input.artifact, input.buildInput);
+  // Read the small canonical evidence set in order. The artifact broker can
+  // legitimately throttle a burst of concurrent immutable reads; serial reads
+  // keep assessment deterministic without adding retries or recovery policy.
+  const retainedCaptures: Array<{
+    screenshot: VisualQualityScreenshot;
+    blob: Awaited<ReturnType<ArtifactBlobStore["get"]>>;
+  }> = [];
+  for (const screenshot of screenshots) {
+    retainedCaptures.push({
+      screenshot,
+      blob: await store.get(screenshot.artifactKey).catch(() => undefined)
+    });
+  }
+  const unreadableCaptures = retainedCaptures.filter((capture) => !capture.blob);
+  if (unreadableCaptures.length) {
+    return unavailableVisualQuality({
+      observedAt: input.observedAt,
+      limitation: `Labeled retained artifact screenshots could not be read for: ${unreadableCaptures
+        .map(({ screenshot }) => `${screenshot.route} ${screenshot.viewport} ${screenshot.frame}`)
+        .join(", ")}.`
+    });
+  }
+  let contactSheets: Awaited<ReturnType<typeof createArtifactContactSheets>>;
+  try {
+    contactSheets = await createArtifactContactSheets(
+      retainedCaptures.map(({ screenshot, blob }): BrowserGateCapture => ({
+        key: screenshot.artifactKey,
+        route: screenshot.route,
+        viewport: screenshot.viewport,
+        stage: "settled",
+        frame: screenshot.frame,
+        bytes: blob!.bytes
+      })),
+      selectedRoutes
+    );
+  } catch (error) {
+    return unavailableVisualQuality({
+      observedAt: input.observedAt,
+      limitation: `The exact labeled artifact review sheets could not be assembled: ${error instanceof Error ? error.message : String(error)}`
+    });
+  }
   const vertical = artifactVertical(input.artifact, input.buildInput);
-  const screenshots = artifactScreenshots(
-    input.artifact,
-    routeSelection.selected.flatMap((selection) => selection.route ? [selection.route] : [])
-  );
   return evaluateVisualQuality({
-    contactSheets: retainedSheets.map((sheet) => ({
+    contactSheets: contactSheets.map((sheet) => ({
       viewport: sheet.viewport,
-      bytes: sheet.blob!.bytes,
-      mimeType: sheet.blob!.contentType === "image/jpeg"
-        ? "image/jpeg" as const
-        : sheet.blob!.contentType === "image/webp"
-          ? "image/webp" as const
-          : "image/png" as const
+      bytes: sheet.bytes,
+      mimeType: "image/png" as const
     })),
     screenshots,
     vertical: vertical.vertical,
@@ -79,19 +103,28 @@ export async function evaluateArtifactVisualQuality(input: {
       || input.artifact.capabilityBindings.some((binding) => binding.kind === "gallery"),
     deterministicContext: {
       target: "site_artifact",
-      routeSelection,
+      routeSelection: {
+        policy: "artifact_route_family_review",
+        selectedRoutes
+      },
       routes: input.artifact.routes.map((route) => ({
         path: route.path,
         title: route.title,
         description: route.description
       })),
       hardGate: input.artifact.qa.hardGate,
+      navigationEvidence: {
+        interactiveDisclosureObserved: input.artifact.qa.findings.some((finding) =>
+          finding.id === "functional.navigation_reachability"
+        ),
+        openedStateCaptured: screenshots.some((screenshot) => screenshot.frame === "navigation")
+      },
       renderFindings: input.artifact.qa.findings
         .filter((finding) => finding.area === "render" || finding.area === "asset")
         .slice(0, 50)
     },
     limitations: [
-      "Visual Quality used retained artifact verification screenshots; public-serving behavior is assessed after publication."
+      "Visual Quality used exact route-labeled retained artifact screenshots reassembled for the canonical sample; public-serving behavior is assessed after publication."
     ],
     observedAt: input.observedAt,
     signal: input.signal,
@@ -121,7 +154,7 @@ export function artifactScreenshots(
   const screenshots: VisualQualityScreenshot[] = [];
   for (const route of artifact.routes.filter((item) => selectedRoutes.includes(item.path))) {
     for (const viewport of ["desktop", "mobile"] as const) {
-      for (const frame of ["top", "middle", "bottom"] as const) {
+      for (const frame of ["top", "middle", "bottom", "navigation"] as const) {
         const suffix = `/${routeKey(route.path)}-${viewport}-${frame}.png`;
         const artifactKey = artifact.qa.screenshotKeys.find((key) => key.endsWith(suffix));
         if (artifactKey) screenshots.push({ route: route.path, viewport, frame, artifactKey });
@@ -129,13 +162,6 @@ export function artifactScreenshots(
     }
   }
   return screenshots;
-}
-
-function artifactRouteSelection(
-  artifact: SiteBuildArtifact,
-  buildInput: SitePublicBuildInput
-) {
-  return selectArtifactVisualRoutes(artifact.routes, buildInput.intent.pageRequirements);
 }
 
 function routeKey(route: string) {

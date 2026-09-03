@@ -9,6 +9,7 @@ import {
 } from "@/lib/crawler";
 import { assertPublicFetchUrl, PublicFetchUrlError } from "@/lib/url-safety";
 import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "./crawl-errors";
+import { isLikelyCmsTemplateOrSystemSourcePage } from "./source-page-classification";
 import {
   generationCrawlerUserAgent,
   parseRobotsPolicy,
@@ -284,22 +285,26 @@ export async function crawlWebsiteForGeneration(input: {
   const robots = await readRobots(source, fetchImpl, scheduler, signal, limits, validateSameSite);
   if ("capture" in robots && robots.capture) retainCapture(robots.capture);
   const addInventory = (candidate: string, reason: string, sitemap?: { url: string; lastModified?: string }) => {
-    const normalized = normalizeSameSite(candidate, source);
+    const sameSiteUrl = normalizeSameSite(candidate, source);
+    const normalized = sameSiteUrl && reason !== "source_home"
+      ? canonicalizeCmsPresentationUrl(sameSiteUrl)
+      : sameSiteUrl;
     const robotsCandidate = normalizeSameSite(candidate, source, true);
-    if (!normalized) return;
-    if (inventory.has(normalized)) return;
+    if (!normalized) return undefined;
+    if (inventory.has(normalized)) return normalized;
     if (!meaningfulUrl(normalized)) {
       skipped.push({ url: normalized, reason: "unsupported_content" });
       pageRecords.set(normalized, terminalPage(normalized, reason, "excluded", "unsupported_content", sitemap));
-      return;
+      return normalized;
     }
     if (robotsCandidate && !robotsAllows(robotsCandidate, robots.rules)) {
       restricted = true;
       skipped.push({ url: normalized, reason: "robots_disallowed" });
       pageRecords.set(normalized, terminalPage(normalized, reason, "excluded", "robots_disallowed", sitemap));
-      return;
+      return normalized;
     }
     inventory.set(normalized, { url: normalized, reason, sitemapUrl: sitemap?.url, sitemapLastModified: sitemap?.lastModified });
+    return normalized;
   };
 
   addInventory(source.href, "source_home");
@@ -434,9 +439,9 @@ export async function crawlWebsiteForGeneration(input: {
           body: fetched.text
         };
       }
-      const evidenceClass = classifyPageEvidence(summary);
+      const evidenceClass = classifyPageEvidence(summary, source.href);
       const allLinks = extractDocumentLinks(html, fetched.finalUrl ?? item.url, source.hostname);
-      const extractedText = extractDocumentText(html);
+      const extractedText = extractDocumentText(html, summary);
       summaries.set(item.url, summary);
       documents.push({ url: item.url, finalUrl: fetched.finalUrl ?? item.url, html, extractedText, summary });
       pageRecords.set(item.url, {
@@ -463,8 +468,8 @@ export async function crawlWebsiteForGeneration(input: {
         summary
       });
       for (const link of allLinks.internal) {
-        addInventory(link, "linked_page");
-        const discovered = inventory.get(normalizeSameSite(link, source) ?? "");
+        const discoveredUrl = addInventory(link, "linked_page");
+        const discovered = discoveredUrl ? inventory.get(discoveredUrl) : undefined;
         if (discovered && !queued.has(discovered.url)) {
           queued.add(discovered.url);
           queue.push(discovered);
@@ -476,7 +481,7 @@ export async function crawlWebsiteForGeneration(input: {
   const documentsCompleted = now();
   if (!signal.aborted) {
     await captureDocumentDependencies({
-      documents,
+      documents: documents.filter((document) => classifyPageEvidence(document.summary, source.href) === "first_party"),
       existing: captures,
       fetchImpl,
       scheduler,
@@ -582,18 +587,25 @@ async function captureDocumentDependencies(input: {
 }) {
   const pending = new Map<string, DependencyCaptureCandidate>();
   const captured = new Set(input.existing.map((resource) => resource.requestedUrl));
-  const enqueue = (candidate: { url: string; role: GenerationResourceRole; initiatorUrl: string }) => {
+  const enqueue = (candidate: { url: string; role: GenerationResourceRole; initiatorUrl: string; optional?: boolean }) => {
     if (captured.has(candidate.url) || /^data:/i.test(candidate.url) || isKnownNonWebsiteMedia(candidate.url)) return;
     const retained = pending.get(candidate.url);
     if (retained) {
       retained.initiatorUrls.add(candidate.initiatorUrl);
+      retained.optional = Boolean(retained.optional && candidate.optional);
       if (resourceRoleRank(candidate.role) > resourceRoleRank(retained.role)) retained.role = candidate.role;
       return;
     }
-    pending.set(candidate.url, { url: candidate.url, role: candidate.role, initiatorUrls: new Set([candidate.initiatorUrl]) });
+    pending.set(candidate.url, { url: candidate.url, role: candidate.role, initiatorUrls: new Set([candidate.initiatorUrl]), optional: candidate.optional });
   };
   for (const document of input.documents) {
-    for (const resource of extractResourceReferences(document.html, document.finalUrl)) enqueue({ ...resource, initiatorUrl: document.url });
+    for (const resource of extractResourceReferences(document.html, document.finalUrl)) {
+      enqueue({ ...resource, initiatorUrl: document.url });
+      if (resource.role === "image") {
+        const original = sourceGalleryOriginalVariant(resource.url, document.finalUrl);
+        if (original) enqueue({ url: original, role: "image", initiatorUrl: document.url, optional: true });
+      }
+    }
   }
 
   const retain = input.retainCapture;
@@ -622,6 +634,22 @@ async function captureDocumentDependencies(input: {
       }
       const fetched = await fetchHtml(validated, input.fetchImpl, input.scheduler, input.signal, input.limits, undefined, input.validateUrl);
       if (!fetched.ok) {
+        if (resource.optional) {
+          retain({
+            captureKind: "http_response",
+            role: resource.role,
+            requestedUrl: validated,
+            outcome: "excluded",
+            reason: "derived_original_unavailable",
+            status: fetched.status,
+            contentType: fetched.contentType,
+            finalUrl: fetched.finalUrl,
+            redirectChain: fetched.redirectChain ?? [],
+            headers: fetched.headers ?? {},
+            initiatorUrls: [...resource.initiatorUrls].sort()
+          });
+          continue;
+        }
         const retained = captureFromFailedFetch(resource.role, validated, fetched);
         retain(retained ? {
           ...retained,
@@ -653,7 +681,7 @@ async function captureDocumentDependencies(input: {
           const known = pending.get(nested.url);
           if (known) known.initiatorUrls.add(validated);
           else {
-            const next = { url: nested.url, role: nested.role, initiatorUrls: new Set([validated]) };
+            const next = { url: nested.url, role: nested.role, initiatorUrls: new Set([validated]), optional: false };
             pending.set(nested.url, next);
             queue.push(next);
           }
@@ -683,6 +711,7 @@ type DependencyCaptureCandidate = {
   url: string;
   role: GenerationResourceRole;
   initiatorUrls: Set<string>;
+  optional?: boolean;
 };
 
 /**
@@ -700,9 +729,29 @@ export function coalesceResponsiveImageDependencies(candidates: DependencyCaptur
       continue;
     }
     for (const initiator of candidate.initiatorUrls) prior.initiatorUrls.add(initiator);
+    prior.optional = Boolean(prior.optional && candidate.optional);
     if (preferredResponsiveImage(candidate.url, prior.url)) prior.url = candidate.url;
   }
   return [...retained.values()];
+}
+
+/**
+ * NextGEN Gallery publishes its full image beside a directly referenced
+ * `/thumbs/thumbs_*` derivative. Treat that exact convention as an optional
+ * first-party discovery: a missing original is recorded without degrading the
+ * otherwise complete source crawl.
+ */
+export function sourceGalleryOriginalVariant(value: string, sourcePageUrl: string) {
+  try {
+    const image = new URL(value);
+    const page = new URL(sourcePageUrl);
+    if (image.origin !== page.origin) return undefined;
+    if (!/\/wp-content\/gallery\/[^/]+\/thumbs\/thumbs_[^/]+\.(?:jpe?g|png|webp)$/i.test(image.pathname)) return undefined;
+    image.pathname = image.pathname.replace(/\/thumbs\/thumbs_([^/]+)$/i, "/$1");
+    return image.href;
+  } catch {
+    return undefined;
+  }
 }
 
 export function isKnownNonWebsiteMedia(value: string) {
@@ -790,7 +839,7 @@ function extractResourceReferences(html: string, baseUrl: string) {
 function extractCssResourceReferences(css: string, baseUrl: string) {
   const resources: Array<{ url: string; role: GenerationResourceRole }> = [];
   for (const match of css.matchAll(/@import\s+(?:url\()?\s*["']?([^"')\s;]+)|url\(\s*["']?([^"')]+)["']?\s*\)/gi)) {
-    const raw = match[1] ?? match[2];
+    const raw = decodeHtmlText(match[1] ?? match[2] ?? "");
     if (!raw || /^(?:data:|blob:|#)/i.test(raw.trim())) continue;
     try {
       const url = new URL(raw.trim(), baseUrl);
@@ -1170,11 +1219,15 @@ function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], inges
   const source = new URL(sourceUrl);
   const primary = pages.find((page) => normalizeSameSite(page.url, source) === normalizeSameSite(sourceUrl, source)) ?? pages[0];
   const orderedPages = primary ? [primary, ...pages.filter((page) => page !== primary)] : pages;
-  const mergedFacts = orderedPages.reduce((combined, page) => mergeExtractedFacts(combined, page.extractedFacts), emptyFacts());
+  const firstPartyUrls = new Set(ingestion.pages
+    .filter((page) => page.evidenceClass === "first_party")
+    .flatMap((page) => [page.url, (page.summary as CrawlPageSummary).url]));
+  const factPages = orderedPages.filter((page) => page === primary || firstPartyUrls.has(page.url));
+  const mergedFacts = factPages.reduce((combined, page) => mergeExtractedFacts(combined, page.extractedFacts), emptyFacts());
   const facts = {
     ...mergedFacts,
-    phone: consensusPhone(orderedPages),
-    hours: consensusHours(orderedPages)
+    phone: consensusPhone(factPages),
+    hours: consensusHours(factPages)
   };
   return {
     url: sourceUrl,
@@ -1206,8 +1259,14 @@ function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], inges
   };
 }
 
-function classifyPageEvidence(page: CrawlPageSummary): EvidenceClass {
-  if (page.purposeTags.includes("reviews")) return "third_party";
+function classifyPageEvidence(page: CrawlPageSummary, sourceUrl: string): EvidenceClass {
+  const visibleText = page.sourceTextBlocks.map((block) => block.displayText).join("\n");
+  if (isLikelyCmsTemplateOrSystemSourcePage({
+    url: page.url,
+    sourceUrl,
+    title: page.title,
+    text: visibleText
+  })) return "unknown";
   if (page.purposeTags.includes("blog") && /guest|sponsored|press release/i.test(`${page.title ?? ""} ${page.metaDescription ?? ""}`)) return "unknown";
   return "first_party";
 }
@@ -1568,9 +1627,26 @@ function decodeSitemapBytes(bytes: Buffer, url: string, contentType: string | un
   return (compressed ? gunzipSync(bytes) : bytes).toString("utf8");
 }
 function decodeXml(value: string) { return value.replaceAll("&amp;", "&").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#39;", "'"); }
-function normalizeSameSite(value: string, source: URL, preserveSearch = true) { try { const url = new URL(value, source); if (!sameSite(url.hostname, source.hostname) || !["http:", "https:"].includes(url.protocol)) return undefined; url.hash = ""; if (!preserveSearch) url.search = ""; url.pathname = url.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/"; return url.href; } catch { return undefined; } }
+function normalizeSameSite(value: string, source: URL, preserveSearch = true) { try { const url = new URL(decodeHtmlText(value), source); if (!sameSite(url.hostname, source.hostname) || !["http:", "https:"].includes(url.protocol)) return undefined; url.hash = ""; if (!preserveSearch) url.search = ""; url.pathname = url.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/"; return url.href; } catch { return undefined; } }
+function canonicalizeCmsPresentationUrl(value: string) {
+  const url = new URL(value);
+  const option = url.searchParams.get("option") ?? "";
+  if (/^(?:com_content|com_jdbuilder|com_sppagebuilder)$/i.test(option)) {
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(?:itemid|tmpl)$/i.test(key)) url.searchParams.delete(key);
+    }
+  }
+  url.searchParams.sort();
+  return url.href;
+}
 function sameSite(left: string, right: string) { const clean = (value: string) => value.toLowerCase().replace(/^www\./, ""); return clean(left) === clean(right); }
-function meaningfulUrl(value: string) { const path = new URL(value).pathname.toLowerCase(); return !/\.(?:avif|bmp|csv|docx?|eot|gif|gz|ico|jpe?g|json|kml|kmz|m4a|mov|mp3|mp4|mpeg|odt|ogg|pdf|png|pptx?|rar|rss|svg|tar|tiff?|txt|webm|webp|woff2?|xlsx?|xml|zip)$/.test(path); }
+function meaningfulUrl(value: string) {
+  const url = new URL(value);
+  const path = url.pathname.toLowerCase();
+  if (/^(?:com_users|com_config|com_ajax)$/i.test(url.searchParams.get("option") ?? "")) return false;
+  if (/(?:^|\/)(?:administrator|wp-login\.php|wp-admin)(?:\/|$)/.test(path)) return false;
+  return !/\.(?:avif|bmp|csv|docx?|eot|gif|gz|ico|jpe?g|json|kml|kmz|m4a|mov|mp3|mp4|mpeg|odt|ogg|pdf|png|pptx?|rar|rss|svg|tar|tiff?|txt|webm|webp|woff2?|xlsx?|xml|zip)$/.test(path);
+}
 function transientStatus(status: number) { return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500; }
 function classifyHttpFailure(response: Response): GenerationFetchFailureReason {
   if (response.status === 401) return "authentication_required";
@@ -1797,7 +1873,13 @@ function boundedUnicodeText(value: string, maximumCodepoints: number) {
   return [...value].slice(0, maximumCodepoints).join("").trim();
 }
 
-function extractDocumentText(html: string) {
+function extractDocumentText(html: string, summary: CrawlPageSummary) {
+  const semanticText = summary.sourceTextBlocks
+    .map((block) => block.displayText)
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  if (semanticText) return semanticText;
   return decodeHtmlText(html
     .replace(/<!--[^]*?-->/g, " ")
     .replace(/<(?:script|style|svg|noscript)\b[^]*?<\/(?:script|style|svg|noscript)>/gi, " ")

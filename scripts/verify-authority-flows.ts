@@ -123,6 +123,26 @@ try {
     sourceSnapshotIds: [websiteSnapshot.id],
     runtimeSeriesId: "site-runtime-v4"
   });
+  assert.deepEqual(
+    buildInput.publicFacts.filter((fact) => fact.kind === "offering").map((fact) => fact.id).sort(),
+    buildInput.business.offerings.flatMap((offering) => offering.sourceFactIds).sort(),
+    "Unnormalized offering observations crossed the public-authority boundary."
+  );
+  assert.throws(
+    () => createPublicBuildInput({
+      id: "input_mismatched_offering",
+      state: {
+        ...state,
+        offerings: state.offerings.map((offering) => ({ ...offering, name: "Unrelated invented service" }))
+      },
+      intent: synthetic.intent,
+      forms: synthetic.forms,
+      sourceSnapshotIds: [websiteSnapshot.id],
+      runtimeSeriesId: "site-runtime-v4"
+    }),
+    /eligible canonical offering fact with the same name/,
+    "A published offering diverged from its canonical source fact."
+  );
   const site = platformSiteRecordSchema.parse({
     id: synthetic.siteId,
     ownerUserId: ownerId,

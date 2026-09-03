@@ -124,4 +124,63 @@ assert.equal(archiveAware[1]?.resource.id, "multi_page_photo", "A customer-conte
 assert.equal(archiveAware[1]?.sourcePageId, about.id);
 assert.equal(archiveAware.at(-1)?.resource.id, "archive_tech", "Archive-only filename signals must not dominate retained visual evidence.");
 
+const identityRanking = rankSourceAssetCandidates({
+  pages: [home],
+  resources: [
+    resource("business_logo", "https://fixture.example/images/logos/Logo.png", home.finalUrl!, "image/png", 40_000),
+    resource("association_logo", "https://fixture.example/images/accolades/chamber-logo.png", home.finalUrl!, "image/png", 250_000),
+    resource("site_vendor_logo", "https://fixture.example/common/scorpion/logo/wordmark-gray.png", home.finalUrl!, "image/png", 8_000),
+    resource("social_preview", "https://fixture.example/images/FB-LinkImage.jpg", home.finalUrl!, "image/jpeg", 250_000),
+    resource("android_icon", "https://fixture.example/android-chrome-512x512.png", home.finalUrl!, "image/png", 250_000)
+  ]
+});
+assert.equal(identityRanking[0]?.resource.id, "business_logo", "Association or site-vendor artwork displaced the business logo.");
+assert.equal(identityRanking.find((candidate) => candidate.resource.id === "association_logo")?.likelyKind, "other");
+assert.equal(identityRanking.find((candidate) => candidate.resource.id === "site_vendor_logo")?.likelyKind, "other");
+assert.notEqual(identityRanking.find((candidate) => candidate.resource.id === "social_preview")?.likelyKind, "photo");
+assert.equal(identityRanking.find((candidate) => candidate.resource.id === "android_icon")?.likelyKind, "icon");
+
+const projectPage = {
+  ...page("page_project", "/changed-this-bath-from-wallpaper-to-paint"),
+  title: "Changed this bath from wallpaper to paint"
+};
+const projectGalleryRanking = rankSourceAssetCandidates({
+  pages: [projectPage],
+  resources: [
+    resource(
+      "project_thumb",
+      "https://fixture.example/wp-content/gallery/changed-bath/thumbs/thumbs_b1.jpg",
+      projectPage.finalUrl!,
+      "image/jpeg",
+      8_000
+    ),
+    resource(
+      "project_original",
+      "https://fixture.example/wp-content/gallery/changed-bath/b1.jpg",
+      projectPage.finalUrl!,
+      "image/jpeg",
+      90_000
+    )
+  ]
+});
+assert.equal(projectGalleryRanking.length, 1, "A gallery thumbnail remained as a separate authoring candidate beside its original.");
+assert.equal(projectGalleryRanking[0]?.resource.id, "project_original", "A low-resolution gallery thumbnail displaced its discovered original.");
+assert.equal(projectGalleryRanking[0]?.likelyKind, "photo");
+assert(projectGalleryRanking[0]?.relevanceReasons.includes("first-party gallery image"));
+
+const opaqueFirstPartyPhoto = rankSourceAssetCandidates({
+  pages: [home],
+  resources: [
+    resource(
+      "named_owner_photo",
+      "https://fixture.example/images/Jordan-With-A-Project-2024.webp",
+      home.finalUrl!,
+      "image/webp",
+      80_000
+    )
+  ]
+});
+assert.equal(opaqueFirstPartyPhoto[0]?.likelyKind, "photo", "A substantial first-party customer image required a service keyword to reach visual evidence.");
+assert(opaqueFirstPartyPhoto[0]?.relevanceReasons.includes("substantial first-party customer-page image"));
+
 console.log("Source asset ranking verification passed.");

@@ -4,7 +4,9 @@ import {
   authoringContextCharacters,
   createSourceWorkspace,
   createSiteAuthoringContext,
-  managerBuildContext
+  managerBuildContext,
+  taskSkillFor,
+  websiteManagerAuthoringSystemPrompt
 } from "../packages/site-agent";
 import { sourceSnapshotPageSchema, sourceSnapshotSchema } from "../packages/site-contracts";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
@@ -156,12 +158,38 @@ assert(sourceWorkspace.files.some((file) => file.path.endsWith(`${scalePages[0]!
 assert.deepEqual(scalePromptContext.workspace.sourceWorkspace, sourceWorkspace.summary);
 assert.match(scalePromptContext.task.sourceInventorySummary, /complete crawl; 260 manifest pages; 260 eligible; 260 fetched; 250 unique fetched indexable paths/);
 assert.match(scalePromptContext.task.sourceInventorySummary, /240 distinct fetched indexable content bodies after 10 duplicate bodies/);
-assert.match(scalePromptContext.task.sourceInventorySummary, /Content-estate signal: 233 likely customer-content paths after separating 3 obvious mechanical archive paths and 4 obvious technical or utility paths/);
+assert.match(scalePromptContext.task.sourceInventorySummary, /Content-estate signal: 233 likely customer-content paths after separating 3 obvious mechanical archive paths, 2 technical or site-builder paths, and 2 source-sensitive legal paths/);
+assert.match(scalePromptContext.task.sourceInventorySummary, /Legal paths are different: preserve their exact paths and substantive provisions without summarizing/);
 assert.match(scalePromptContext.task.sourceInventorySummary, /133 of those content paths have at least 500 words; 0 have at least 1000 words; together they contain 114100 words and 233 distinct content bodies/);
 assert.match(scalePromptContext.task.sourceInventorySummary, /existing authorized first-party content assets are not hypothetical generated keyword pages/);
 assert.match(scalePromptContext.task.sourceInventorySummary, /20 exact-duplicate references; largest route prefixes: \/services\/ \(252\), \/ \(1\), \/author\/ \(1\), \/blog\/ \(1\), \/category\/ \(1\), \/llms-txt\/ \(1\), \/privacy-policy\/ \(1\), \/terms-of-service\/ \(1\)/);
 assert.match(scalePromptContext.task.sourceInventorySummary, /neutral corpus indicators rather than an automatic route target or quality verdict/);
 assert.match(scalePromptContext.task.sourceInventorySummary, /every retained source path still requires a deliberate preserved, redirected, canonical-duplicate, or intentionally retired disposition/);
+assert.match(websiteManagerAuthoringSystemPrompt, /no missing routes and no additional routes/);
+assert.match(websiteManagerAuthoringSystemPrompt, /evidence for that route, not permission to recreate the source URL/);
+assert.match(websiteManagerAuthoringSystemPrompt, /CSS readable and organized rather than minified/);
+const initialBuildSkill = taskSkillFor("initial_build").knowledge.join("\n");
+assert.match(initialBuildSkill, /implement no additional route/);
+assert.match(initialBuildSkill, /never make a project title deceptively link to an unrelated generic service page/);
+assert.match(initialBuildSkill, /shared eyebrow-title-paragraph intro used on every primary route is still a repeated opening composition/);
+assert.match(initialBuildSkill, /CSS readable and organized rather than minified/);
+assert.match(initialBuildSkill, /legacy typo is not owner-authoritative wording unless it is a proper name or exact quotation/);
+assert.match(initialBuildSkill, /Do not force a bare number, count, year, ordinal, or metric tile where the number adds no useful customer meaning/);
+assert.match(initialBuildSkill, /Do not put a decorative 01 or another ordinal beside a contact summary/);
+assert.match(initialBuildSkill, /safer-feeling/);
+assert.match(initialBuildSkill, /do not append an additional catch-all group that simply repeats the same items/);
+assert.match(initialBuildSkill, /A large circle containing a region name is still a prohibited geography circle/);
+assert.match(initialBuildSkill, /Central Texas never authorizes statewide Texas service/);
+assert.match(initialBuildSkill, /primary heading so it does not consume nearly the entire first viewport/);
+assert.match(initialBuildSkill, /keep the H1 and concise request context before the managed form at phone and tablet widths/);
+assert.match(initialBuildSkill, /an area code, list position, or other bare numeral is not evidence by itself/);
+assert.match(initialBuildSkill, /reserve quotation styling for exact attributable source quotations/);
+assert.match(initialBuildSkill, /do not repeat the same phone number through several adjacent call, text, and direct-contact treatments/);
+assert.match(initialBuildSkill, /distribute distinct proof across the customer journeys that it genuinely supports/);
+assert.match(initialBuildSkill, /not an image quota or permission to create an unapproved gallery route/);
+assert.match(initialBuildSkill, /use LeadField wrapper, label, and control class props/);
+assert.match(initialBuildSkill, /make inputs, selects, and textareas fill their assigned column/);
+assert.match(initialBuildSkill, /Inspect the complete form in its actual route composition/);
 
 const [contracts, workflow, sourcePreparation, repository, architecture, browserGate] = await Promise.all([
   readFile("packages/site-agent/contracts.ts", "utf8"),
@@ -216,7 +244,7 @@ assert(repository.includes('rpc("begin_incremental_website_source_snapshot"'));
 assert(repository.includes('rpc("complete_incremental_website_source_snapshot"'));
 assert(repository.includes('.not("ready_at", "is", null)'));
 assert(!repository.includes('rpc("finalize_staged_website_source_snapshot"'));
-assert(architecture.includes("return coverage === \"all-page-types\" ? [...selected] : [...selected].slice(0, 7)"));
+assert(architecture.includes('if (coverage === "all-routes") return routes.map((route) => route.path)'));
 assert(browserGate.includes('viewport.name !== "tablet"'));
 
 process.stdout.write("Compact complete source inventory, separate source preparation, bounded browser verification, retained-page workspace, and source tools verified.\n");

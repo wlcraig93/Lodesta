@@ -1,6 +1,92 @@
 # Generated-site authoring status
 
-Date: 2026-08-21
+Date: 2026-09-04
+
+## Current release-candidate status
+
+The canonical generator implementation is locally release-ready and awaits the coordinated hosted release plus a post-release end-to-end run. This supersedes the September 1 correction and every earlier readiness claim below; historical entries remain experiment provenance rather than the current decision.
+
+Three fresh, materially different artifacts now satisfy the corrected contract and human review:
+
+- L3 Paper & Paint R3b (`run_37cb1c8bbd76bf1bf2fc0f9627f106d5`) passed 13 routes at $0.31141899 in 29m 05s with six first-submission builds.
+- Advanced Wildlife R7i (`run_0cebf9b8fe1547321942b59aeae5a30b`) passed seven routes at $0.15398194 in 12m 23s with four first-submission builds and a clean all-route replay.
+- Western Roof R5a (`run_20749db844e2a095ed2e2e6fe7b96e41`) passed six routes at $0.16666462 in 19m 49s. Its independent replay checked all six routes, retained 50 native viewport captures, completed an identical post-inspection apply in 16 seconds on the same pinned sandbox, and reported no blocker or warning.
+
+The Western Roof sequence deliberately rejected a technically passing earlier artifact after human review found that ingestion had widened `Central Texas` into statewide `Texas`. The corrected authority boundary strips trailing `since YYYY` prose from visible service-area evidence and rejects a bare state schema claim when narrower directional-region evidence is present. R5a preserved `Central Texas`, avoided a thin geography route, and kept the contact purpose and call context before the managed form on phone and tablet.
+
+The fresh evidence closes the known severe below-fold, ambiguous branch, destination, legal-preservation, image-suitability, testimonial, geographic-scope, and mobile conversion-order defects. It does not turn the uncalibrated Website Health number into a quality authority. Production readiness remains a human, whole-site judgment backed by deterministic release integrity and exact retained evidence.
+
+The remaining operational gate is explicit: commit and release this exact verified tree through the maintenance-fenced Railway and sandbox workflow, require web and worker to report the same release SHA before sandbox promotion, and complete one ordinary hosted initial build. Until that passes, the code is a release candidate rather than a deployed production claim. Full Western Roof review is retained in `.design/v4-production-readiness-2026-09-03/western-roof/DESIGN_REVIEW.md`.
+
+## Commercial-core whole-site quality closure
+
+The current canonical V4 context is ready for owner review after two fresh cross-vertical treatments and one deliberately rejected diagnostic. This conclusion is categorical and human-reviewed; it does not use a close uncalibrated numeric score to claim superiority over R8.
+
+Automotive R2 (`run_e89b66e1507643e9b597648109e5111f`) produced `version_d8bab3e3339574d798886512634502a1` / `artifact_dc19acdfd6fb09fc4f372f1ef310d9ea`. It reduced a 455-path multi-location corporate crawl to the authorized Abilene business and 10 useful routes, passed the hard gate, cost $0.26696996, and completed in 1,113,378 ms with 25 model requests, three inspections, one finish attempt, and three first-submission builds. A current-policy replay checked all 10 routes and 517 links with zero blocker or warning. Human review found a distinctive photo-led dark-green/lime automotive system, strong service and conversion copy, correct local authority, clean managed navigation/form behavior, and deliberate desktop/tablet/phone recomposition.
+
+Wallcovering R1 (`run_c103556fd6e74fe79c31a9b4e483f55c`) is rejected even though the old representative gate passed. Its `/duncan-sc` phone hero retained a desktop split and collapsed the address into a character-wide vertical strip. This proved that a strong representative contact sheet and route-family sample could still miss a route-local responsive catastrophe.
+
+Wallcovering R2 (`run_77c861f0a233411c9327264ccae7bd4c`) produced `version_9ac523e43a75d4cc88a06a1324199776` / `artifact_ef8d9871e7215d8b294d84c4fcc5de68`. It authored eight differentiated routes at $0.13300969 in 822,494 ms with 24 model requests, five inspections, one finish attempt, and four first-submission builds. A current-policy replay checked all eight routes and 386 links with no blocker. Human review found a strong type-led cream/forest/rust editorial system, clean concrete copy, differentiated guide arguments, complete managed navigation, and an integrated responsive form. Its five remaining warnings are minor: two component families render body text at 14.72px or 15.2px, and one readable two-column resource callout remains an advisory narrow split.
+
+The resulting implementation remains consistent with the simplification doctrine. Owner authority is now explicit architecture scope; bounded route evidence helps the architect consolidate noisy crawls; the author receives clearer page-argument, counterfactual-swap, content-led-composition, image-role, and natural-language guidance; and cheap whole-site advisory signals cover the complete emitted inventory. No deterministic page composer, vertical template, critic, repair continuation, or subjective quality blocker was added.
+
+Final release verification now browser-checks every approved route at desktop and phone widths, with homepage tablet coverage, while `inspect_site` remains a bounded representative feedback tool. Actual rendered character fragmentation is a functional blocker. The detector measures rendered line fragments rather than average characters per estimated line, which rejects R1's unreadable address strip without rejecting R2's legitimate editorial narrow column.
+
+The complete review is `.design/v4-commercial-core-2026-09-01/DESIGN_REVIEW.md`. This local work has not been committed, pushed, deployed, or used to rewrite retained production artifacts.
+
+## Fresh tree-service quality treatment
+
+A new vertical was tested from scratch against `https://goodmorningtreeservice.com/`, rather than reusing Kind, Surge, automotive, or wallcovering authority. The first attempt, `run_2bf4ae3c38a9847f7d32bd60c74caca5`, is infrastructure-invalid: architecture completed and four authoring turns returned normally, but the fifth OpenAI request remained pending for roughly 68 minutes, never reached a source mutation or sandbox operation, and ended at the overall deadline. The manager now races every provider request against the run signal even when the provider client fails to honor `AbortSignal`; a focused verifier covers that boundary.
+
+The corrected treatment, `run_f15b74f9d0948400a07196409a8fa906`, produced candidate `version_0974c1dbf66a0d44f77c478966fdbb1c` / artifact `artifact_bf74f00923c43ef0aca11847c4b3bd70`. It authored 28 routes in 1,883,348ms at $0.22599411 using 27 model requests, six inspections, two finish attempts, and six first-submission sandbox applies. Every build succeeded without replay, recycle, or transport timeout. Two malformed initial source writes were rejected atomically, four inspections returned legitimate authoring feedback, the fifth passed, and a route-plan mismatch caught by `finish` was corrected before the final pass.
+
+The exact retained artifact passed its then-current hard gate, rendered all 28 routes at desktop and phone sizes plus representative tablet states, opened a contained authored mobile menu, and recorded zero console or page errors across 62 fresh review captures. Human review found a coherent, business-specific visual system, a strong custom managed form, accurate contact and locality paths, authentic team imagery, supported review proof, and clean mobile recomposition. It also found two reasons not to call this example A-grade or use its provisional numeric diagnostic as a decision:
+
+- nine final mobile axe findings were labeled `serious` but retained as warnings, so the old release classification allowed objective WCAG failures to pass; and
+- useful authentic imagery and review proof existed, but the homepage's main visual role went to invented decorative artwork while the strongest business evidence lived on deeper routes.
+
+The local artifact assessment reported provisional 94.2 Measured Website Health with the band suppressed, visual/editorial craft unscored, and comparison eligibility false. That number is provenance only. The production-readiness disposition is `needs_revision` under the strengthened accessibility boundary.
+
+The focused correction keeps the V4 architecture intact. Canonical axe critical and serious violations now block through the existing trusted verification gate. Initial-build guidance tells the author to resolve those violations even when other output calls them advisory, give useful authentic business imagery priority over invented high-salience decoration, and let supported homepage evidence earn the primary action rather than exiling all proof to another route. This adds no template, deterministic aesthetic rule, critic, repair continuation, mandatory phase, or authoring orchestration. Full evidence is retained in `.design/v4-proof-action-2026-08-26/proof-action-fresh-tree-service-r2/DESIGN_REVIEW.md`.
+
+### Matched R4-R7 follow-up
+
+Four further matched treatments separated the remaining quality issues without changing the V4 runtime boundary:
+
+| Run | Routes | Cost | Duration | Hard gate | Human disposition | Decisive evidence |
+| --- | ---: | ---: | ---: | --- | --- | --- |
+| R4 `run_3f0c048fe885cf77b474b23f8035f02c` | 29 | $0.19308922 | 18m 15s | passed | `needs_revision` | Authentic homepage evidence, strong navigation/form, and repaired serious contrast; unsupported leave-a-review route promised a destination authority did not supply. |
+| R5 `run_b82811db83851cb531975848cc0ab2ac` | 32 | $0.19810928 | 24m 06s | passed | `needs_revision` | Feedback workflow correctly consolidated; projects/reviews routes ignored substantial mapped evidence and contact facts collided visually. |
+| R6 `run_52e1cf9c135a7045457618fb33e163d3` | 29 | $0.14453750 | 16m 50s | passed | `needs_revision` | Strongest compact architecture and visual result; customer-review wording was synthesized and attributed to named customers rather than quoted exactly. |
+| R7 `run_1d049d646f2df9c02a2983a462bda3ee` | 33 | $0.18816859 | 18m 13s | passed | `needs_revision` | Removed fabricated individual quotations and produced a strong evidence-led gallery, but overcorrected the reviews route into a generic business quote and outbound profile instruction instead of using the available exact customer excerpts. |
+
+All 19 recorded R4-R7 sandbox applies succeeded on their first submission with no replay, recycle, or transport timeout. R5-R7 did record recoverable `inspect_site` tool failures even though their sandbox applies succeeded, so sandbox continuity and inspection-tool reliability remain separate findings. Each final artifact captured every route at desktop and phone sizes plus representative tablet and opened-navigation states with zero console errors, page errors, horizontal overflow, broken visible images, or H1-count failures.
+
+The experiments validate the clean architecture and the focused visual improvements, but no tree-service artifact is promoted as the new canonical quality example. R6/R7 are materially better than the initial treatment across homepage evidence, mobile composition, navigation, form integration, route architecture, gallery treatment, and accessibility; the remaining blocker is exact use of customer testimony on a retained reviews route.
+
+The resulting implementation remains context-only except for the objective accessibility classification: the single architecture request now receives a bounded evidence preview for each source route, transactional review submission is separated from testimonial content, evidence-led routes must inspect mapped raw source when previews are insufficient, and customer quotations must use exact retained wording and attribution. An approved reviews route with mapped attributable feedback must render exact excerpts rather than substitute a generic quote or profile instructions. No new phase, critic, visual template, deterministic aesthetic gate, retry, repair continuation, or component framework was added. These latest context changes are locally verified but not deployed or promoted.
+
+## Mobile recomposition follow-up
+
+The automotive quality-closure example exposed one localized authored-source defect: its desktop split hero remained split at 390px, reducing the authentic service-bay image to a narrow vertical sliver. The canonical initial-build skill now states the responsive judgment directly: when a desktop relationship no longer has useful phone width, recompose it by stacking, reordering, recropping, simplifying, or omitting elements so retained content still contributes and the primary action remains legible. This is authoring guidance only; it adds no component, breakpoint rule, detector, runtime presentation, critic, repair continuation, or convergence machinery.
+
+Two fresh local treatments reused the same retained automotive authority to isolate the context change. Both deliberately stacked the hero photograph below the proposition and actions on phone while preserving a strong desktop split. The first otherwise-valid artifact was rejected because it drew a `City or ZIP code` shell that looked like an input beside a separate approved external location-search link. The skill now names that exact semantic mistake, and the corrected treatment rendered a truthful ordinary location-search link without an input-like shell.
+
+Corrected run `run_a50b57c7d8bf4f3da0962651184f99c2` produced `version_b6ca3527b07d4c39f629b7f5f2d2ec42` / `artifact_caf954f86751bcd1110c3164cc58d51a`. It passed the hard gate across 27 routes and 1,100 links at $0.22173241 in 1,641,295ms, using 28 model requests, five inspections, one finish attempt, and five first-submission builds. No build failed, replayed, recycled, or timed out in transport. Against automotive r5 it was 5.9% cheaper, 11.2% faster, and used one fewer model request and inspection.
+
+Representative-route review initially scored the corrected treatment 44/45. A subsequent whole-source and all-route review correctly lowers it to 43/45: mobile composition rises from 4 to 5, editorial composition falls from 5 to 4 for secondary-route polish debt, and destination integrity falls from 5 to 4 because six differently titled News links all resolve to `/about`. That collection must be corrected in authored source before this exact artifact is called A-grade. The artifact also retained eight advisory warnings—tight mobile article heading, sub-12px news metadata, legal-page target sizes, and three long-line measurements—where automotive r5 retained zero. None of these findings is attributable to the responsive instruction, and one stochastic artifact does not justify another generator rule. The focused skill changes remain; the experiment does not claim universal superiority or consequence-free output. Full retained evidence is in `.design/v4-generalization-2026-08-26/automotive-mobile-recomposition-r6/DESIGN_REVIEW.md`.
+
+## V4 quality closure in the production-ready comparison tier
+
+The clean V4 architecture remains the canonical direction: trusted runtime owns navigation state and managed-form submission, source owns presentation, owner authority owns facts and destinations, and the release gate owns objective integrity. The August 25 quality treatment did not add recipes, deterministic aesthetic logic, a critic, repair continuation, template engine, tool budget, or convergence machinery.
+
+Two final fresh private treatments reached a production-ready disposition under the anchored whole-site review. The historical nine-category labels totaled 44/45 for automotive r5 (`run_a3a09b6e7c4746059690402bd5b9d70f`) and 43/45 for wallcovering r5 (`run_deca59acec4e4d94947d29bdd0ab5d33`); the strongest retained R8 control totaled 42/45 for Surge and the Kind R8 control totaled 32/45. Those totals remain experiment provenance, not calibrated measurements. In particular, 42 versus 43 or 44 is unresolved reviewer-scale noise and does not establish V4 superiority. The meaningful result is categorical: both V4 artifacts passed the technical preconditions and were judged publishable without a general design or copy pass, while V4 preserved the cleaner navigation and managed-form ownership boundary.
+
+Both final V4 artifacts passed the hard gate, retained zero warnings or blockers, recorded 97.6 Measured Website Health with the uncalibrated visual band correctly suppressed, used contained authored mobile navigation and custom managed forms, and preserved exact facts and destinations. Informational measurements remain retained. Automotive produced 24 routes at $0.23561670 in 1,847,594ms; wallcovering produced 14 routes at $0.13586758 in 770,255ms. All nine sandbox applies across the pair succeeded on the first submission. Neither run replayed, recycled, timed out in transport, or failed a build.
+
+The closure is evidence-backed rather than cherry-picked. Earlier treatments were rejected for inactive search UI, repeated guide prose, imitation identity, enlarged thumbnails, internal provenance copy, or excessive repair churn. The final correction stays focused: clearer source/asset/customer-language guidance, canonical four-slot inspection ordering, and one hard functional check that rejects field-like search/filter UI without actual behavior. The complete retained record and criterion evidence are in `.design/v4-generalization-2026-08-24/PRODUCTION_READINESS_CLOSURE.md`.
+
+The implementation and evidence are ready for a coordinated release decision. These treatments used copied local authority and the development sandbox; they did not mutate production, deploy Railway, repoint public inputs, or alter retained artifacts.
 
 ## Canonical V4 glyph and runtime consolidation released
 
@@ -192,3 +278,30 @@ candidate integrity, and owner-controlled publication boundaries.
 
 Prior Sol, visual-reference, planner, and bakeoff experiments remain calibration
 evidence only. They are not live authoring instructions.
+
+## Canonical quality contract and adaptive V4 treatment — August 25, 2026
+
+Lodesta now has one target-neutral quality contract rather than separate incumbent, generated-site, experiment, and public-report score meanings. Release integrity remains deterministic and blocking only for safety, factual, capability, accessibility-floor, and functional failures. Measured Website Health reports numeric diagnostic evidence with explicit coverage. Production readiness remains an anchored human judgment until criterion-level calibration earns automation. Public grades remain withheld.
+
+Comparisons now require identical serving, reference-authority, complete-inventory, four-slot route-sampling, and evaluator identities. A private artifact is therefore not silently compared with a public incumbent, and a generated-site fact-binding check cannot inflate cross-site health. Both artifact assessment and visual review use the same frozen sample: home, primary service, a second route in the same material family, and contact or FAQ.
+
+The fresh Geiger treatment `run_ad6ed7656e0b4514a4942927784bb3d2` passed the hard gate with 24 routes, 17 model requests, $0.13370249 cost, and 1,060,346 ms authoring duration. Three sandbox builds completed on the first submission with no replay, recycle, recovery, or transport failure. It recorded 95.7 Measured Website Health, with the qualitative band suppressed because visual evidence was unavailable. Human review labeled it `needs_revision`: navigation and the managed form were sound, but the route system repeated sparse detail structures, the media-free hero became a poster-like identity panel, shared text and target floors remained, and one CTA was awkward. It was not a clear quality win over the hand-polished Geiger reference.
+
+That evidence produced a focused context treatment: consolidate thin route families more aggressively, prefer useful text-led composition over invented decorative identity when suitable media is absent, use direct action language, and establish shared body, form, utility-text, and control-size floors from the first stylesheet. No critic, retry, mandatory sequence, or subjective gate was added.
+
+The adaptive generalization run then used L3 Paper & Paint rather than another pest business. Treatment `run_21559c483e97435ea2c65fcb88df560f` passed the hard gate with ten routes, 23 author model requests plus architecture, $0.12769502 cost, and 708,788 ms duration. Four sandbox builds again completed on their first submission with no replay, recycle, recovery, or transport failure. Its architecture consolidated a 235-path source inventory into a coherent ten-route commercial site. The canonical report recorded 97.6 Measured Website Health, with the visual dimension again unscored rather than fabricated.
+
+Human review found the L3 result stronger than the preceding treatment: it removed the invented monogram, used a distinctive editorial type-and-color system, retained a clean managed menu and custom form, and avoided the ordinary-screenshot focus artifact. Against the preceding L3 run, cost fell 20.0% from $0.15959556 and duration fell 41.1% from 1,203,484 ms while route scope stayed at ten.
+
+One material problem repeated: retained raster images around 214x120 pixels were enlarged into prominent placements. Prompt guidance alone failed twice, so the adaptive screen stopped before a third run. Browser inspection now emits an advisory `render.raster_image_upscale` finding when a visible non-logo raster is both prominent and enlarged at least 1.5x beyond its intrinsic pixels. Feedback tells the author to pull a genuinely higher-resolution retained source or choose a type-led composition; CSS cropping or sharpening is explicitly not treated as a repair. This remains nonblocking and presentation remains in authored source.
+
+The treatment is promising but not broadly vetted. It demonstrates clean infrastructure behavior across two fresh sites and a substantial second-business efficiency improvement, but does not prove universal quality superiority over the historical R8-era baseline. Production was not repointed and no new public input was promoted. The next isolated experiment is one fresh initial build that deliberately exercises limited source imagery and confirms the raster-suitability evidence changes author behavior. Only after that passes should the screen expand to another vertical or support a promotion decision.
+## September 1, 2026 — fresh V4 quality and rating-evidence closure
+
+Two fresh corrected V4 businesses now pass the hard gate without sandbox replay, recycle, or transport failure: A & T Well and Pump (`run_1c8a65502848f10542d3568d01024695`, 44 routes, $0.29714888) and A To Z Wildlife Control (`run_5e59f723c86fa68436cbb032901a4f2c`, 31 routes, $0.19266417). Human review places both in the production-ready reference tier while finding materially different brand systems. The remaining repeated `organized around` process-copy construction and A & T's emblem-only header were corrected in canonical authoring guidance without adding deterministic presentation logic.
+
+Offering ingestion now excludes service-area/location pages, blog articles, generic CTA labels, and Schema.org category noise while retaining clear root-level service routes. Desktop semantic navigation and managed phone disclosure are authored separately; route-local inspection follows the representative pass; emblem-like marks are paired with the business name.
+
+Google aggregate-rating research is now resolved through one bounded evidence path. Exact retained build evidence wins, then an exact-first-party-website match may reuse the existing browser-observed prospect rating, then one live web-search lookup runs with retained identity evidence, and otherwise the rating is omitted. A controlled ten-business screen showed that larger search context and a more expensive model both reduced reliability; visible-browser audit confirmed that several live-search omissions were extraction variance. The final authoring/factual boundary remains unchanged: the model receives one exact display string, individual Google review prose is forbidden, and a different rating fails verification.
+
+The full decision and evidence are recorded in `docs/canonical-generator-quality-validation-2026-09-01.md`; exact reviewed frames and the design critique are retained under `.design/canonical-v4-validation-2026-09-01/`.

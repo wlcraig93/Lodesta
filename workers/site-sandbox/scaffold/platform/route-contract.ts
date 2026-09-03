@@ -14,10 +14,15 @@ export function assertValidRoutePaths(routes: Array<{ path: string }>) {
 
 function isStaticRoutePath(path: string) {
   if (path === "/") return true;
-  if (!path.startsWith("/") || path.endsWith("/")) return false;
+  if (!path.startsWith("/") || path.endsWith("/") || path.includes("?") || path.includes("#") || path.includes("\\")) return false;
   // Retained source URLs may legitimately end a slug segment with a hyphen.
   // Keep validation linear so long legacy paths cannot trigger regex backtracking.
-  return path.slice(1).split("/").every((segment) => /^[a-z0-9][a-z0-9-]*$/.test(segment));
+  const segments = path.slice(1).split("/");
+  return segments.every((segment, index) => {
+    if (/^[a-z0-9][a-z0-9-]*$/.test(segment)) return true;
+    return index === segments.length - 1
+      && /^[a-z0-9][a-z0-9-]*\.(?:html?|php|aspx?)$/.test(segment);
+  });
 }
 
 export function assertRenderedRouteBodies(routes: Array<{ path: string; bodyHtml: string }>) {

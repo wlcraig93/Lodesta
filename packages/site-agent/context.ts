@@ -5,10 +5,11 @@ import type {
   SourceSnapshotPage
 } from "@/packages/site-contracts";
 import { sha256 } from "@/packages/business-data/hash";
+import { googleAggregateRatingObservationFromSnapshot } from "@/packages/business-data/web-research";
 import type { WorkspaceSourceFile } from "./contracts";
 import { trustedAuthoringFonts } from "./font-library";
 import { websiteSourceSnapshotPayloadSchema } from "@/packages/site-contracts";
-import { classifySourcePagePath, normalizedSourcePagePath } from "@/packages/business-data/source-page-classification";
+import { classifySourcePagePath, isLegalSourcePagePath, normalizedSourcePagePath } from "@/packages/business-data/source-page-classification";
 
 export type SiteAuthoringContext = {
   schemaVersion: 1;
@@ -32,6 +33,17 @@ export type SiteAuthoringContext = {
     assets: Array<SitePublicBuildInput["business"]["assets"][number] | AuthoringAssetContext>;
   };
   publicFacts: SitePublicBuildInput["publicFacts"];
+  provisionalObservations: {
+    googleAggregateRating?: {
+      rating: number;
+      displayText: string;
+      provider: "google";
+      observedAt: string;
+      sourceSnapshotId: string;
+      untrusted: true;
+      destination: "not_authorized_unless_present_in_managed_links";
+    };
+  };
   provisionalSources: Array<{
     id: string;
     sourceType: SourceSnapshot["sourceType"];
@@ -117,6 +129,7 @@ export function createSiteAuthoringContext(input: {
   neutralAssetSemantics?: boolean;
 }): SiteAuthoringContext {
   const { buildInput } = input;
+  const googleAggregateRating = latestGoogleAggregateRating(input.snapshots);
   const assets = input.neutralAssetSemantics
     ? buildInput.business.assets.map(({ alt: _alt, ...asset }) => ({
         ...asset,
@@ -143,6 +156,19 @@ export function createSiteAuthoringContext(input: {
     },
     publishableBusiness: { ...buildInput.business, assets },
     publicFacts: buildInput.publicFacts,
+    provisionalObservations: {
+      ...(googleAggregateRating ? {
+        googleAggregateRating: {
+          rating: googleAggregateRating.observation.rating,
+          displayText: `${googleAggregateRating.observation.rating} stars on Google`,
+          provider: "google" as const,
+          observedAt: googleAggregateRating.observation.observedAt,
+          sourceSnapshotId: googleAggregateRating.snapshot.id,
+          untrusted: true as const,
+          destination: "not_authorized_unless_present_in_managed_links" as const
+        }
+      } : {})
+    },
     provisionalSources: input.snapshots.map((snapshot) => ({
       id: snapshot.id,
       sourceType: snapshot.sourceType,
@@ -169,6 +195,16 @@ export function createSiteAuthoringContext(input: {
     },
     designResources: { trustedFonts: trustedAuthoringFonts }
   };
+}
+
+function latestGoogleAggregateRating(snapshots: SourceSnapshot[]) {
+  return snapshots.flatMap((snapshot) => {
+    const observation = googleAggregateRatingObservationFromSnapshot(snapshot);
+    return observation ? [{ snapshot, observation }] : [];
+  }).sort((left, right) => (
+    Date.parse(right.observation.observedAt) - Date.parse(left.observation.observedAt)
+    || right.snapshot.id.localeCompare(left.snapshot.id)
+  ))[0];
 }
 
 function websiteInventory(snapshot: SourceSnapshot, pages: SourceSnapshotPage[]): SiteAuthoringContext["provisionalSources"][number]["websiteInventory"] {
@@ -326,7 +362,9 @@ export function sourceInventorySummary(context: SiteAuthoringContext) {
       return true;
     });
     const mechanicalArchivePages = distinctIndexablePages.filter((page) => classifySourcePagePath(page.path) === "mechanical_archive");
-    const utilityPages = distinctIndexablePages.filter((page) => classifySourcePagePath(page.path) === "technical_or_utility");
+    const legalPages = distinctIndexablePages.filter((page) => isLegalSourcePagePath(page.path));
+    const utilityPages = distinctIndexablePages.filter((page) =>
+      classifySourcePagePath(page.path) === "technical_or_utility" && !isLegalSourcePagePath(page.path));
     const customerContentPages = distinctIndexablePages.filter((page) => classifySourcePagePath(page.path) === "customer_content");
     const customerContentCounts = {
       atLeast500: customerContentPages.filter((page) => page.wordCount >= 500).length,
@@ -343,7 +381,7 @@ export function sourceInventorySummary(context: SiteAuthoringContext) {
     const fetched = countFromInventory(inventory.counts, "documentsFetched");
     const label = source.sourceUrl ?? source.id;
     return [
-      `Website source ${label}: ${inventory.coverage} crawl; ${inventory.pages.length} manifest pages; ${eligible} eligible; ${fetched} fetched; ${uniqueIndexablePages.length} unique fetched indexable paths; ${distinctIndexablePages.length} distinct fetched indexable content bodies after ${duplicateIndexableBodies} duplicate bodies. Content-estate signal: ${customerContentPages.length} likely customer-content paths after separating ${mechanicalArchivePages.length} obvious mechanical archive paths and ${utilityPages.length} obvious technical or utility paths, including legal and site-builder surfaces; ${customerContentCounts.atLeast500} of those content paths have at least 500 words; ${customerContentCounts.atLeast1000} have at least 1000 words; together they contain ${customerContentCounts.words} words and ${customerContentPages.length} distinct content bodies. These existing authorized first-party content assets are not hypothetical generated keyword pages. Known CMS archive and site-builder routes are retained as evidence but are strong retirement candidates, not business offerings or design direction. The manifest also contains ${inventory.pages.filter((page) => Boolean(page.exactDuplicateOf)).length} exact-duplicate references; largest route prefixes: ${largestPrefixes || "none"}. These are neutral corpus indicators rather than an automatic route target or quality verdict, but every retained source path still requires a deliberate preserved, redirected, canonical-duplicate, or intentionally retired disposition.`
+      `Website source ${label}: ${inventory.coverage} crawl; ${inventory.pages.length} manifest pages; ${eligible} eligible; ${fetched} fetched; ${uniqueIndexablePages.length} unique fetched indexable paths; ${distinctIndexablePages.length} distinct fetched indexable content bodies after ${duplicateIndexableBodies} duplicate bodies. Content-estate signal: ${customerContentPages.length} likely customer-content paths after separating ${mechanicalArchivePages.length} obvious mechanical archive paths, ${utilityPages.length} technical or site-builder paths, and ${legalPages.length} source-sensitive legal paths; ${customerContentCounts.atLeast500} of those content paths have at least 500 words; ${customerContentCounts.atLeast1000} have at least 1000 words; together they contain ${customerContentCounts.words} words and ${customerContentPages.length} distinct content bodies. These existing authorized first-party content assets are not hypothetical generated keyword pages. Known CMS archive and site-builder routes are strong retirement candidates, not business offerings or design direction. Legal paths are different: preserve their exact paths and substantive provisions without summarizing. The manifest also contains ${inventory.pages.filter((page) => Boolean(page.exactDuplicateOf)).length} exact-duplicate references; largest route prefixes: ${largestPrefixes || "none"}. These are neutral corpus indicators rather than an automatic route target or quality verdict, but every retained source path still requires a deliberate preserved, redirected, canonical-duplicate, or intentionally retired disposition.`
     ];
   });
   return summaries.length

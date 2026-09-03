@@ -62,6 +62,7 @@ import {
   siteArchitectureUserPrompt,
   validateSiteArchitecturePlan,
   type RawSiteArchitecturePlan,
+  type SiteArchitectureAuthorityContext,
   type SiteArchitectureInventoryEntry
 } from "./architecture";
 import {
@@ -685,6 +686,7 @@ export class WebsiteManagerAgent {
 
   async architect(input: {
     inventory: SiteArchitectureInventoryEntry[];
+    authorityContext?: SiteArchitectureAuthorityContext;
     architectureMode?: "commercial-core-pull" | "commercial-core-message-target";
     signal?: AbortSignal;
   }) {
@@ -699,7 +701,7 @@ export class WebsiteManagerAgent {
       name: "exhaustive_site_architecture",
       schema: siteArchitectureOutputJsonSchema(input.inventory),
       system: siteArchitectureSystemPromptFor(input.architectureMode),
-      content: [{ type: "input_text", text: siteArchitectureUserPrompt(input.inventory) }],
+      content: [{ type: "input_text", text: siteArchitectureUserPrompt(input.inventory, input.authorityContext) }],
       signal: input.signal,
       maxOutputTokens: 100_000,
       reasoningEffort: "high"
@@ -932,7 +934,10 @@ async function createWithTransportRetry(
   let lastError: unknown;
   for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
     try {
-      const response = await client.create(params, options.signal ? { signal: options.signal } : undefined);
+      const response = await raceModelRequestWithAbort(
+        client.create(params, options.signal ? { signal: options.signal } : undefined),
+        options.signal
+      );
       if (response.status === "failed") throw new Error(response.error?.message ?? "manager_model_failed");
       if (response.status === "incomplete") throw new Error(`manager_model_incomplete:${response.incomplete_details?.reason ?? "unknown"}`);
       return response;
@@ -945,6 +950,28 @@ async function createWithTransportRetry(
     }
   }
   throw lastError;
+}
+
+function raceModelRequestWithAbort<T>(request: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return request;
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("model_request_aborted"));
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener("abort", abort);
+      reject(signal.reason ?? new Error("model_request_aborted"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    request.then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      }
+    );
+  });
 }
 
 function transportRetryDelayMs(error: unknown, attempt: number, modelId: string) {
@@ -1363,7 +1390,7 @@ export const websiteManagerTools: Tool[] = [
       alt: { type: "string", maxLength: 500 }
     }
   }),
-  tool("search_public_web", "Research a required current fact only when owner, canonical-link, and retained first-party evidence are insufficient. Never use this tool merely to revalidate or rediscover a supplied canonical destination. Selected results are retained as provisional web research.", {
+  tool("search_public_web", "Research a required current fact only when owner, canonical-link, retained first-party evidence, and supplied structured provisional observations are insufficient. This may include a specifically requested current Google aggregate rating or reviews destination for an unambiguously matched business; never request or reproduce individual third-party review text. Never use this tool merely to revalidate or rediscover a supplied canonical destination. Selected results are retained as provisional web research.", {
     type: "object", additionalProperties: false, required: ["query", "domains"],
     properties: {
       query: { type: "string", minLength: 1, maxLength: 500 },
@@ -1459,7 +1486,7 @@ export const websiteManagerTools: Tool[] = [
       alt: { type: "string", minLength: 1, maxLength: 500 }
     }
   }),
-  tool("inspect_site", "Build the current workspace if needed, then inspect actual desktop, tablet, mobile, and opened mobile-navigation pixels in Lodesta's browser together with concrete render findings. For an edit, pass null to use the selected route and automatically outline the selected element, or pass another affected route for route-level evidence. This never runs hard release verification.", {
+  tool("inspect_site", "Build the current workspace if needed, then inspect actual desktop, tablet, mobile, and opened mobile-navigation pixels in Lodesta's browser together with concrete render findings. For an initial build, pass null for the architecture-selected representative route set; passing '/' inspects only the homepage. After a route-local finding or change, pass that exact route instead of repeating the representative set. For an edit, pass null to use the selected route and automatically outline the selected element, or pass another affected route for route-level evidence. This never runs hard release verification.", {
     type: "object", additionalProperties: false, properties: {
       route: { type: ["string", "null"], pattern: "^/" }
     }, required: ["route"]

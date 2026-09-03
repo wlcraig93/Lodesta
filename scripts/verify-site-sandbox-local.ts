@@ -7,6 +7,7 @@ import { expectedSiteSandboxManifest } from "../packages/site-contracts";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 import { requiredDestinationsSource } from "../workers/site-sandbox/src/initial-source";
 import {
+  directionsHrefForLocation,
   formatLocalHoursValue,
   formatLocalAddress,
   summarizedLocationHours
@@ -197,6 +198,15 @@ try {
     performance.now() - retainedLegacyRouteStartedAt < 1_000,
     "Long retained route validation regressed to catastrophic backtracking."
   );
+  assert.doesNotThrow(
+    () => assertValidRoutePaths([{ path: "/" }, { path: "/about-us.html" }]),
+    "The sandbox route contract rejected a safe legacy HTML route approved by architecture."
+  );
+  assert.throws(
+    () => assertValidRoutePaths([{ path: "/" }, { path: "/payload.exe" }]),
+    /not a static site path/,
+    "The sandbox route contract admitted an unsupported file-like route."
+  );
   await writeFile(join(workspace, "src/site.tsx"), `export const siteDefinition = {
     routes: [
       { path: "/services", element: <main>One</main> },
@@ -221,6 +231,16 @@ try {
     () => formatLocalAddress({ street: "1 King St", city: "Toronto", region: "ON", postalCode: "M5H 1A1", country: "CA" }),
     /supports US locations only/,
     "The local address formatter silently rendered a non-US address."
+  );
+  assert.equal(
+    formatLocalAddress({ street: "3300 Bennett St. N.,", city: "St. Petersburg", region: "FL", postalCode: "33713", country: "US" }),
+    "3300 Bennett St. N., St. Petersburg, FL 33713",
+    "The local address formatter preserved source punctuation that duplicates its presentation separator."
+  );
+  assert.equal(
+    directionsHrefForLocation({ label: "Geiger's", street: "3300 Bennett St. N.,", city: "St. Petersburg", region: "FL", postalCode: "33713", country: "US" }),
+    "https://www.google.com/maps/dir/?api=1&destination=3300%20Bennett%20St.%20N.%2C%20St.%20Petersburg%2C%20FL%2C%2033713%2C%20US",
+    "The managed directions URL preserved source punctuation that duplicates its address separator."
   );
   assert.equal(
     summarizedLocationHours({ Monday: "Open", Wednesday: "Open" }),

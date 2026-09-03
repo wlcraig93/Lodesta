@@ -2,47 +2,83 @@ import { z } from "zod";
 import { assessmentCriteria } from "./rubric";
 
 const hash = z.string().regex(/^sha256:[a-f0-9]{64}$/);
-const identity = z.string().min(1).max(300);
+const identity = z.string().min(1).max(500);
 const status = z.enum(["pass", "warning", "fail", "unknown", "not_applicable"]);
-const routeSlot = z.enum(["home", "primary_service", "contact_or_about"]);
+const disposition = z.enum(["ship", "needs_revision", "reject"]);
+const routeSlot = z.enum([
+  "home",
+  "primary_service",
+  "secondary_same_family",
+  "conversion_or_faq"
+]);
+
+const targetPinsSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("public_url"),
+    sourceKey: identity,
+    sourceUrl: z.string().url()
+  }).strict(),
+  z.object({
+    kind: z.literal("published_site"),
+    sourceKey: identity,
+    sourceUrl: z.string().url(),
+    siteId: identity,
+    versionId: identity
+  }).strict(),
+  z.object({
+    kind: z.literal("site_artifact"),
+    sourceKey: identity,
+    siteId: identity,
+    artifactId: identity,
+    versionId: identity.optional(),
+    publicBuildInput: z.object({ id: identity, hash }).strict()
+  }).strict()
+]);
+
+const referenceAuthorityPinsSchema = z.object({
+  kind: z.enum(["none", "site_public_build_input"]),
+  identity: z.string().regex(/^reference-authority@sha256:[a-f0-9]{64}$/),
+  publicBuildInputId: identity.optional(),
+  publicBuildInputHash: hash.optional(),
+  businessRevision: z.number().int().positive().optional(),
+  siteIntentRevision: z.number().int().positive().optional(),
+  sourceSnapshotIds: z.array(identity).max(500)
+}).strict().superRefine((authority, context) => {
+  const pinned = authority.kind === "site_public_build_input";
+  if (pinned !== Boolean(authority.publicBuildInputId && authority.publicBuildInputHash)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "A site-public-build-input reference requires its immutable ID and hash."
+    });
+  }
+});
 
 const calibrationPinsSchema = z.object({
-  sourceSnapshots: z.array(z.object({
-    id: identity,
-    hash
-  }).strict()).min(1),
-  businessState: z.object({
-    revision: z.number().int().positive(),
-    hash
-  }).strict(),
-  siteIntent: z.object({
-    revision: z.number().int().positive(),
-    hash
-  }).strict(),
-  publicBuildInput: z.object({
-    id: identity,
-    hash
-  }).strict(),
-  artifact: z.object({
-    id: identity,
-    versionId: identity.optional()
-  }).strict(),
+  target: targetPinsSchema,
+  referenceAuthority: referenceAuthorityPinsSchema,
   report: z.object({
     id: identity,
     hash,
     inputHash: hash
   }).strict(),
   screenshotSetHash: hash,
+  comparability: z.object({
+    key: z.string().regex(/^comparison@sha256:[a-f0-9]{64}$/),
+    servingContractIdentity: z.string().regex(/^serving-contract@sha256:[a-f0-9]{64}$/),
+    referenceAuthorityIdentity: z.string().regex(/^reference-authority@sha256:[a-f0-9]{64}$/),
+    inventoryIdentity: z.string().regex(/^assessment-inventory@sha256:[a-f0-9]{64}$/)
+  }).strict(),
   routeSelectionIdentity: identity,
-  selectedSlots: z.tuple([
+  selectedRoutes: z.tuple([
     z.object({ slot: z.literal("home"), resolvedPath: z.string().startsWith("/").optional() }).strict(),
     z.object({ slot: z.literal("primary_service"), resolvedPath: z.string().startsWith("/").optional() }).strict(),
-    z.object({ slot: z.literal("contact_or_about"), resolvedPath: z.string().startsWith("/").optional() }).strict()
+    z.object({ slot: z.literal("secondary_same_family"), resolvedPath: z.string().startsWith("/").optional() }).strict(),
+    z.object({ slot: z.literal("conversion_or_faq"), resolvedPath: z.string().startsWith("/").optional() }).strict()
   ])
 }).strict();
 
 export const assessmentCalibrationDatasetSchema = z.object({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.literal(3),
   kind: z.literal("website-health-calibration"),
   registryIdentity: identity,
   scannerIdentity: identity,
@@ -53,14 +89,14 @@ export const assessmentCalibrationDatasetSchema = z.object({
     reviewer: z.string().min(1).max(180),
     reviewedAt: z.string().datetime({ offset: true }),
     pins: calibrationPinsSchema,
-    automatedRankScore: z.number().min(0).max(100),
-    humanRankScore: z.number().min(0).max(100),
+    readinessDisposition: disposition,
     criteria: z.array(z.object({
       criterionId: identity,
       certainty: z.enum(["deterministic", "inferred", "human_reviewed"]),
       scoreEligible: z.boolean(),
       automatedStatus: status,
       expectedStatus: status,
+      evidence: z.array(z.string().min(1).max(2_000)).min(1).max(12),
       note: z.string().min(1).max(1_000).optional()
     }).strict()).min(1)
   }).strict()).min(1)
@@ -73,7 +109,14 @@ export const assessmentCalibrationDatasetSchema = z.object({
         message: `Report ${review.pins.report.id} uses a different route-selection identity.`
       });
     }
-    const slots = review.pins.selectedSlots.map((slot) => slot.slot);
+    if (review.pins.referenceAuthority.identity !== review.pins.comparability.referenceAuthorityIdentity) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["reviews"],
+        message: `Report ${review.pins.report.id} does not bind the same reference authority in its calibration and comparability pins.`
+      });
+    }
+    const slots = review.pins.selectedRoutes.map((slot) => slot.slot);
     if (new Set(slots).size !== slots.length || slots.some((slot) => !routeSlot.options.includes(slot))) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -90,7 +133,7 @@ export const assessmentCalibrationDatasetSchema = z.object({
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["reviews"],
-        message: `Retained inputs, selected slots, or screenshot hashes differ across reviews for report ${review.pins.report.id}.`
+        message: `Target, reference, selected routes, or screenshot hashes differ across reviews for report ${review.pins.report.id}.`
       });
     }
     byReport.set(review.pins.report.id, serialized);
@@ -111,21 +154,32 @@ export function summarizeAssessmentCalibration(value: unknown) {
   const criterionIds = [...new Set(rows.map((row) => row.criterionId))];
   const criteria = criterionIds.map((criterionId) => {
     const relevant = rows.filter((row) => row.criterionId === criterionId);
-    const opportunities = relevant.filter((row) =>
+    const labelComparable = relevant.filter((row) =>
+      row.automatedStatus !== "unknown" && row.expectedStatus !== "unknown"
+    );
+    const opportunities = labelComparable.filter((row) =>
       row.scoreEligible
       && row.certainty === "inferred"
       && isOpportunity(row.automatedStatus)
     );
     const trueOpportunities = opportunities.filter((row) => isOpportunity(row.expectedStatus));
-    const disagreements = relevant.filter((row) => row.automatedStatus !== row.expectedStatus);
+    const disagreements = labelComparable.filter((row) => row.automatedStatus !== row.expectedStatus);
+    const missedOpportunities = labelComparable.filter((row) =>
+      !isOpportunity(row.automatedStatus) && isOpportunity(row.expectedStatus)
+    );
     return {
       criterionId,
       definitionIdentity: registryDefinitions.get(criterionId)?.definitionIdentity,
       reviewed: relevant.length,
+      comparableLabels: labelComparable.length,
+      agreement: labelComparable.length
+        ? round((labelComparable.length - disagreements.length) / labelComparable.length)
+        : undefined,
       scoredInferredOpportunities: opportunities.length,
       opportunityPrecision: opportunities.length
         ? round(trueOpportunities.length / opportunities.length)
         : undefined,
+      missedOpportunities: missedOpportunities.length,
       disagreements: disagreements.length,
       disagreementSamples: disagreements.slice(0, 10).map((row) => ({
         reportId: row.reportId,
@@ -139,31 +193,33 @@ export function summarizeAssessmentCalibration(value: unknown) {
   const inferredCriteriaWithOpportunities = criteria.filter((criterion) =>
     criterion.scoredInferredOpportunities > 0
   );
-  const disagreements = rows.filter((row) => row.automatedStatus !== row.expectedStatus);
-  const undocumentedDisagreements = disagreements.filter((row) => !row.note?.trim());
-  const agreement = reviewerAgreement(rows);
-  const reports = uniqueReportScores(dataset);
-  const rankAgreement = spearman(
-    reports.map((report) => report.automated),
-    reports.map((report) => report.human)
+  const disagreements = rows.filter((row) =>
+    row.automatedStatus !== "unknown"
+    && row.expectedStatus !== "unknown"
+    && row.automatedStatus !== row.expectedStatus
   );
-  const reviewedSites = reports.length;
+  const undocumentedDisagreements = disagreements.filter((row) => !row.note?.trim());
+  const criterionAgreement = reviewerCriterionAgreement(rows);
+  const readinessDispositionAgreement = reviewerDispositionAgreement(dataset.reviews);
+  const reportIds = [...new Set(dataset.reviews.map((review) => review.pins.report.id))];
+  const reviewedSites = reportIds.length;
   const verticals = [...new Set(dataset.reviews.map((review) => review.vertical))];
   const readiness = {
     minimumReviewedSitesMet: reviewedSites >= 30,
     verticalCoverageMet: verticals.length >= 5,
-    dualReviewedSitesMet: agreement.overlappingSites >= 10,
+    dualReviewedSitesMet: criterionAgreement.overlappingSites >= 10,
     inferredOpportunityPrecisionMet: inferredCriteriaWithOpportunities.length > 0
       && inferredCriteriaWithOpportunities.every((criterion) =>
         (criterion.opportunityPrecision ?? 0) >= 0.85
       ),
-    reviewerAgreementMet: agreement.value !== undefined && agreement.value >= 0.8,
-    rankingAgreementMet: rankAgreement !== undefined && rankAgreement >= 0.8,
+    reviewerCriterionAgreementMet: criterionAgreement.value !== undefined && criterionAgreement.value >= 0.8,
+    readinessDispositionAgreementMet: readinessDispositionAgreement.value !== undefined
+      && readinessDispositionAgreement.value >= 0.8,
     everyDisagreementDocumented: undocumentedDisagreements.length === 0,
     publicScoreApproved: false
   };
   return {
-    schemaVersion: 2 as const,
+    schemaVersion: 3 as const,
     kind: "website-health-calibration-summary" as const,
     registryIdentity: dataset.registryIdentity,
     scannerIdentity: dataset.scannerIdentity,
@@ -171,9 +227,9 @@ export function summarizeAssessmentCalibration(value: unknown) {
     evaluatorIdentities: dataset.evaluatorIdentities,
     reviewedSites,
     verticals,
-    dualReviewedSites: agreement.overlappingSites,
-    reviewerAgreement: agreement.value,
-    rankingAgreement: rankAgreement,
+    dualReviewedSites: criterionAgreement.overlappingSites,
+    reviewerCriterionAgreement: criterionAgreement.value,
+    readinessDispositionAgreement: readinessDispositionAgreement.value,
     criteria,
     undocumentedDisagreements: undocumentedDisagreements.map((row) => ({
       reportId: row.reportId,
@@ -194,17 +250,37 @@ function isOpportunity(value: z.infer<typeof status>) {
   return value === "warning" || value === "fail";
 }
 
-function reviewerAgreement(rows: Array<{
+function reviewerCriterionAgreement(rows: Array<{
   reportId: string;
   criterionId: string;
   reviewer: string;
   expectedStatus: string;
 }>) {
+  return groupedReviewerAgreement(rows.map((row) => ({
+    reportId: row.reportId,
+    key: `${row.reportId}:${row.criterionId}`,
+    reviewer: row.reviewer,
+    value: row.expectedStatus
+  })));
+}
+
+function reviewerDispositionAgreement(reviews: AssessmentCalibrationDataset["reviews"]) {
+  return groupedReviewerAgreement(reviews.map((review) => ({
+    reportId: review.pins.report.id,
+    key: review.pins.report.id,
+    reviewer: review.reviewer,
+    value: review.readinessDisposition
+  })));
+}
+
+function groupedReviewerAgreement(rows: Array<{
+  reportId: string;
+  key: string;
+  reviewer: string;
+  value: string;
+}>) {
   const groups = new Map<string, typeof rows>();
-  for (const row of rows) {
-    const key = `${row.reportId}:${row.criterionId}`;
-    groups.set(key, [...(groups.get(key) ?? []), row]);
-  }
+  for (const row of rows) groups.set(row.key, [...(groups.get(row.key) ?? []), row]);
   let comparisons = 0;
   let agreements = 0;
   const overlappingSites = new Set<string>();
@@ -215,7 +291,7 @@ function reviewerAgreement(rows: Array<{
     for (let left = 0; left < reviewers.length; left += 1) {
       for (let right = left + 1; right < reviewers.length; right += 1) {
         comparisons += 1;
-        if (reviewers[left].expectedStatus === reviewers[right].expectedStatus) agreements += 1;
+        if (reviewers[left].value === reviewers[right].value) agreements += 1;
       }
     }
   }
@@ -223,50 +299,6 @@ function reviewerAgreement(rows: Array<{
     overlappingSites: overlappingSites.size,
     value: comparisons ? round(agreements / comparisons) : undefined
   };
-}
-
-function uniqueReportScores(dataset: AssessmentCalibrationDataset) {
-  const groups = new Map<string, AssessmentCalibrationDataset["reviews"]>();
-  for (const review of dataset.reviews) {
-    groups.set(review.pins.report.id, [...(groups.get(review.pins.report.id) ?? []), review]);
-  }
-  return [...groups.entries()].map(([id, reviews]) => ({
-    id,
-    automated: average(reviews.map((review) => review.automatedRankScore)),
-    human: average(reviews.map((review) => review.humanRankScore))
-  }));
-}
-
-function spearman(left: number[], right: number[]) {
-  if (left.length !== right.length || left.length < 3) return undefined;
-  const leftRanks = ranks(left);
-  const rightRanks = ranks(right);
-  const meanLeft = average(leftRanks);
-  const meanRight = average(rightRanks);
-  const numerator = leftRanks.reduce((total, value, index) =>
-    total + (value - meanLeft) * (rightRanks[index] - meanRight), 0);
-  const leftVariance = leftRanks.reduce((total, value) => total + (value - meanLeft) ** 2, 0);
-  const rightVariance = rightRanks.reduce((total, value) => total + (value - meanRight) ** 2, 0);
-  if (!leftVariance || !rightVariance) return undefined;
-  return round(numerator / Math.sqrt(leftVariance * rightVariance));
-}
-
-function ranks(values: number[]) {
-  const ordered = values.map((value, index) => ({ value, index }))
-    .sort((left, right) => left.value - right.value);
-  const result = Array<number>(values.length);
-  for (let start = 0; start < ordered.length;) {
-    let end = start + 1;
-    while (end < ordered.length && ordered[end].value === ordered[start].value) end += 1;
-    const rank = (start + 1 + end) / 2;
-    for (let index = start; index < end; index += 1) result[ordered[index].index] = rank;
-    start = end;
-  }
-  return result;
-}
-
-function average(values: number[]) {
-  return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
 function round(value: number) {

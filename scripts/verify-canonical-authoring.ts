@@ -23,14 +23,88 @@ const reviewRoutes = selectArtifactReviewRoutePaths(routes, requirements);
 assert.deepEqual(reviewRoutes, ["/", "/services", "/services/ants", "/contact"]);
 
 const ia = buildInformationArchitectureAdvisory({
-  routes: routes.map((item) => ({ path: item.path, title: item.title, html: item.bodyHtml })),
+  routes: routes.map((item) => ({ path: item.path, title: item.title, description: item.description, html: item.bodyHtml })),
   sourcePaths: ["/", "/services", "/services/ants", "/services/rodents", "/contact"]
 });
 assert.equal(ia.report.liveRouteCount, 6);
 assert.equal(ia.report.newRouteCount, 1);
 assert.deepEqual(ia.report.unreachableFromHome, ["/faq"]);
+assert.equal(ia.report.routeWordCounts.length, routes.length);
+assert.equal(ia.report.metadataCoverage.titledRoutes, routes.length);
+assert.equal(ia.report.metadataCoverage.describedRoutes, routes.length);
 assert(ia.findings.length <= 3);
 assert(ia.findings.every((finding) => finding.severity !== "error"));
+
+const extensionUtilityEvidence = buildInformationArchitectureAdvisory({
+  routes: ["/contact.html", "/image-credit.html", "/privacy-policy.php"].map((path) => ({
+    path,
+    title: path,
+    description: path,
+    html: "<main><h1>Utility</h1><p>Concise supported utility content.</p></main>"
+  })),
+  sourcePaths: ["/contact.html", "/image-credit.html", "/privacy-policy.php"]
+});
+assert.deepEqual(
+  extensionUtilityEvidence.report.suspectedThinRoutes,
+  [],
+  "Legacy-extension contact, legal, or image-credit utilities were incorrectly reported as thin commercial routes."
+);
+
+const wholeInventoryEvidence = buildInformationArchitectureAdvisory({
+  routes: ["/services/one", "/services/two", "/services/three"].map((path, index) => ({
+    path,
+    title: `Service ${index + 1}`,
+    description: `Distinct description ${index + 1}`,
+    html: `<main><img src="/_lodesta/assets/shared-photo"><p>${"concrete customer answer ".repeat(50)}${index === 1 ? " Source website" : ""}${index === 2 ? " 12:00 AM–11:59 PM" : ""}</p></main>`
+  })),
+  sourcePaths: ["/services/one", "/services/two", "/services/three"]
+});
+assert.equal(wholeInventoryEvidence.report.distinctMainImageCount, 1);
+assert.equal(wholeInventoryEvidence.report.repeatedOpeningImages[0]?.routes.length, 3);
+assert.deepEqual(wholeInventoryEvidence.report.internalArtifactRoutes, ["/services/two"]);
+assert.deepEqual(wholeInventoryEvidence.report.rawDataStringRoutes, ["/services/three"]);
+assert(wholeInventoryEvidence.findings.some((finding) => finding.id === "advisory.asset_reuse"));
+
+const sharedDetailStructure = (title: string, description: string, tone: string) => `<main class="${tone}-tone"><section class="${tone}-hero"><h1>${title}</h1><p>${description}</p></section><section class="${tone}-guide"><h2>Useful guidance</h2><p>${Array.from({ length: 36 }, (_, index) => `detailword${index}`).join(" ")}</p></section></main>`;
+const repeatedSectionWords = Array.from({ length: 36 }, (_, index) => `evidenceword${index}`).join(" ");
+const wholeRouteIntegrityEvidence = buildInformationArchitectureAdvisory({
+  routes: [
+    { path: "/services/bats", title: "Bat control", description: "Bat service", html: sharedDetailStructure("Bat control", "Guidance for bat activity around a building.", "bat") },
+    { path: "/services/birds", title: "Bird control", description: "Bird service", html: sharedDetailStructure("Bird control", "Guidance for nuisance birds around a building.", "bird") },
+    { path: "/services/rodents", title: "Rodent control", description: "Rodent service", html: sharedDetailStructure("Rodent control", "Guidance for rodent signs inside a building.", "rodent") },
+    {
+      path: "/about",
+      title: "About",
+      description: "About the business",
+      html: `<main><section><h2>About the work</h2><p>${repeatedSectionWords}</p></section><section><h2>About our work</h2><p>${repeatedSectionWords}</p></section></main>`
+    }
+  ],
+  sourcePaths: ["/services/bats", "/services/birds", "/services/rodents", "/about"]
+});
+assert.deepEqual(wholeRouteIntegrityEvidence.report.headingCoverage.missingH1Routes, ["/about"]);
+assert.deepEqual(
+  wholeRouteIntegrityEvidence.report.repeatedMainStructureGroups[0]?.routes,
+  ["/services/bats", "/services/birds", "/services/rodents"]
+);
+assert.equal(wholeRouteIntegrityEvidence.report.adjacentSectionRepetition[0]?.path, "/about");
+assert(wholeRouteIntegrityEvidence.findings.some((finding) =>
+  finding.id === "advisory.ia_structure"
+    && finding.message.includes("/about")
+    && finding.message.includes("near-duplicate")));
+assert(wholeRouteIntegrityEvidence.findings.some((finding) =>
+  finding.id === "advisory.ia_repetition"
+    && finding.message.includes("complete main-structure")));
+
+const substantiveCompactRoute = buildInformationArchitectureAdvisory({
+  routes: [{
+    path: "/service",
+    title: "Focused service",
+    description: "A concise but substantive customer answer",
+    html: `<main><h1>Focused service</h1><section><h2>What to notice</h2><p>${Array.from({ length: 94 }, (_, index) => `useful${index}`).join(" ")}</p></section></main>`
+  }],
+  sourcePaths: ["/service"]
+});
+assert.deepEqual(substantiveCompactRoute.report.suspectedThinRoutes, [], "The IA advisory must not induce word-count padding on a substantive compact route.");
 
 const [workflow, manager, managerRuntime, authoringProfile, skills, worker, v4Sdk, canaryRoute] = await Promise.all([
   readFile("packages/site-platform/workflow.ts", "utf8"),
@@ -48,8 +122,10 @@ assert.doesNotMatch(workflow, /architectureInventory:/);
 assert.match(skills, /Preserve every existing workspace source file unconditionally/);
 assert.match(skills, /const knowledgeByKind =/);
 assert.match(skills, /blank initial build.*NavigationDisclosure behavior=/);
-assert.match(skills, /three-bar closed trigger.*distinct close state/i);
+assert.match(skills, /three-bar closed trigger.*unmistakable close state/i);
 assert.match(skills, /never collapse multiple bars onto one coordinate/i);
+assert.match(skills, /Every live route must have exactly one clear H1.*near-duplicated section must be removed/i);
+assert.match(skills, /target-size finding on navigation, contact, call, text, email, form.*unresolved essential-control defect/i);
 assert.match(skills, /Never apply blank-build design defaults/);
 assert.match(skills, /websiteAuthoringSkillIdentityFor\(kind/);
 assert.match(workflow, /Older authoring format—full rebuild required/);
@@ -74,11 +150,15 @@ assert(managerRuntime.includes("const inspectionToolTimeoutMs = 8 * 60_000")
   && managerRuntime.includes("browserNavigationCaptureMs")
   && managerRuntime.includes("contactSheetGenerationMs")
   && managerRuntime.includes("persistenceMs"), "Inspection must retain mechanical feedback and surface the eight-minute ceiling as a recoverable tool failure with phase telemetry.");
-assert(workflow.includes("preferredRouteLimit: 4")
+assert.match(managerRuntime, /every live route needs exactly one H1, accidental duplicated sections must be removed/i);
+assert.match(managerRuntime, /target-size finding on navigation, contact, call, text, email, form.*unresolved essential-control defect/i);
+assert(workflow.includes("preferredRouteLimit: 5")
+  && workflow.includes("defaultRoutes: input.releasePlan?.visualReviewRoutePaths")
+  && workflow.includes("createArtifactRouteFamilyContactSheets")
   && workflow.includes("browserRoutePaths: input.releasePlan?.browserRoutePaths")
   && !workflow.includes("all-representative-routes")
   && !authoringProfile.includes("all-representative-routes"),
-"The authoring loop must retain its all-route mechanical pass while limiting the separate model-facing visual pass to four representative routes.");
+"The authoring loop must retain its all-route mechanical pass while splitting five architecture-selected review routes into readable family sheets.");
 assert.match(worker, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*unsupported_authoring_runtime_series/);
 assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-canonical\.tsx"/);
 assert.doesNotMatch(worker, /"#lodesta-sdk"[\s\S]{0,300}sdk-native\.tsx/);

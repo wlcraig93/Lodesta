@@ -68,7 +68,8 @@ assert.deepEqual(
     "202608050003_persist_google_place_candidate_data.sql",
     "202608080001_shared_retained_source_mirrors.sql",
     "202608140001_immutable_logo_preparation_revisions.sql",
-    "202608140002_canonical_source_logo_recapture.sql"
+    "202608140002_canonical_source_logo_recapture.sql",
+    "202608230001_canonical_site_quality.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );
@@ -98,6 +99,7 @@ const modelBakeoff = await readFile(`${migrationDirectory}/${migrations[20]}`, "
 const websiteSetupManagedModel = await readFile(`${migrationDirectory}/202607260003_website_setup_managed_model.sql`, "utf8");
 const prospectReportAccessPolicy = await readFile(`${migrationDirectory}/202607260004_prospect_report_access_policy.sql`, "utf8");
 const websiteHealthReportV2 = await readFile(`${migrationDirectory}/202607270001_website_health_report_v2.sql`, "utf8");
+const canonicalSiteQuality = await readFile(`${migrationDirectory}/202608230001_canonical_site_quality.sql`, "utf8");
 const generationExperiments = await readFile(`${migrationDirectory}/202607280001_generation_experiments.sql`, "utf8");
 const normalizedProspectResearch = await readFile(`${migrationDirectory}/202607290001_normalized_prospect_research.sql`, "utf8");
 const simplifiedSiteAuthoring = await readFile(`${migrationDirectory}/202607300001_simplified_site_authoring.sql`, "utf8");
@@ -134,6 +136,14 @@ assert(
     && businessLocationsPrimaryContacts.includes("as outreach_email")
     && businessLocationsPrimaryContacts.includes("as outreach_phone"),
   "Prospects must use the canonical business, locations, named contacts, and outreach projection."
+);
+assert(
+  canonicalSiteQuality.includes(`assessment_json @> '{"schemaVersion": 1}'::jsonb`)
+    && canonicalSiteQuality.includes(`assessment_json @> '{"schemaVersion": 2, "kind": "website-health-report"}'::jsonb`)
+    && canonicalSiteQuality.includes(`assessment_json @> '{"schemaVersion": 3, "kind": "website-health-report"}'::jsonb`)
+    && !/\bdelete\s+from\s+public\.website_assessments\b/i.test(canonicalSiteQuality)
+    && !/\bupdate\s+public\.website_assessments\b/i.test(canonicalSiteQuality),
+  "Canonical Site Quality must preserve retained assessment payloads and admit only the current report kind."
 );
 assert(
   contactIdentityByBusinessName.includes("create unique index prospect_contacts_business_name_idx")

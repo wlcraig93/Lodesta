@@ -242,7 +242,10 @@ async function runArtifactBrowserGateOnce(input: {
         if (viewport.name === "mobile" && !isAuthorReview) {
           routeFindings.push(...await inspectMobileCanonicalFunctionalLinks(page, input.buildInput, route.path));
         }
-        if (input.captureMode === "review" && viewport.name === "mobile") {
+        // Retain one opened-state frame in final artifacts. Navigation
+        // presentation cannot be assessed honestly from the closed header,
+        // while capturing every route would add redundant evidence and cost.
+        if (viewport.name === "mobile" && (isAuthorReview || route.path === "/")) {
           const openNavigation = await captureOpenNavigation(page);
           if (openNavigation) {
             captures.push({
@@ -251,8 +254,17 @@ async function runArtifactBrowserGateOnce(input: {
               viewport: viewport.name,
               stage: "settled",
               frame: "navigation",
-              bytes: openNavigation
+              bytes: openNavigation.bytes
             });
+            if (openNavigation.callActionLabelSpacingExamples.length > 0) {
+              routeFindings.push(finding(
+                "render.call_action_label_spacing",
+                `${openNavigation.callActionLabelSpacingExamples.length} visible call action(s) omit whitespace between “Call” and the phone number in the opened mobile navigation. Use a human-readable label such as “Call (804) 914-8120.” Examples: ${openNavigation.callActionLabelSpacingExamples.join("; ")}.`,
+                route.path,
+                "render",
+                "warning"
+              ));
+            }
           }
         }
         if (viewport.name === "mobile" && navigationReachability.brokenToggles.length > 0) {
@@ -488,6 +500,15 @@ async function runArtifactBrowserGateOnce(input: {
             "render"
           ));
         }
+        if (metrics.duplicateHeaderIdentityCount > 0) {
+          routeFindings.push(finding(
+            "identity.duplicate_header_identity",
+            `${metrics.duplicateHeaderIdentityCount} header identity group(s) render the same business name more than once at ${viewport.name}. Keep one visible brand identity per header state. Examples: ${metrics.duplicateHeaderIdentityExamples.join("; ")}.`,
+            route.path,
+            "render",
+            "error"
+          ));
+        }
         if (metrics.internalProvenanceCopyCount > 0) {
           routeFindings.push(finding(
             "render.internal_provenance_copy",
@@ -586,13 +607,22 @@ async function runArtifactBrowserGateOnce(input: {
         }
         if (viewport.name === "mobile" && metrics.fragmentedHeadingCount > 0) {
           routeFindings.push(finding(
-            "render.mobile_heading_measure",
+            "functional.mobile_heading_measure",
             `${metrics.fragmentedHeadingCount} heading(s) collapse into an unreadably narrow phone column. Stack or widen the responsive composition so meaningful words—not one- or two-character fragments—form each line. Examples: ${metrics.fragmentedHeadingExamples.join("; ")}.`,
             route.path,
             "render",
             // This metric is deliberately limited to severe one- or two-character
             // fragmentation. At that point customer content is functionally
             // unreadable, rather than merely an advisory typography preference.
+            "error"
+          ));
+        }
+        if (metrics.fragmentedBodyTextCount > 0) {
+          routeFindings.push(finding(
+            "functional.text_measure",
+            `${metrics.fragmentedBodyTextCount} body-text block(s) collapse into an unreadably narrow column at ${viewport.name}. Stack, widen, or correct the grid placement so words remain readable. Examples: ${metrics.fragmentedBodyTextExamples.join("; ")}.`,
+            route.path,
+            "render",
             "error"
           ));
         }
@@ -635,7 +665,7 @@ async function runArtifactBrowserGateOnce(input: {
         if (metrics.syntheticIdentityDeviceCount > 0) {
           routeFindings.push(finding(
             "render.synthetic_identity_device",
-            `${metrics.syntheticIdentityDeviceCount} CSS badge, seal, stamp, monogram, slogan-poster, or empty marker device(s) may compete with the official identity or add evidence-free visual filler at ${viewport.name}. Use the supplied official logo as the sole identity mark and express the message through ordinary section typography or supported content. Examples: ${metrics.syntheticIdentityDeviceExamples.join("; ")}.`,
+            `${metrics.syntheticIdentityDeviceCount} CSS badge, seal, stamp, monogram, slogan-poster, or empty marker device(s) may compete with the official identity or add evidence-free visual filler at ${viewport.name}. Use a credible supplied official logo when available; otherwise present the bound business name with ordinary typography and no invented mark. Express other messages through supported section content. Examples: ${metrics.syntheticIdentityDeviceExamples.join("; ")}.`,
             route.path,
             "render",
             "warning"
@@ -695,6 +725,15 @@ async function runArtifactBrowserGateOnce(input: {
             "warning"
           ));
         }
+        if (metrics.noninteractiveControlCount > 0) {
+          routeFindings.push(finding(
+            "functional.noninteractive_control",
+            `${metrics.noninteractiveControlCount} visible field-like search or filter control(s) are not interactive at ${viewport.name}. Use a real supported control or style the approved destination itself as the action. Examples: ${metrics.noninteractiveControlExamples.join("; ")}.`,
+            route.path,
+            "render",
+            "error"
+          ));
+        }
         if (metrics.repeatedSourceImageCount > 0) {
           routeFindings.push(finding(
             "render.repeated_source_image",
@@ -704,14 +743,18 @@ async function runArtifactBrowserGateOnce(input: {
             "warning"
           ));
         }
-        const primaryGeometryFailure = route.path === "/" && (
+        const homepagePrimaryGeometryFailure = route.path === "/" && (
           !metrics.primaryHeadingAboveFold
           || !metrics.primaryActionAboveFold
           || !metrics.primaryHeadingBeforeAction
         );
+        const responsiveActionBeforeHeading = viewport.name !== "desktop"
+          && metrics.primaryActionAboveFold
+          && !metrics.primaryHeadingBeforeAction;
+        const primaryGeometryFailure = homepagePrimaryGeometryFailure || responsiveActionBeforeHeading;
         routeFindings.push(finding(
           "render.primary_geometry",
-          `Primary heading above fold: ${metrics.primaryHeadingAboveFold}; main primary action above fold: ${metrics.primaryActionAboveFold}; heading precedes main action: ${metrics.primaryHeadingBeforeAction}; viewport: ${viewport.name}.${primaryGeometryFailure ? " Keep the homepage value proposition and its main conversion visible in the first natural viewport; inspect header and navigation layout before changing hero content." : ""}`,
+          `Primary heading above fold: ${metrics.primaryHeadingAboveFold}; main primary action above fold: ${metrics.primaryActionAboveFold}; heading precedes main action: ${metrics.primaryHeadingBeforeAction}; viewport: ${viewport.name}.${homepagePrimaryGeometryFailure ? " Keep the homepage value proposition and its main conversion visible in the first natural viewport; inspect header and navigation layout before changing hero content." : ""}${responsiveActionBeforeHeading ? " Keep the page H1 and concise context before its primary conversion on smaller viewports; do not reorder a form or action above the page purpose." : ""}`,
           route.path,
           "render",
           primaryGeometryFailure ? "warning" : "info"
@@ -767,6 +810,15 @@ async function runArtifactBrowserGateOnce(input: {
             "warning"
           ));
         }
+        if (metrics.prominentRasterUpscaleExamples.length > 0) {
+          routeFindings.push(finding(
+            "render.raster_image_upscale",
+            `${metrics.prominentRasterUpscaleCount} prominent raster image(s) render materially larger than their intrinsic pixels at ${viewport.name}. Pull a higher-resolution retained source or use a deliberate type-led composition instead of enlarging a thumbnail. Examples: ${metrics.prominentRasterUpscaleExamples.join("; ")}.`,
+            route.path,
+            "asset",
+            "warning"
+          ));
+        }
         if (metrics.filteredRasterLogoExamples.length > 0) {
           routeFindings.push(finding(
             "render.raster_logo_filter",
@@ -811,7 +863,7 @@ async function runArtifactBrowserGateOnce(input: {
         ) {
           routeFindings.push(finding(
             "render.primary_logo_missing",
-            `The retained business record supplies ${activeLogoRevisionIds.size} active official logo revision(s), but the homepage does not render any matching visible asset. Use an exact supplied logo as the primary identity instead of replacing it with text, a monogram, or CSS artwork.`,
+            `The retained business record supplies ${activeLogoRevisionIds.size} active logo-classified asset revision(s), but the homepage does not render any matching visible asset. Judge the asset by its pixels: use an exact credible business logo as the primary identity, but do not promote an association, certification, partner, or co-branded badge into the brand position merely because its metadata says logo. When no credible business logo exists, use a well-typeset canonical business name rather than inventing a mark.`,
             route.path,
             "render",
             "warning"
@@ -955,6 +1007,13 @@ async function runArtifactBrowserGateOnce(input: {
           }
         }
         if (!focusedSelection) {
+          // Functional navigation probes may restore keyboard focus to a
+          // trigger. Retain that state only in the explicit navigation frame;
+          // ordinary route frames represent a natural first load.
+          await page.evaluate(() => {
+            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+          });
+          await page.waitForTimeout(50);
           const retainExtendedEvidence = input.captureMode === "review"
             || routeFindings.some(isTechnicalReleaseBlocker);
           const frames = !retainExtendedEvidence || viewport.name === "tablet"
@@ -1151,16 +1210,33 @@ async function captureOpenNavigation(page: Page) {
       await page.evaluate(() => new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
       }));
+      const callActionLabelSpacingExamples = await page.evaluate(() => [...document.querySelectorAll("a[href^='tel:' i],button")]
+        .filter((element) => {
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          return style.display !== "none"
+            && style.visibility !== "hidden"
+            && Number(style.opacity) > 0
+            && rect.width > 0
+            && rect.height > 0
+            && rect.bottom > 0
+            && rect.top < innerHeight;
+        })
+        .map((element) => (element instanceof HTMLElement ? element.innerText : element.textContent ?? "").trim())
+        .filter((label) => /^call(?=[(\d+])/i.test(label))
+        .slice(0, 3));
       const bytes = await page.screenshot({ fullPage: false, type: "png", animations: "disabled" });
       await closeBrowserNavigationTrigger(page, toggle);
       // Escape deliberately restores keyboard focus to the trigger. That is
       // correct runtime behavior, but leaving the synthetic review focus in
       // place contaminates later route screenshots with a focus-visible ring
       // that a natural first-load visitor does not see.
-      await toggle.evaluate((trigger) => trigger instanceof HTMLElement && trigger.blur()).catch(() => undefined);
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      }).catch(() => undefined);
       await page.waitForTimeout(150);
       await settleScrollPosition(page, 0);
-      return bytes;
+      return { bytes, callActionLabelSpacingExamples };
     }
   }
   return undefined;
@@ -1486,6 +1562,8 @@ type BrowserPageMetrics = {
   adjacentDuplicateTextExamples: string[];
   adjacentDuplicateContentBlockCount: number;
   adjacentDuplicateContentBlockExamples: string[];
+  duplicateHeaderIdentityCount: number;
+  duplicateHeaderIdentityExamples: string[];
   internalProvenanceCopyCount: number;
   internalProvenanceCopyExamples: string[];
   vagueProcessCopyCount: number;
@@ -1512,6 +1590,8 @@ type BrowserPageMetrics = {
   longMobileCardWallExamples: string[];
   fragmentedHeadingCount: number;
   fragmentedHeadingExamples: string[];
+  fragmentedBodyTextCount: number;
+  fragmentedBodyTextExamples: string[];
   mediaContainerOverflowCount: number;
   mediaContainerOverflowExamples: string[];
   headerBrandCollisionCount: number;
@@ -1534,6 +1614,8 @@ type BrowserPageMetrics = {
   callActionLabelSpacingExamples: string[];
   falseAffordanceCount: number;
   falseAffordanceExamples: string[];
+  noninteractiveControlCount: number;
+  noninteractiveControlExamples: string[];
   repeatedSourceImageCount: number;
   repeatedSourceImageExamples: string[];
   primaryHeadingAboveFold: boolean;
@@ -1541,6 +1623,8 @@ type BrowserPageMetrics = {
   primaryHeadingBeforeAction: boolean;
   imageAltQualityCount: number;
   imageAltQualityExamples: string[];
+  prominentRasterUpscaleCount: number;
+  prominentRasterUpscaleExamples: string[];
   filteredRasterLogoCount: number;
   filteredRasterLogoExamples: string[];
   oversizedFooterRasterLogoCount: number;
@@ -1785,12 +1869,12 @@ const browserInspectionSource = String.raw`(() => {
       if (element.closest('[aria-hidden="true"],script,style,svg')) return false;
       const text = (element.textContent ?? "").replace(/\s+/g, " ").trim();
       if (text.length < 3 || text.length > 120) return false;
-      if (!/(?:^|\s)([a-z][a-z'-]*)(?:[\s,.:;!?—–-]+)\1(?:$|\s|[,.:;!?—–-])/i.test(text)) return false;
+      if (!/(?:^|\s)([a-z][a-z'-]*)(?:[\s:;—–-]+)\1(?:$|\s|[,.:;!?—–-])/i.test(text)) return false;
       return ![...element.children].some((child) => {
         const childText = (child.textContent ?? "").replace(/\s+/g, " ").trim();
         return childText.length >= 3
           && childText.length <= 120
-          && /(?:^|\s)([a-z][a-z'-]*)(?:[\s,.:;!?—–-]+)\1(?:$|\s|[,.:;!?—–-])/i.test(childText);
+          && /(?:^|\s)([a-z][a-z'-]*)(?:[\s:;—–-]+)\1(?:$|\s|[,.:;!?—–-])/i.test(childText);
       });
     });
     const adjacentDuplicateContentBlocks = elements.flatMap((element) => {
@@ -1805,6 +1889,20 @@ const browserInspectionSource = String.raw`(() => {
       const siblingRect = sibling.getBoundingClientRect();
       if (rect.width < 200 || siblingRect.width < 200 || rect.height < 80 || siblingRect.height < 80) return [];
       return [{ element, sibling, text }];
+    });
+    const duplicateHeaderIdentities = [...document.querySelectorAll("header")].flatMap((header) => {
+      if (!colorTools.visible(header)) return [];
+      const groups = new Map();
+      for (const identity of header.querySelectorAll("[data-lodesta-business-name]")) {
+        if (!colorTools.visible(identity)) continue;
+        const text = colorTools.textFor(identity).replace(/\s+/g, " ").trim();
+        const key = text.toLocaleLowerCase();
+        if (!key) continue;
+        groups.set(key, [...(groups.get(key) ?? []), identity]);
+      }
+      return [...groups.values()].flatMap((identities) => identities.length > 1
+        ? [{ header, identities, text: colorTools.textFor(identities[0]).replace(/\s+/g, " ").trim() }]
+        : []);
     });
     // Provenance language inside a closed disclosure or responsive panel is still
     // customer-facing once the control is opened. Inspect authored text nodes in
@@ -2402,6 +2500,18 @@ const browserInspectionSource = String.raw`(() => {
         || /\bnear me\b/i.test(alt)
         || repeated;
     });
+    const prominentRasterUpscale = boundImages.flatMap((image) => {
+      if (!colorTools.visible(image) || !image.complete || image.naturalWidth < 2 || image.naturalHeight < 2) return [];
+      if (isCanonicalLogoImage(image)) return [];
+      const source = image.currentSrc || image.src;
+      if (/\.svg(?:[?#]|$)|image\/svg\+xml/i.test(source)) return [];
+      const rect = image.getBoundingClientRect();
+      if (rect.width < 240 && rect.height < 180) return [];
+      const widthScale = rect.width / image.naturalWidth;
+      const heightScale = rect.height / image.naturalHeight;
+      if (Math.max(widthScale, heightScale) < 1.5) return [];
+      return [{ image, width: rect.width, height: rect.height, widthScale, heightScale }];
+    });
     const filteredRasterLogos = [...document.images].flatMap((image) => {
       if (!colorTools.visible(image)) return [];
       const identityWrapper = image.closest("[class*='brand'],[class*='logo']");
@@ -2737,6 +2847,27 @@ const browserInspectionSource = String.raw`(() => {
       if (peers.length < 3) return [];
       return [{ element, owner, token, peerCount: peers.length }];
     });
+    const noninteractiveControls = elements.flatMap((element) => {
+      if (!colorTools.visible(element)) return [];
+      if (element.closest("a[href],button,[role=button],[role=textbox],summary,input,select,textarea")) return [];
+      if (element.querySelector("a[href],button,[role=button],[role=textbox],summary,input,select,textarea")) return [];
+      const selectorLanguage = element.id + " " + (element.getAttribute("class") ?? "");
+      if (!/\b(?:search|filter|input|field|picker|control)\b/i.test(selectorLanguage)) return [];
+      const text = colorTools.textFor(element).replace(/\s+/g, " ").trim();
+      if (text.length < 4 || text.length > 100 || !/^(?:search|filter|select|choose|enter|type|find)\b/i.test(text)) return [];
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 160 || rect.height < 36 || rect.height > 120) return [];
+      const style = getComputedStyle(element);
+      const borderWidth = Math.max(
+        Number.parseFloat(style.borderTopWidth) || 0,
+        Number.parseFloat(style.borderRightWidth) || 0,
+        Number.parseFloat(style.borderBottomWidth) || 0,
+        Number.parseFloat(style.borderLeftWidth) || 0
+      );
+      const background = colorTools.parse(style.backgroundColor);
+      if (borderWidth < 1 && (!background.valid || background.channels[3] <= .04)) return [];
+      return [{ element, text }];
+    });
     const misalignedMobileNavigationToggles = innerWidth <= 640
       ? [...document.querySelectorAll("header [data-lodesta-menu-toggle],header button[aria-controls]")]
         .filter((control) => colorTools.visible(control))
@@ -3000,6 +3131,26 @@ const browserInspectionSource = String.raw`(() => {
       return [colorTools.selectorFor(container) + " contains " + cardLike.length
         + " full-width descriptive cards across " + Math.round(verticalExtent) + "px"];
     }) : [];
+    const renderedLineFragments = (element) => {
+      const fragments = new Map();
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const value = node.textContent ?? "";
+        for (let index = 0; index < value.length; index += 1) {
+          const range = document.createRange();
+          range.setStart(node, index);
+          range.setEnd(node, index + 1);
+          const rect = range.getClientRects()[0];
+          if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+          const lineKey = Math.round(rect.top / 2) * 2;
+          fragments.set(lineKey, (fragments.get(lineKey) ?? "") + value[index]);
+        }
+      }
+      return [...fragments.entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([, value]) => value.replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+    };
     const fragmentedHeadings = innerWidth <= 640 ? [...document.querySelectorAll("h1,h2,h3,h4")].flatMap((heading) => {
       if (!colorTools.visible(heading) || heading.closest("header,footer,nav")) return [];
       const text = colorTools.textFor(heading);
@@ -3009,15 +3160,31 @@ const browserInspectionSource = String.raw`(() => {
       const fontSize = Number.parseFloat(style.fontSize) || 16;
       const lineHeight = Number.parseFloat(style.lineHeight) || fontSize * 1.15;
       const lines = Math.max(1, Math.round(rect.height / lineHeight));
-      if (
-        text.length < 20
-        || lines < 5
-        || rect.width > Math.min(180, innerWidth * 0.5)
-        || text.length / lines >= 8
-      ) return [];
+      if (text.length < 20 || lines < 5 || rect.width > Math.min(180, innerWidth * 0.5)) return [];
+      const lineFragments = renderedLineFragments(heading);
+      const shortFragments = lineFragments.filter((line) => line.replace(/\s/g, "").length <= 3);
+      if (lineFragments.length < 5 || shortFragments.length < Math.max(3, Math.ceil(lineFragments.length * 0.4))) return [];
       return [colorTools.selectorFor(heading) + " \"" + text.slice(0, 80) + "\" uses "
-        + Math.round(rect.width) + "px across " + lines + " lines"];
+        + Math.round(rect.width) + "px across " + lineFragments.length + " lines; short fragments: "
+        + shortFragments.slice(0, 5).map((line) => "\"" + line + "\"").join(", ")];
     }) : [];
+    const fragmentedBodyText = [...document.querySelectorAll("main p,main address,main li,main dd,main blockquote")].flatMap((element) => {
+      if (!colorTools.visible(element) || element.closest("header,footer,nav")) return [];
+      const text = colorTools.textFor(element).replace(/\s+/g, " ").trim();
+      if (text.length < 20) return [];
+      const style = getComputedStyle(element);
+      if (!style.writingMode.startsWith("horizontal")) return [];
+      const lineFragments = renderedLineFragments(element);
+      const shortFragments = lineFragments.filter((line) => line.replace(/\s/g, "").length <= 4);
+      const singleWordFragments = lineFragments.filter((line) => line.split(/\s+/).filter(Boolean).length <= 1);
+      const characterFragmentation = shortFragments.length >= Math.max(4, Math.ceil(lineFragments.length * 0.55));
+      const wordFragmentation = singleWordFragments.length >= Math.max(5, Math.ceil(lineFragments.length * 0.7));
+      if (lineFragments.length < 6 || (!characterFragmentation && !wordFragmentation)) return [];
+      const rect = element.getBoundingClientRect();
+      return [colorTools.selectorFor(element) + " \"" + text.slice(0, 80) + "\" uses "
+        + Math.round(rect.width) + "px across " + lineFragments.length + " lines; one-word fragments: "
+        + singleWordFragments.slice(0, 5).map((line) => "\"" + line + "\"").join(", ")];
+    });
     const mediaContainerOverflows = [...document.querySelectorAll("img,video")].flatMap((media) => {
       if (!colorTools.visible(media)) return [];
       const mediaStyle = getComputedStyle(media);
@@ -3081,7 +3248,7 @@ const browserInspectionSource = String.raw`(() => {
           .map((node) => node.textContent ?? "")
           .join(" ")
           .trim();
-        return /^[A-Z]{1,5}$/.test(ownText);
+        return /^(?=[A-Z0-9]{1,5}$)(?=.*[A-Z])[A-Z0-9]+$/.test(ownText);
       });
       const numericToken = tokenCandidates.find((candidate) => {
         const ownText = [...candidate.childNodes]
@@ -3136,6 +3303,8 @@ const browserInspectionSource = String.raw`(() => {
         Number.parseFloat(style.borderLeftWidth) || 0
       );
       const radius = Number.parseFloat(style.borderRadius) || 0;
+      const filledSurface = style.backgroundImage !== "none"
+        || !/^rgba?\(0(?:,\s*0){2}(?:,\s*0)?\)$/.test(style.backgroundColor.replace(/\s+/g, ""));
       const substantialTokenDevice = Boolean(token) && rect.width >= 64 && rect.height >= 64;
       const largeStandaloneToken = Boolean(token) && fontSize >= 48 && rect.width >= 40 && rect.height >= 40;
       const numberedSloganPoster = visualPosterHint
@@ -3160,6 +3329,14 @@ const browserInspectionSource = String.raw`(() => {
         && rect.width >= 72
         && rect.height >= 44
         && (borderWidth >= 1 || style.transform !== "none");
+      const compactTextMonogram = explicitIdentityHint
+        && Boolean(token)
+        && text.length <= 5
+        && rect.width >= 24
+        && rect.height >= 24
+        && rect.width <= 96
+        && rect.height <= 96
+        && (borderWidth >= 1 || radius >= 12 || style.transform !== "none" || filledSurface);
       const largeStandaloneSymbol = Boolean(oversizedSymbolToken)
         && rect.width >= 40
         && rect.height >= 40;
@@ -3169,13 +3346,14 @@ const browserInspectionSource = String.raw`(() => {
         && rect.height >= 80
         && (borderWidth >= 1 || radius >= 12 || style.transform !== "none")
         && (hasStyledPseudo || element.children.length > 0);
-      if (!token && !compactSlogan && !largeSloganMarker && !emptyStyledMarker && !numberedSloganPoster && !framedLogoPoster && !posterSizedWordmark && !compactStampedSlogan && !largeStandaloneSymbol) return false;
+      if (!token && !compactSlogan && !largeSloganMarker && !emptyStyledMarker && !numberedSloganPoster && !framedLogoPoster && !posterSizedWordmark && !compactStampedSlogan && !compactTextMonogram && !largeStandaloneSymbol) return false;
       if (largeStandaloneToken) return true;
       if (largeStandaloneSymbol) return true;
       if (numberedSloganPoster) return true;
       if (framedLogoPoster) return true;
       if (posterSizedWordmark) return true;
       if (compactStampedSlogan) return true;
+      if (compactTextMonogram) return true;
       return (borderWidth >= 1 || radius >= 12 || style.transform !== "none")
         && (compactSlogan || largeSloganMarker || substantialTokenDevice || emptyStyledMarker);
     });
@@ -3506,6 +3684,9 @@ const browserInspectionSource = String.raw`(() => {
       adjacentDuplicateContentBlockCount: adjacentDuplicateContentBlocks.length,
       adjacentDuplicateContentBlockExamples: adjacentDuplicateContentBlocks.slice(0, 3).map(({ element, sibling, text }) =>
         colorTools.selectorFor(element) + " + " + colorTools.selectorFor(sibling) + ' "' + text.slice(0, 140) + '"'),
+      duplicateHeaderIdentityCount: duplicateHeaderIdentities.length,
+      duplicateHeaderIdentityExamples: duplicateHeaderIdentities.slice(0, 3).map(({ header, identities, text }) =>
+        colorTools.selectorFor(header) + ' "' + text.slice(0, 80) + '" ×' + identities.length),
       internalProvenanceCopyCount: internalProvenanceCopy.length,
       internalProvenanceCopyExamples: internalProvenanceCopy.slice(0, 3).map((element) =>
         colorTools.selectorFor(element) + ' "' + (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 140) + '"'),
@@ -3540,6 +3721,8 @@ const browserInspectionSource = String.raw`(() => {
       longMobileCardWallExamples: [...new Set(longMobileCardWalls)].slice(0, 3),
       fragmentedHeadingCount: [...new Set(fragmentedHeadings)].length,
       fragmentedHeadingExamples: [...new Set(fragmentedHeadings)].slice(0, 3),
+      fragmentedBodyTextCount: [...new Set(fragmentedBodyText)].length,
+      fragmentedBodyTextExamples: [...new Set(fragmentedBodyText)].slice(0, 3),
       mediaContainerOverflowCount: [...new Set(mediaContainerOverflows)].length,
       mediaContainerOverflowExamples: [...new Set(mediaContainerOverflows)].slice(0, 3),
       headerBrandCollisionCount: [...new Set(headerBrandCollisions)].length,
@@ -3573,6 +3756,10 @@ const browserInspectionSource = String.raw`(() => {
       falseAffordanceExamples: falseAffordances.slice(0, 3).map((item) =>
         colorTools.selectorFor(item.owner) + " ends with " + JSON.stringify(item.token)
         + " across " + item.peerCount + " repeated peers but contains no interactive control"),
+      noninteractiveControlCount: noninteractiveControls.length,
+      noninteractiveControlExamples: noninteractiveControls.slice(0, 3).map((item) =>
+        colorTools.selectorFor(item.element) + " " + JSON.stringify(item.text.slice(0, 80))
+        + " renders as a field-like control but has no interactive semantics or destination"),
       repeatedSourceImageCount: repeatedSourceImages.length,
       repeatedSourceImageExamples: repeatedSourceImages.slice(0, 3),
       primaryHeadingAboveFold: Boolean(primaryHeadingRect && primaryHeadingRect.top < innerHeight),
@@ -3581,6 +3768,12 @@ const browserInspectionSource = String.raw`(() => {
       imageAltQualityCount: imageAltQuality.length,
       imageAltQualityExamples: imageAltQuality.slice(0, 3).map((image) =>
         colorTools.selectorFor(image) + " alt=" + JSON.stringify((image.getAttribute("alt") ?? "").slice(0, 100))),
+      prominentRasterUpscaleCount: prominentRasterUpscale.length,
+      prominentRasterUpscaleExamples: prominentRasterUpscale.slice(0, 3).map((item) =>
+        colorTools.selectorFor(item.image)
+        + " renders at " + Math.round(item.width) + "×" + Math.round(item.height) + "px"
+        + " from " + item.image.naturalWidth + "×" + item.image.naturalHeight + "px"
+        + " intrinsic pixels (max scale " + (Math.round(Math.max(item.widthScale, item.heightScale) * 10) / 10) + "×)"),
       filteredRasterLogoCount: filteredRasterLogos.length,
       filteredRasterLogoExamples: filteredRasterLogos.slice(0, 3).map((item) =>
         colorTools.selectorFor(item.image)
@@ -3749,7 +3942,7 @@ async function inspectAutomatedAccessibility(page: Page, context: AccessibilityR
       `${violation.help}: ${violation.nodes.length} node(s). Examples: ${violation.nodes.slice(0, 3).map((node) => node.target.join(" ")).join("; ")}.`,
       context.route,
       "accessibility",
-      "warning"
+      "error"
     ));
   }
   return findings;

@@ -1,5 +1,6 @@
 import { sha256, stableJson } from "@/packages/business-data";
 import {
+  isStaticSiteRoutePath,
   siteArchitecturePlanSchema,
   type SiteArchitecturePlan,
   type SiteArchitectureRoute,
@@ -8,6 +9,7 @@ import {
 import type { WorkspaceSourceFile } from "./contracts";
 import { sourceWorkspaceContentFilePaths } from "./source-workspace";
 import { normalizeSiteRedirectPath } from "@/packages/platform-operations/contracts";
+import { isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
 
 export const siteArchitectureModelId = "gpt-5.6-luna" as const;
 
@@ -24,6 +26,20 @@ export type SiteArchitectureInventoryEntry = {
   linkProminence: number;
   internalLinkCount: number;
   exactDuplicateOf: string | null;
+  evidencePreview: string | null;
+};
+
+export type SiteArchitectureAuthorityContext = {
+  businessName: string;
+  description: string | null;
+  locations: Array<{
+    label: string;
+    city: string | null;
+    region: string | null;
+    country: string;
+  }>;
+  serviceAreas: string[];
+  offerings: string[];
 };
 
 export type RawSiteArchitecturePlan = {
@@ -50,24 +66,42 @@ Your output must also be mechanically exhaustive:
 - If a disposition is retired, targetPath must be null.
 - Never declare a redirected, canonical-duplicate, or retired source path as a live route.
 - Never emit the same live route path twice. Lodesta derives each route's source-content mapping from disposition targets, so do not repeat that mapping in routes.
-- Use one route convention: root is "/"; every other live route starts with "/", contains no query string, and has no trailing slash.
+- Use one route convention: root is "/"; every other live route uses lowercase slug segments, contains no query string, and has no trailing slash. A final legacy .html, .htm, .php, .asp, or .aspx extension is allowed when preserving that source URL.
 - A preserved source path must remain the same route.
 - Preserve distinct, useful, indexable articles and guides as explicit routes. Do not replace a large editorial corpus with generic placeholders.
 
 Improve the architecture rather than blindly mirror it. Distinguish core offerings from location and search-intent labels. Do not create a service-by-location Cartesian product. Keep primary navigation concise even if the crawlable route surface is large. There is no numeric page target.
 
-For every live route, provide one concise purpose sentence describing the distinct customer need that page owns. This is technical content responsibility, not draft copy or a keyword restatement.
+The supplied owner authority defines the business this site is allowed to represent. A crawl may include a parent brand, franchise network, sibling offices, marketplace, or other locations outside that authority. Treat those pages as migration evidence, not proof that this site owns those businesses or locations. Preserve location-specific routes only when they are represented by the supplied locations or service areas; otherwise redirect useful context to an in-scope hub or retire it.
+
+For every live route, provide one concise purpose sentence describing the distinct customer need that page owns. Use natural, concrete verbs and the actual customer condition or choice; avoid abstract placeholders such as service question, condition question, journey, or next step. This is technical content responsibility, not draft copy or a keyword restatement.
 
 This is architecture only. Do not write page copy, HTML, CSS, or visual design. Keep records terse so there is ample output capacity to enumerate the entire site.`;
 
 /** Operator-only architecture treatment: keep the migration ledger exhaustive while making the live site intentionally useful. */
 export const siteArchitectureCommercialCoreSystemPrompt = `You are Lodesta's information architect for a high-quality redesign of an existing local-business website.
 
-The inventory is exhaustive research and migration evidence, not a checklist of pages to recreate. Design the smallest coherent live site that fully serves the business: a clear commercial core, supported service and location journeys, company/contact/utility pages, and only genuinely distinct evergreen guides with durable customer value. A large legacy corpus should not by itself produce a large live route surface.
+The inventory is exhaustive research and migration evidence, not a checklist of pages to recreate. Each evidencePreview is a bounded source sample for judging whether the page owns concrete customer value; it is not draft copy and may omit material elsewhere on the page. Design the smallest coherent live site that fully serves the business: a clear commercial core, supported service and location journeys, company/contact/utility pages, and only genuinely distinct evergreen guides with durable customer value. A large legacy corpus should not by itself produce a large live route surface.
 
-Consolidate or redirect thin, repetitive, keyword-variant, date-stale, archive, tag, author, service-by-location, unsupported-superlative, unsupported-offer, and near-duplicate pages into the best complete customer answer. Retire content only when it is obsolete, wrong-market, mechanically generated, unsupported, or has no useful destination. Preserve a source path as live only when that page owns a distinct substantive customer job. Every live route must be reachable from concise primary navigation or an explicit hub and must warrant its own customer-facing composition and copy.
+Consolidate or redirect thin, repetitive, keyword-variant, date-stale, archive, tag, author, service-by-location, unsupported-superlative, unsupported-offer, and near-duplicate pages into the best complete customer answer. Retire content only when it is obsolete, wrong-market, mechanically generated, unsupported, or has no useful destination. Preserve a source path as live only when that page owns a distinct substantive customer job. If two proposed routes would use substantially the same opening argument, evidence, and next action, consolidate them unless they answer materially different customer decisions. Every live route must be reachable from concise primary navigation or an explicit hub and must warrant its own customer-facing composition and copy.
 
-Treat transactional systems as capability boundaries, not route inventories to reproduce. Lodesta does not rebuild commerce catalogs, carts, checkout, appointment inventory, or provider embeds as static pages. When the source contains one of those systems, keep a single authored overview or hub only when it serves a distinct customer decision, preserve approved booking or shopping destinations as external link-outs during authoring, and redirect or retire item-detail, cart, checkout, and other transaction-only paths. Never create a static product or appointment-detail route when a visitor cannot complete that transaction on Lodesta. Transactional source pages remain evidence for the overview; they are not independent live-route obligations.
+A different service or pest label does not by itself justify a separate live route. Preserve a service-detail route only when the evidence supports a distinct customer situation, observable concern, comparison, preparation need, or useful answer beyond replacing the subject noun in one shared page. Treat copied location lists, noun-swapped prose, topic leakage from another service, and repeated calls to action as thin even when the page has a large word count. Redirect those source paths into the strongest truthful service hub or grouped answer before authoring begins.
+
+A distinct article title or search question is not enough to justify a distinct live route. Preserve an individual guide or news route only when the inventory indicates enough first-party depth to support a materially different, useful customer answer with its own opening, substantive middle, and specific next action. Otherwise consolidate the useful material into a curated hub or stronger related answer and redirect the source path. Prefer a smaller complete editorial collection over a large family of shallow pages that would repeat one shell and generic advice.
+
+Do not preserve a reviews, testimonials, team, staff, careers, offer, project, gallery, proof, or city route merely because its URL, headings, or word count exists. Keep it only when the inventory evidence shows enough concrete first-party content to satisfy that exact customer job without unsupported claims or generic meta-advice about what a visitor could ask. A project or gallery route needs identifiable work, places, imagery, or outcomes rather than general statements about the category. A reviews route needs attributable customer feedback rather than an explanation of why reviews matter. Consolidate useful proof into home or about when it does not warrant a complete distinct route. A city name plus generic service availability is not a distinct local answer; consolidate it into the service-area hub unless the source supports meaningful locality-specific guidance.
+
+Do not create a dedicated service-area route from one broad region or state label alone. Keep that fact as a concise homepage or contact cue unless a retained source route contains a substantive local answer or multiple named markets support a useful grouped service-area page.
+
+Treat transactional systems as capability boundaries, not route inventories to reproduce. Lodesta does not rebuild commerce catalogs, carts, checkout, appointment inventory, provider embeds, or third-party review submission as static pages. When the source contains one of those systems, keep a single authored overview or hub only when it serves a distinct customer decision, preserve approved booking, shopping, or review destinations as external link-outs during authoring, and redirect or retire item-detail, cart, checkout, review-submission, and other transaction-only paths. A legacy leave-a-review route is transaction-only: never preserve it as a live authored route that promises a destination the inventory cannot establish; redirect it to a supported company or contact route, or retire it. Any owner-approved external review destination is materialized separately for the author. Never create a static product, appointment-detail, or review-submission route when a visitor cannot complete that transaction on Lodesta. Transactional source pages remain evidence for the overview; they are not independent live-route obligations.
+
+Treat utility systems the same way. Lodesta does not provide authored-site search, so redirect or retire a legacy search route instead of drawing a nonfunctional search box. Preserve a site-map route only when the proposed live architecture is large enough that the index gives visitors meaningful navigation beyond the concise header and explicit hubs. A legacy utility URL is not by itself a customer job.
+
+Existing privacy, terms, cookie, legal, and accessibility pages are source-sensitive owner documents, not ordinary utility content. Preserve each one at its exact source path and carry its substantive source text forward without summarizing, modernizing, or replacing provisions. Design may change; legal meaning may not.
+
+The supplied owner authority is the scope boundary. Source pages for a parent brand, franchise network, sibling branch, marketplace, or location outside that authority are not owned location pages. Preserve a location route only when its place is represented in the supplied locations or service areas. Consolidate useful general service evidence into an in-scope hub and redirect or retire out-of-scope location pages. Never infer a larger operating footprint merely because the crawl reached it.
+
+Write every route purpose as a natural internal customer brief with concrete verbs and the actual condition, comparison, or action. Avoid abstract placeholders such as service question, condition question, preparation question, journey, or next step; those phrases leak into weak customer copy even though the purpose itself is not draft prose.
 
 The sourceDispositions ledger remains mechanically exhaustive: include every inventory path exactly once. Every non-retired targetPath must name an explicitly declared live route; preserved paths keep the same path; retired paths use null. If a live route path already exists in the source inventory, that exact source path must be preserved to itself—never mark a declared live route's source path redirected, canonical_duplicate, or retired. Emit every live route explicitly, never placeholders or wildcards, never duplicate routes, queries, or trailing slashes. Keep one concise customer-need purpose per live route and one concise primary navigation. Do not create service-by-location Cartesian products.
 
@@ -104,6 +138,17 @@ export function siteArchitecturePromptIdentityFor(mode: SiteArchitectureMode = "
 
 export function buildSiteArchitectureInventory(pages: SourceSnapshotPage[]): SiteArchitectureInventoryEntry[] {
   const pagePathById = new Map(pages.map((page) => [page.id, canonicalPathname(page.path)]));
+  const fetchedPages = pages.filter((page) => page.outcome === "fetched" && Boolean(page.extractedText));
+  const evidencePageByPath = new Map<string, SourceSnapshotPage>();
+  const lineFrequency = new Map<string, number>();
+  for (const page of fetchedPages) {
+    const path = canonicalPathname(page.path);
+    const current = evidencePageByPath.get(path);
+    if (!current || page.wordCount > current.wordCount) evidencePageByPath.set(path, page);
+    for (const line of new Set(lines(page.extractedText).map(normalizeLine).filter(Boolean))) {
+      lineFrequency.set(line, (lineFrequency.get(line) ?? 0) + 1);
+    }
+  }
   const byPath = new Map<string, SiteArchitectureInventoryEntry>();
   for (const page of pages) {
     const path = canonicalPathname(page.path);
@@ -120,7 +165,8 @@ export function buildSiteArchitectureInventory(pages: SourceSnapshotPage[]): Sit
       wordCount: page.wordCount,
       linkProminence: page.linkProminence,
       internalLinkCount: page.internalLinks.length,
-      exactDuplicateOf: page.exactDuplicateOf ? pagePathById.get(page.exactDuplicateOf) ?? null : null
+      exactDuplicateOf: page.exactDuplicateOf ? pagePathById.get(page.exactDuplicateOf) ?? null : null,
+      evidencePreview: null
     };
     const current = byPath.get(path);
     if (!current) {
@@ -143,18 +189,44 @@ export function buildSiteArchitectureInventory(pages: SourceSnapshotPage[]): Sit
       exactDuplicateOf: richer.exactDuplicateOf
     });
   }
-  return [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
+  return [...byPath.values()]
+    .map((entry) => {
+      const page = evidencePageByPath.get(entry.path);
+      return {
+        ...entry,
+        evidencePreview: page ? retainedEvidencePreview(page, lineFrequency, {
+          authorDigest: true,
+          includeTestimonials: true
+        }) || null : null
+      };
+    })
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 export function siteArchitectureInventoryHash(inventory: SiteArchitectureInventoryEntry[]) {
   return sha256(stableJson(inventory));
 }
 
-export function siteArchitectureUserPrompt(inventory: SiteArchitectureInventoryEntry[]) {
-  return `Produce the complete explicit architecture for this ${inventory.length}-path source inventory. Before responding, verify internally that every source path appears exactly once and every non-null target is present in the explicit route list.\n\n${JSON.stringify(inventory)}`;
+export function siteArchitectureUserPrompt(
+  inventory: SiteArchitectureInventoryEntry[],
+  authority?: SiteArchitectureAuthorityContext
+) {
+  const authoritySection = authority
+    ? `Owner authority (the allowed business and geographic scope):\n${JSON.stringify(authority)}\n\n`
+    : "";
+  return `${authoritySection}Produce the complete explicit architecture for this ${inventory.length}-path source inventory. Before responding, verify internally that every source path appears exactly once and every non-null target is present in the explicit route list.\n\n${JSON.stringify(inventory)}`;
 }
 
 export function siteArchitectureOutputJsonSchema(inventory: SiteArchitectureInventoryEntry[]) {
+  // Keep the structured-output grammar deliberately simple. The provider has
+  // repeatedly terminated otherwise-valid exhaustive plans after ~500 tokens
+  // when this same route regexp is expanded across every disposition. The
+  // parsed plan still passes isStaticSiteRoutePath below before it can become
+  // retained authority or reach authoring, so this changes generation grammar,
+  // not the deterministic route-safety boundary.
+  const liveRoutePath = {
+    type: "string"
+  } as const;
   return {
     type: "object",
     additionalProperties: false,
@@ -167,7 +239,7 @@ export function siteArchitectureOutputJsonSchema(inventory: SiteArchitectureInve
           type: "object",
           additionalProperties: false,
           required: ["label", "path"],
-          properties: { label: { type: "string" }, path: { type: "string" } }
+          properties: { label: { type: "string" }, path: liveRoutePath }
         }
       },
       routes: {
@@ -177,11 +249,11 @@ export function siteArchitectureOutputJsonSchema(inventory: SiteArchitectureInve
           additionalProperties: false,
           required: ["path", "label", "purpose", "pageType", "parentPath", "navigation"],
           properties: {
-            path: { type: "string" },
+            path: liveRoutePath,
             label: { type: "string" },
             purpose: { type: "string" },
             pageType: { type: "string" },
-            parentPath: { type: ["string", "null"] },
+            parentPath: { ...liveRoutePath, type: ["string", "null"] },
             navigation: { type: "string", enum: ["primary", "footer", "contextual", "none"] }
           }
         }
@@ -195,8 +267,15 @@ export function siteArchitectureOutputJsonSchema(inventory: SiteArchitectureInve
           additionalProperties: false,
           required: ["disposition", "targetPath"],
           properties: {
-            disposition: { type: "string", enum: ["preserved", "redirected", "canonical_duplicate", "retired"] },
-            targetPath: { type: ["string", "null"] }
+            disposition: {
+              type: "string",
+              enum: isLegalSourcePagePath(page.path)
+                ? ["preserved"]
+                : ["preserved", "redirected", "canonical_duplicate", "retired"]
+            },
+            targetPath: isLegalSourcePagePath(page.path)
+              ? { type: "string", const: page.path }
+              : { ...liveRoutePath, type: ["string", "null"] }
           }
         }]))
       },
@@ -326,9 +405,7 @@ export function validateSiteArchitecturePlan(
   for (const route of plan.routes) routeCounts.set(route.path, (routeCounts.get(route.path) ?? 0) + 1);
   const routePaths = new Set(routeCounts.keys());
   const duplicateRoutePaths = [...routeCounts.entries()].filter(([, count]) => count > 1).map(([path]) => path);
-  const malformedRoutePaths = [...routePaths].filter((path) =>
-    path !== "/" && (!path.startsWith("/") || path.endsWith("/") || path.includes("?") || /[\[\]*{}]/.test(path))
-  );
+  const malformedRoutePaths = [...routePaths].filter((path) => !isStaticSiteRoutePath(path));
   const invalidTargets = plan.sourceDispositions.flatMap((item) => {
     if (item.disposition === "retired") {
       return item.targetPath === null ? [] : [{ sourcePath: item.sourcePath, targetPath: item.targetPath, reason: "retired_has_target" }];
@@ -352,6 +429,12 @@ export function validateSiteArchitecturePlan(
   );
   const invalidNavigationTargets = plan.primaryNavigation.map((item) => item.path).filter((path) => !routePaths.has(path));
   const missingRoutePurposes = plan.routes.filter((route) => route.purpose.trim().length < 12).map((route) => route.path);
+  const unsafeLegalDispositions = plan.sourceDispositions.flatMap((item) =>
+    isLegalSourcePagePath(item.sourcePath)
+      && (item.disposition !== "preserved" || item.targetPath !== item.sourcePath)
+      ? [{ sourcePath: item.sourcePath, disposition: item.disposition, targetPath: item.targetPath }]
+      : []
+  );
   return {
     complete: !missingDispositionPaths.length
       && !duplicateDispositionPaths.length
@@ -363,7 +446,8 @@ export function validateSiteArchitecturePlan(
       && !preservedPathChanges.length
       && !unknownRouteSources.length
       && !invalidNavigationTargets.length
-      && !missingRoutePurposes.length,
+      && !missingRoutePurposes.length
+      && !unsafeLegalDispositions.length,
     accountedPaths: inventory.length - missingDispositionPaths.length,
     missingDispositionPaths,
     duplicateDispositionPaths,
@@ -375,13 +459,14 @@ export function validateSiteArchitecturePlan(
     preservedPathChanges,
     unknownRouteSources,
     invalidNavigationTargets,
-    missingRoutePurposes
+    missingRoutePurposes,
+    unsafeLegalDispositions
   };
 }
 
 export function createArchitectureReleasePlan(
   plan: SiteArchitecturePlan,
-  input: { browserCoverage?: "all-page-types" } = {}
+  input: { browserCoverage?: "all-routes" } = {}
 ) {
   const redirectableDispositions = plan.sourceDispositions.filter((item): item is typeof item & { targetPath: string } => (
     (item.disposition === "redirected" || item.disposition === "canonical_duplicate")
@@ -399,6 +484,7 @@ export function createArchitectureReleasePlan(
   return {
     routePaths: plan.routes.map((route) => route.path),
     browserRoutePaths: selectArchitectureBrowserRoutes(plan.routes, input.browserCoverage),
+    visualReviewRoutePaths: selectArchitectureVisualReviewRoutes(plan.routes),
     redirects: redirectableDispositions.flatMap((item) =>
       !unsafeRedirectSources.has(item.sourcePath)
         ? [{
@@ -416,6 +502,79 @@ export function createArchitectureReleasePlan(
         : []
     )
   };
+}
+
+/**
+ * Select a small author-facing evidence set that can reveal route-family
+ * repetition. The architecture already records parent/child relationships,
+ * so retain that judgment instead of trying to reconstruct families from
+ * finalized titles or URL words later.
+ */
+function selectArchitectureVisualReviewRoutes(routes: SiteArchitectureRoute[]) {
+  const selected = new Set<string>();
+  const add = (route: SiteArchitectureRoute | undefined) => {
+    if (route) selected.add(route.path);
+  };
+  const routeIndex = new Map(routes.map((route, index) => [route.path, index]));
+  const home = routes.find((route) => route.path === "/")
+    ?? routes.find((route) => normalizeArchitecturePageType(route.pageType) === "home")
+    ?? routes[0];
+  add(home);
+
+  const childrenByParent = new Map<string, SiteArchitectureRoute[]>();
+  for (const route of routes) {
+    // Root-parented routes are the site's top-level collection, not a
+    // comparable content family. Prefer a real nested family such as one
+    // service hub and its detail routes.
+    if (!route.parentPath || route.parentPath === "/" || route.parentPath === route.path) continue;
+    const siblings = childrenByParent.get(route.parentPath) ?? [];
+    siblings.push(route);
+    childrenByParent.set(route.parentPath, siblings);
+  }
+  const siblingFamily = [...childrenByParent.entries()]
+    .filter(([, children]) => children.length >= 2)
+    .sort(([leftParent, left], [rightParent, right]) =>
+      right.length - left.length
+      || (routeIndex.get(leftParent) ?? Number.MAX_SAFE_INTEGER) - (routeIndex.get(rightParent) ?? Number.MAX_SAFE_INTEGER)
+      || leftParent.localeCompare(rightParent)
+    )[0];
+
+  if (siblingFamily) {
+    const [parentPath, children] = siblingFamily;
+    add(routes.find((route) => route.path === parentPath));
+    add(children[0]);
+    add(children[1]);
+  } else {
+    const comparable = routes
+      .filter((route) => route !== home && isMaterialArchitecturePageType(route.pageType))
+      .sort((left, right) =>
+        normalizeArchitecturePageType(left.pageType).localeCompare(normalizeArchitecturePageType(right.pageType))
+        || (routeIndex.get(left.path) ?? 0) - (routeIndex.get(right.path) ?? 0)
+      );
+    add(comparable[0]);
+    add(comparable.find((route) =>
+      route !== comparable[0]
+      && normalizeArchitecturePageType(route.pageType) === normalizeArchitecturePageType(comparable[0]?.pageType ?? "")
+    ) ?? comparable[1]);
+  }
+
+  add(routes.find((route) => normalizeArchitecturePageType(route.pageType).includes("contact"))
+    ?? routes.find((route) => /(?:^|\/)contact(?:-us)?(?:\.[a-z0-9]+)?$/.test(route.path)));
+
+  for (const routePath of selectArchitectureBrowserRoutes(routes)) {
+    if (selected.size >= 5) break;
+    add(routes.find((route) => route.path === routePath));
+  }
+  return [...selected].slice(0, 5);
+}
+
+function normalizeArchitecturePageType(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function isMaterialArchitecturePageType(value: string) {
+  const normalized = normalizeArchitecturePageType(value);
+  return !/(?:^|-)(?:home|contact|company|about|utility|legal|privacy|terms|image-credit)(?:-|$)/.test(normalized);
 }
 
 const approvedArchitectureModulePrefix = "export const approvedArchitecture = ";
@@ -520,12 +679,16 @@ function createApprovedSourceIndex(
           })
           .sort((left, right) =>
             Number(right.sourcePath === route.path) - Number(left.sourcePath === route.path)
+            || Number(sourcePageCarriesCustomerProof(right.sourcePath, right.page)) - Number(sourcePageCarriesCustomerProof(left.sourcePath, left.page))
             || right.page.wordCount - left.page.wordCount
             || right.page.linkProminence - left.page.linkProminence
             || left.sourcePath.localeCompare(right.sourcePath)
           )
           .flatMap(({ sourcePath, page }) => {
-            const preview = retainedEvidencePreview(page, lineFrequency, { authorDigest: input.authorDigest });
+            const preview = retainedEvidencePreview(page, lineFrequency, {
+              authorDigest: input.authorDigest,
+              includeTestimonials: sourcePageCarriesCustomerProof(sourcePath, page)
+            });
             return preview ? [{ sourcePath, sourcePageId: page.id, preview }] : [];
           })
           .slice(0, 2)
@@ -550,10 +713,24 @@ function createApprovedSourceIndex(
   });
 }
 
+function sourcePageCarriesCustomerProof(sourcePath: string, page: SourceSnapshotPage) {
+  const explicitProofIdentity = /\b(?:reviews?|testimonials?|customer stor(?:y|ies)|success stor(?:y|ies)|case stud(?:y|ies))\b/i.test(
+    `${sourcePath} ${page.title ?? ""}`
+  );
+  if (explicitProofIdentity) return true;
+
+  // A homepage can legitimately carry its own review module. Other source pages
+  // frequently repeat that module's heading as site chrome, so using headings
+  // for every route makes nearly the entire crawl look like customer proof and
+  // buries the actual review source in the bounded author digest.
+  return canonicalPathname(sourcePath) === "/"
+    && /\b(?:reviews?|testimonials?|happy customers?)\b/i.test(page.headings.join(" "));
+}
+
 function retainedEvidencePreview(
   page: SourceSnapshotPage,
   lineFrequency: Map<string, number>,
-  input: { authorDigest?: boolean } = {}
+  input: { authorDigest?: boolean; includeTestimonials?: boolean } = {}
 ) {
   const candidates: Array<{ index: number; line: string; score: number }> = [];
   for (const [lineIndex, rawLine] of lines(page.extractedText).entries()) {
@@ -568,7 +745,9 @@ function retainedEvidencePreview(
       if (/^(?:https?:\/\/|follow\b|read more\b|navigate\b|home\b|customer login\b|call now\b|contact us\b)/i.test(line)) continue;
       if (/^(?:[A-Z0-9&'’ -]{20,})$/.test(line)) continue;
       if (containsGatedBusinessClaim(line)) continue;
-      if (input.authorDigest && isLowSignalAuthorDigestLine(line)) continue;
+      if (input.authorDigest && isLowSignalAuthorDigestLine(line, {
+        includeTestimonials: input.includeTestimonials
+      })) continue;
       if (candidates.some((current) => normalizeLine(current.line) === normalized)) continue;
       candidates.push({ index, line, score: input.authorDigest ? authorDigestLineScore(line) : -index });
     }
@@ -589,10 +768,14 @@ function retainedEvidencePreview(
   return selected.sort((left, right) => left.index - right.index).map((candidate) => candidate.line).join(" ").trim();
 }
 
-function isLowSignalAuthorDigestLine(line: string) {
-  return /\b(?:beguiled|demoralized|charms? of pleasure|blinded by desire|nothing prevents our being able)\b/i.test(line)
-    || /^\s*["“]/.test(line)
-    || /\b(?:my husband|my wife|my home|i have been|i've been|i couldn't|highly recommend|fully satisfied|our needs|gives us peace of mind|since they started|when he arrived|when she arrived|he took care|she took care|with surge pest control is always)\b/i.test(line);
+function isLowSignalAuthorDigestLine(line: string, input: { includeTestimonials?: boolean } = {}) {
+  if (/\b(?:beguiled|demoralized|charms? of pleasure|blinded by desire|nothing prevents our being able|lorem ipsum|cookie consent|this website uses cookies|we use cookies|cookies? to improve|google analytics|google ads|_setCustomVar)\b/i.test(line)) {
+    return true;
+  }
+  return !input.includeTestimonials && (
+    /^\s*["“]/.test(line)
+    || /\b(?:my husband|my wife|my home|i have been|i've been|i couldn't|highly recommend|fully satisfied|our needs|gives us peace of mind|since they started|when he arrived|when she arrived|he took care|she took care|with surge pest control is always)\b/i.test(line)
+  );
 }
 
 function previewSegments(rawLine: string) {
@@ -605,7 +788,7 @@ function authorDigestLineScore(line: string) {
   let score = Math.min(3, line.length / 120);
   if (/\b(?:we|our|us|surge|company|team|technicians?)\b/i.test(line)) score += 5;
   if (/\b(?:mission|purpose|approach|relationship[- ]based|locally owned|family owned|founded|started|committed|the way we'd want)\b/i.test(line)) score += 7;
-  if (/\b(?:homeowners?|customers?|service|inspection|estimate|treatment|pest control)\b/i.test(line)) score += 2;
+  if (/\b(?:homeowners?|customers?|property|project|service|inspection|estimate|treatment|team|crew|work|pest control|tree care)\b/i.test(line)) score += 2;
   if (/\b(?:ants?|roaches?|rodents?|mosquitoes?|termites?|bed bugs?|bees?|wasps?|spiders?|scorpions?)\b/i.test(line)) score += 1;
   return score;
 }
@@ -655,16 +838,12 @@ Keep the approved primary navigation concise even though the crawlable route sur
 The approved route and migration ledger is bound to this run. Lodesta will mechanically reject missing or extra live routes before browser verification and will apply the approved redirects and retirements at finalization. Call finish without copying that migration ledger into the finish arguments.`;
 }
 
-function selectArchitectureBrowserRoutes(routes: SiteArchitectureRoute[], coverage?: "all-page-types") {
+function selectArchitectureBrowserRoutes(routes: SiteArchitectureRoute[], coverage?: "all-routes") {
+  if (coverage === "all-routes") return routes.map((route) => route.path);
   const selected = new Set<string>();
   const add = (route: SiteArchitectureRoute | undefined) => { if (route) selected.add(route.path); };
   add(routes.find((route) => route.path === "/"));
   add(routes.find((route) => route.path === "/contact"));
-  if (coverage === "all-page-types") {
-    for (const route of routes) {
-      if (route.navigation === "primary") add(route);
-    }
-  }
   const representedPageTypes = new Set<string>();
   for (const route of routes) {
     if (representedPageTypes.has(route.pageType)) continue;
@@ -678,7 +857,7 @@ function selectArchitectureBrowserRoutes(routes: SiteArchitectureRoute[], covera
     || left.path.localeCompare(right.path))[0]);
   add([...routes].sort((left, right) => right.sourcePaths.length - left.sourcePaths.length
     || left.path.localeCompare(right.path))[0]);
-  return coverage === "all-page-types" ? [...selected] : [...selected].slice(0, 7);
+  return [...selected].slice(0, 7);
 }
 
 function createRetainedContent(pages: SourceSnapshotPage[], plan: SiteArchitecturePlan) {

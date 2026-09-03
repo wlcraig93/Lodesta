@@ -31,6 +31,10 @@ import { unavailableVisualQuality } from "./visual-quality";
 import type { SitePublicBuildInput } from "@/packages/site-contracts";
 import { selectVisualQualityPages } from "./visual-quality-capture";
 import { siteInventoryForPublicUrl } from "./site-inventory";
+import {
+  assessmentReferenceAuthorityFor,
+  assessmentServingContractFor
+} from "./comparability";
 
 export type PublicUrlAssessmentRun = {
   assessment: WebsiteAssessment;
@@ -177,8 +181,12 @@ export async function assessPublicUrl(input: {
       customerJourneys
     },
     canonicalFactAvailability: canonicalFactAvailabilityFor({
-      crawl,
       buildInput: input.canonicalBuildInput
+    }),
+    referenceAuthority: assessmentReferenceAuthorityFor(input.canonicalBuildInput),
+    servingContract: assessmentServingContractFor({
+      targetKind: input.targetKind ?? "public_url",
+      sourceUrl: crawl.finalUrl ?? sourceUrl
     }),
     routeSelection,
     siteInventory: siteInventoryForPublicUrl({ crawl, ingestion }),
@@ -190,6 +198,13 @@ export async function assessPublicUrl(input: {
     generatedAt,
     inputHashSource: {
       sourceUrl,
+      canonicalReference: input.canonicalBuildInput ? {
+        id: input.canonicalBuildInput.id,
+        inputHash: input.canonicalBuildInput.inputHash,
+        ownerOperationalRevision: input.canonicalBuildInput.ownerOperationalRevision,
+        ownerIntentRevision: input.canonicalBuildInput.ownerIntentRevision,
+        sourceSnapshotIds: [...input.canonicalBuildInput.sourceSnapshotIds].sort()
+      } : null,
       crawl: { ingestion, crawl },
       render: { adapter: render.adapter, metrics: render.metrics, metricsByViewport: render.metricsByViewport, findings: render.findings },
       destinationProbes,
@@ -267,16 +282,13 @@ function criteriaForPublicUrl(input: {
     : ingestion.coverage === "restricted"
       ? 0.8
       : 0.7;
-  const canonicalPhone = input.canonicalBuildInput?.business.contacts.phone
-    ?? crawl.extractedFacts.phone;
+  const canonicalPhone = input.canonicalBuildInput?.business.contacts.phone;
   const telephoneLinks = links.filter((link) => link.kind === "tel");
   const matchingTelephoneLinks = canonicalPhone
     ? telephoneLinks.filter((link) => phoneMatches(link.href, canonicalPhone))
     : [];
-  const canonicalHours = input.canonicalBuildInput?.business.locations.find((location) => location.hours)?.hours
-    ?? crawl.extractedFacts.hours;
-  const hoursAgree = !input.canonicalBuildInput
-    || !canonicalHours
+  const canonicalHours = input.canonicalBuildInput?.business.locations.find((location) => location.hours)?.hours;
+  const hoursAgree = !canonicalHours
     || !crawl.extractedFacts.hours
     || stableRecord(canonicalHours) === stableRecord(crawl.extractedFacts.hours);
 
@@ -814,24 +826,21 @@ function canonicalSourceKey(value: string) {
 }
 
 function canonicalFactAvailabilityFor(input: {
-  crawl: CrawlAssessment;
   buildInput?: SitePublicBuildInput;
 }): WebsiteAssessment["canonicalFactAvailability"] {
-  const facts = input.crawl.extractedFacts;
   const build = input.buildInput?.business;
   const locations = build?.locations ?? [];
   return {
-    businessName: Boolean(build?.name ?? facts.name),
-    phone: Boolean(build?.contacts.phone ?? facts.phone),
-    email: Boolean(build?.contacts.email ?? facts.email),
-    address: Boolean(locations.length || facts.address),
-    hours: Boolean(locations.some((location) => location.hours) || facts.hours),
-    coordinates: Boolean(
-      locations.some((location) => location.latitude !== undefined && location.longitude !== undefined)
-      || facts.geo
+    businessName: Boolean(build?.name),
+    phone: Boolean(build?.contacts.phone),
+    email: Boolean(build?.contacts.email),
+    address: locations.length > 0,
+    hours: locations.some((location) => Boolean(location.hours)),
+    coordinates: locations.some((location) =>
+      location.latitude !== undefined && location.longitude !== undefined
     ),
-    serviceAreas: Boolean(build?.serviceAreas.length || facts.serviceAreas.length),
-    proof: Boolean(build?.proof.length || facts.reviewsSummary)
+    serviceAreas: Boolean(build?.serviceAreas.length),
+    proof: Boolean(build?.proof.length)
   };
 }
 

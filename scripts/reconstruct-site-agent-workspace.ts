@@ -3,10 +3,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import {
   configuredArtifactBlobStore,
+  LocalArtifactBlobStore,
   workspaceSourceSidecarKey,
   workspaceSourceSidecarSchema
 } from "../packages/site-artifacts";
-import { sitePlatformRepository } from "../packages/platform-data";
+import { LocalSitePlatformRepository, sitePlatformRepository } from "../packages/platform-data";
 import { createArchitectureEvidenceFiles } from "../packages/site-agent/architecture";
 import {
   liveAuthoringProfile,
@@ -31,6 +32,17 @@ const allowedRoot = resolve(repositoryRoot, ".design");
 if (outputDirectory !== allowedRoot && !outputDirectory.startsWith(`${allowedRoot}${sep}`)) {
   throw new Error("The reconstruction output must stay under .design/.");
 }
+const localRepositoryPath = process.env.LODESTA_LOCAL_DATA_PATH?.trim();
+const localBlobRoot = process.env.LODESTA_LOCAL_BLOB_DIR?.trim();
+if (Boolean(localRepositoryPath) !== Boolean(localBlobRoot)) {
+  throw new Error("LODESTA_LOCAL_DATA_PATH and LODESTA_LOCAL_BLOB_DIR must be provided together.");
+}
+const repository = localRepositoryPath
+  ? new LocalSitePlatformRepository(resolve(repositoryRoot, localRepositoryPath))
+  : sitePlatformRepository;
+const store = localBlobRoot
+  ? new LocalArtifactBlobStore(resolve(repositoryRoot, localBlobRoot))
+  : configuredArtifactBlobStore();
 
 type WriteArguments = {
   path: string;
@@ -105,24 +117,23 @@ function applyTargetedEdits(current: string, input: EditArguments) {
   return nextLines.join("\n");
 }
 
-const run = await sitePlatformRepository.getAgentRun(runId);
+const run = await repository.getAgentRun(runId);
 if (!run) throw new Error(`Unknown site-agent run ${runId}.`);
 
-const events = await sitePlatformRepository.listAgentRunEvents(runId, { limit: 5_000, order: "ascending" });
+const events = await repository.listAgentRunEvents(runId, { limit: 5_000, order: "ascending" });
 const retainedMutations = events.filter((event) => (
   event.kind === "tool_call"
   && (event.name === "apply_patch" || event.name === "write_file" || event.name === "edit_file")
   && event.status === "succeeded"
   && (throughSequence === undefined || event.sequence <= throughSequence)
 ));
-const store = configuredArtifactBlobStore();
 const files = new Map<string, string>();
 let sourceProvenance: "retained_candidate_sidecar" | "replayed_mutations" = "replayed_mutations";
 let retainedCandidateSourceHash: string | undefined;
 if (throughSequence === undefined && run.candidateVersionId) {
-  const candidateVersion = await sitePlatformRepository.getSiteVersion(run.candidateVersionId);
+  const candidateVersion = await repository.getSiteVersion(run.candidateVersionId);
   if (!candidateVersion) throw new Error(`Candidate version ${run.candidateVersionId} is unavailable.`);
-  const workspaceRevision = await sitePlatformRepository.getWorkspaceRevision(candidateVersion.workspaceRevisionId);
+  const workspaceRevision = await repository.getWorkspaceRevision(candidateVersion.workspaceRevisionId);
   if (!workspaceRevision) throw new Error(`Candidate workspace revision ${candidateVersion.workspaceRevisionId} is unavailable.`);
   const sidecarKey = workspaceSourceSidecarKey(workspaceRevision.sourceArchiveKey);
   const sidecarBlob = await store.get(sidecarKey);
@@ -142,12 +153,12 @@ if (throughSequence === undefined && run.candidateVersionId) {
   ]) {
     files.set(`src/${relativePath}`, await readFile(resolve(scaffoldSourceRoot, relativePath), "utf8"));
   }
-  const buildInput = await sitePlatformRepository.getPublicBuildInput(run.publicBuildInputId);
+  const buildInput = await repository.getPublicBuildInput(run.publicBuildInputId);
   if (!buildInput) throw new Error(`Run ${run.id} has no retained public build input ${run.publicBuildInputId}.`);
   files.set("src/required-destinations.tsx", requiredDestinationsSource(buildInput));
   if (run.architecture) {
     const sourcePages = (await Promise.all(
-      buildInput.sourceSnapshotIds.map((sourceId) => sitePlatformRepository.listSourceSnapshotPages(sourceId))
+      buildInput.sourceSnapshotIds.map((sourceId) => repository.listSourceSnapshotPages(sourceId))
     )).flat();
     const authoringProfile = liveAuthoringProfile(run.authoringProfileId, run.kind);
     for (const file of createArchitectureEvidenceFiles(sourcePages, run.architecture.plan, {
@@ -158,7 +169,7 @@ if (throughSequence === undefined && run.candidateVersionId) {
   }
 } else {
   if (!run.exactParentRevisionId) throw new Error(`Edit run ${run.id} has no exact parent revision.`);
-  const parentRevision = await sitePlatformRepository.getWorkspaceRevision(run.exactParentRevisionId);
+  const parentRevision = await repository.getWorkspaceRevision(run.exactParentRevisionId);
   if (!parentRevision || parentRevision.siteId !== run.siteId) {
     throw new Error(`Edit run ${run.id} has an unavailable or mismatched parent revision ${run.exactParentRevisionId}.`);
   }

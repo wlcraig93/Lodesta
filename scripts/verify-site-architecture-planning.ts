@@ -38,6 +38,8 @@ const pages = [
 const inventory = buildSiteArchitectureInventory(pages);
 assert.deepEqual(inventory.map((item) => item.path), ["/", "/ant-control", "/ants"]);
 assert.equal(inventory.find((item) => item.path === "/ant-control")?.requestedVariants, 2);
+assert.match(inventory.find((item) => item.path === "/")?.evidencePreview ?? "", /mission to provide relationship-based pest control/i);
+assert.match(inventory.find((item) => item.path === "/ant-control")?.evidencePreview ?? "", /focused identification and treatment/i);
 const inventoryHash = siteArchitectureInventoryHash(inventory);
 
 const rawPlan: RawSiteArchitecturePlan = {
@@ -86,12 +88,39 @@ assert(implicitDestinationPlan.routes.some((route) => route.path === "/ant-contr
 
 const releasePlan = createArchitectureReleasePlan(plan);
 assert.deepEqual(releasePlan.routePaths, ["/", "/ant-control"]);
+assert.deepEqual(releasePlan.visualReviewRoutePaths, ["/", "/ant-control"]);
 assert.deepEqual(releasePlan.redirects, [{
   sourcePath: "/ants",
   destinationPath: "/ant-control",
   reason: "Approved architecture consolidation."
 }]);
 assert(releasePlan.browserRoutePaths.includes("/") && releasePlan.browserRoutePaths.includes("/ant-control"));
+
+const retainedHtmlPlan = normalizeSiteArchitecturePlan({
+  ...rawPlan,
+  primaryNavigation: [{ label: "Home", path: "/" }, { label: "Ant Control", path: "/ant-control.html" }],
+  routes: [
+    rawPlan.routes[0]!,
+    { ...rawPlan.routes[1]!, path: "/ant-control.html" }
+  ],
+  sourceDispositions: {
+    "/": { disposition: "preserved", targetPath: "/" },
+    "/ant-control": { disposition: "redirected", targetPath: "/ant-control.html" },
+    "/ants": { disposition: "redirected", targetPath: "/ant-control.html" }
+  }
+}, inventory);
+assert.equal(validateSiteArchitecturePlan(inventory, retainedHtmlPlan).complete, true);
+assert.deepEqual(createArchitectureReleasePlan(retainedHtmlPlan).routePaths, ["/", "/ant-control.html"]);
+assert.throws(
+  () => siteArchitecturePlanSchema.parse({
+    ...retainedHtmlPlan,
+    routes: retainedHtmlPlan.routes.map((route) => route.path === "/ant-control.html"
+      ? { ...route, path: "/ant-control.exe" }
+      : route)
+  }),
+  /lowercase static slug/i,
+  "An executable-looking file extension escaped the canonical live-route contract."
+);
 
 const unsafeLegacyRedirectPlan = siteArchitecturePlanSchema.parse({
   ...plan,
@@ -132,9 +161,9 @@ const surgeSizedReleasePlan = createArchitectureReleasePlan(surgeSizedPlan);
 assert.equal(surgeSizedReleasePlan.routePaths.length, 13);
 assert.equal(surgeSizedReleasePlan.browserRoutePaths.length, 7);
 assert(surgeSizedReleasePlan.browserRoutePaths.every((path) => surgeSizedReleasePlan.routePaths.includes(path)));
-const allPageTypesReleasePlan = createArchitectureReleasePlan(surgeSizedPlan, { browserCoverage: "all-page-types" });
-assert.equal(allPageTypesReleasePlan.browserRoutePaths.length, 13);
-assert(allPageTypesReleasePlan.browserRoutePaths.every((path) => allPageTypesReleasePlan.routePaths.includes(path)));
+const allRoutesReleasePlan = createArchitectureReleasePlan(surgeSizedPlan, { browserCoverage: "all-routes" });
+assert.equal(allRoutesReleasePlan.browserRoutePaths.length, 13);
+assert.deepEqual(allRoutesReleasePlan.browserRoutePaths, allRoutesReleasePlan.routePaths);
 const primaryHubCoveragePlan = siteArchitecturePlanSchema.parse({
   ...surgeSizedPlan,
   primaryNavigation: [
@@ -146,7 +175,7 @@ const primaryHubCoveragePlan = siteArchitecturePlanSchema.parse({
     ? { ...route, pageType: "hub", navigation: "primary" as const }
     : route)
 });
-const primaryHubCoverageReleasePlan = createArchitectureReleasePlan(primaryHubCoveragePlan, { browserCoverage: "all-page-types" });
+const primaryHubCoverageReleasePlan = createArchitectureReleasePlan(primaryHubCoveragePlan, { browserCoverage: "all-routes" });
 assert(primaryHubCoverageReleasePlan.browserRoutePaths.includes("/service-1"));
 assert(primaryHubCoverageReleasePlan.browserRoutePaths.includes("/service-2"));
 const contactCoveredPlan = siteArchitecturePlanSchema.parse({
@@ -169,6 +198,78 @@ const contactCoveredPlan = siteArchitecturePlanSchema.parse({
 const contactCoveredReleasePlan = createArchitectureReleasePlan(contactCoveredPlan);
 assert.equal(contactCoveredReleasePlan.browserRoutePaths.length, 7);
 assert(contactCoveredReleasePlan.browserRoutePaths.includes("/contact"));
+
+const siblingReviewPlan = siteArchitecturePlanSchema.parse({
+  ...contactCoveredPlan,
+  routes: [
+    contactCoveredPlan.routes[0]!,
+    {
+      path: "/services",
+      label: "Services",
+      purpose: "Help customers choose the appropriate service for their situation.",
+      pageType: "service-hub",
+      parentPath: null,
+      navigation: "primary",
+      sourcePaths: ["/services"]
+    },
+    ...["ants", "rodents", "termites"].map((slug) => ({
+      path: `/services/${slug}`,
+      label: `${slug} service`,
+      purpose: `Help customers understand ${slug} service and request assistance.`,
+      pageType: "service-detail",
+      parentPath: "/services",
+      navigation: "contextual" as const,
+      sourcePaths: [`/services/${slug}`]
+    })),
+    {
+      path: "/areas",
+      label: "Service areas",
+      purpose: "Help customers determine whether their location is served.",
+      pageType: "location-hub",
+      parentPath: "/",
+      navigation: "primary",
+      sourcePaths: ["/areas"]
+    },
+    {
+      path: "/about",
+      label: "About",
+      purpose: "Help customers understand the business and its local role.",
+      pageType: "about",
+      parentPath: "/",
+      navigation: "primary",
+      sourcePaths: ["/about"]
+    },
+    { ...contactCoveredPlan.routes.at(-1)!, parentPath: "/" },
+    {
+      path: "/image-credit",
+      label: "Image credit",
+      purpose: "Record source-sensitive image attribution for the website.",
+      pageType: "utility",
+      parentPath: "/",
+      navigation: "footer",
+      sourcePaths: ["/image-credit"]
+    }
+  ],
+  sourceDispositions: [
+    { sourcePath: "/", disposition: "preserved", targetPath: "/" },
+    { sourcePath: "/services", disposition: "preserved", targetPath: "/services" },
+    ...["ants", "rodents", "termites"].map((slug) => ({
+      sourcePath: `/services/${slug}`,
+      disposition: "preserved" as const,
+      targetPath: `/services/${slug}`
+    })),
+    ...["areas", "about", "contact", "image-credit"].map((slug) => ({
+      sourcePath: `/${slug}`,
+      disposition: "preserved" as const,
+      targetPath: `/${slug}`
+    }))
+  ]
+});
+assert.deepEqual(
+  createArchitectureReleasePlan(siblingReviewPlan).visualReviewRoutePaths,
+  ["/", "/services", "/services/ants", "/services/rodents", "/contact"],
+  "The author-facing review did not preserve a hub and two sibling detail routes."
+);
 
 const evidence = createArchitectureEvidenceFiles(pages, plan);
 assert(evidence.some((file) => file.path === "src/approved-architecture.ts" && file.content.includes("ant-control")));
@@ -213,6 +314,29 @@ assert.doesNotMatch(authorDigestEvidence[1].content, /"wordCount":/);
 assert.match(authorDigestEvidence[1].content, /mission to provide relationship-based pest control/i);
 assert.doesNotMatch(authorDigestEvidence[1].content, /charms? of pleasure|my husband/i);
 assert(authorDigestEvidence[1].content.length < readableIndexedPullPreviewEvidence[1].content.length);
+const customerProofText = "“Kevin arrived when expected, listened carefully, and treated our home with patience,” my husband said after the service visit.";
+const proofPages = [
+  ...pages,
+  page("page_reviews", "/reviews", "Customer Reviews", customerProofText),
+  page("page_service_with_shared_review_heading", "/service-with-shared-review-heading", "Pest Service", "Useful service-specific guidance for the customer.", ["Pest Service", "Proven Results. Real Reviews."]),
+  page("page_site_map", "/site-map", "Site Map", "This oversized utility index lists every archive, category, service, article, and mechanical destination on the legacy website for navigation purposes.")
+];
+const proofPlan = siteArchitecturePlanSchema.parse({
+  ...plan,
+  routes: plan.routes.map((route) => route.path === "/"
+    ? { ...route, sourcePaths: ["/", "/reviews", "/service-with-shared-review-heading", "/site-map"] }
+    : route),
+  sourceDispositions: [
+    ...plan.sourceDispositions,
+    { sourcePath: "/reviews", disposition: "redirected" as const, targetPath: "/" },
+    { sourcePath: "/service-with-shared-review-heading", disposition: "redirected" as const, targetPath: "/" },
+    { sourcePath: "/site-map", disposition: "redirected" as const, targetPath: "/" }
+  ]
+});
+const proofDigestEvidence = createArchitectureEvidenceFiles(proofPages, proofPlan, { retainedContentMode: "indexed-pull-preview-author-digest" });
+assert.match(proofDigestEvidence[1].content, /Kevin arrived when expected.*my husband said after the service visit/i);
+assert.doesNotMatch(proofDigestEvidence[1].content, /oversized utility index/i);
+assert.doesNotMatch(proofDigestEvidence[1].content, /service-specific guidance/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-pull"), /retained mirror remains searchable through source-site\/ and the source tools/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-pull"), /never map raw extracted paragraphs into pages, cards, or metadata/i);
 assert.doesNotMatch(initialArchitectureAuthoringInstruction("commercial-core-pull"), /purpose as its compact message and conversion target/i);
@@ -227,11 +351,23 @@ assert.equal(siteArchitecturePromptIdentityFor(), siteArchitecturePromptIdentity
 assert.notEqual(siteArchitectureSystemPromptFor("commercial-core-pull"), siteArchitectureSystemPrompt);
 assert.notEqual(siteArchitecturePromptIdentityFor("commercial-core-pull"), siteArchitecturePromptIdentity);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /smallest coherent live site/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /evidencePreview is a bounded source sample.*not draft copy/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /different service or pest label does not by itself justify a separate live route/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /copied location lists, noun-swapped prose, topic leakage.*thin even when.*large word count/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /sourceDispositions ledger remains mechanically exhaustive/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /live route path already exists in the source inventory.*must be preserved to itself/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /transactional systems as capability boundaries/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /does not rebuild commerce catalogs, carts, checkout, appointment inventory, or provider embeds/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /redirect or retire item-detail, cart, checkout, and other transaction-only paths/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /does not rebuild commerce catalogs, carts, checkout, appointment inventory, provider embeds, or third-party review submission/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /redirect or retire item-detail, cart, checkout, review-submission, and other transaction-only paths/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /leave-a-review route is transaction-only.*never preserve it as a live authored route.*promises a destination.*cannot establish/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /owner-approved external review destination is materialized separately for the author/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /does not provide authored-site search/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /legacy utility URL is not by itself a customer job/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /distinct article title or search question is not enough/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /smaller complete editorial collection.*shallow pages/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /project or gallery route needs identifiable work, places, imagery, or outcomes/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /reviews route needs attributable customer feedback/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /Do not create a dedicated service-area route from one broad region or state label alone/i);
 assert.doesNotMatch(siteArchitectureSystemPromptFor("commercial-core-pull"), /purpose field as a compact authoring brief/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /purpose field as a compact authoring brief/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /concrete customer decision or question/i);
@@ -275,6 +411,33 @@ assert.equal(validateSiteArchitecturePlan(inventory, invalidPlan).complete, fals
 const schema = siteArchitectureOutputJsonSchema(inventory);
 assert.deepEqual(schema.properties.sourceDispositions.required, ["/", "/ant-control", "/ants"]);
 
+const legalInventory = buildSiteArchitectureInventory([
+  ...pages,
+  page(
+    "page_privacy",
+    "/privacy",
+    "Privacy Policy",
+    "This privacy policy explains what contact information is collected, how it is used to respond to service requests, when service providers may process it, how long records are retained, and how customers may ask questions or request corrections."
+  )
+]);
+const legalSchema = siteArchitectureOutputJsonSchema(legalInventory);
+const privacyDispositionSchema = legalSchema.properties.sourceDispositions.properties["/privacy"];
+assert.deepEqual(privacyDispositionSchema.properties.disposition.enum, ["preserved"]);
+assert.equal(privacyDispositionSchema.properties.targetPath.const, "/privacy");
+const unsafeLegalPlan = normalizeSiteArchitecturePlan({
+  ...rawPlan,
+  sourceDispositions: {
+    ...rawPlan.sourceDispositions,
+    "/privacy": { disposition: "retired", targetPath: null }
+  }
+}, legalInventory);
+assert.equal(validateSiteArchitecturePlan(legalInventory, unsafeLegalPlan).complete, false);
+assert.deepEqual(validateSiteArchitecturePlan(legalInventory, unsafeLegalPlan).unsafeLegalDispositions, [{
+  sourcePath: "/privacy",
+  disposition: "retired",
+  targetPath: null
+}]);
+
 let request: Record<string, unknown> | undefined;
 const agent = new WebsiteManagerAgent({
   create: async (params) => {
@@ -305,9 +468,21 @@ assert.deepEqual(request?.reasoning, { effort: "high" });
 assert.equal((request?.text as { format?: { name?: string } })?.format?.name, "exhaustive_site_architecture");
 
 request = undefined;
-const commercialCore = await agent.architect({ inventory, architectureMode: "commercial-core-pull" });
+const commercialCore = await agent.architect({
+  inventory,
+  authorityContext: {
+    businessName: "Surge Pest Control",
+    description: "Residential pest control for Austin-area homeowners.",
+    locations: [{ label: "Austin office", city: "Austin", region: "TX", country: "US" }],
+    serviceAreas: ["Austin metro"],
+    offerings: ["Pest control"]
+  },
+  architectureMode: "commercial-core-pull"
+});
 assert.equal(commercialCore.promptIdentity, siteArchitecturePromptIdentityFor("commercial-core-pull"));
 assert.equal((request as unknown as Record<string, unknown> | undefined)?.instructions, siteArchitectureSystemPromptFor("commercial-core-pull"));
+assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /Owner authority/);
+assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /Austin metro/);
 
 assert.doesNotThrow(() => siteAgentArchitectureSchema.parse({
   schemaVersion: 1,
@@ -340,7 +515,7 @@ process.stdout.write(`${JSON.stringify({
   singleArchitectureRequest: true
 })}\n`);
 
-function page(id: string, path: string, title: string, extractedText: string): SourceSnapshotPage {
+function page(id: string, path: string, title: string, extractedText: string, headings: string[] = [title]): SourceSnapshotPage {
   return {
     schemaVersion: 1,
     id,
@@ -354,7 +529,7 @@ function page(id: string, path: string, title: string, extractedText: string): S
     contentType: "text/html",
     indexability: "indexable",
     title,
-    headings: [title],
+    headings,
     wordCount: extractedText.split(/\s+/).length,
     internalLinks: [],
     externalLinks: [],

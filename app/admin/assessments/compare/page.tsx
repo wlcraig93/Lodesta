@@ -24,7 +24,7 @@ export default async function AssessmentComparisonPage({
   ]);
   const left = leftRecord?.assessment;
   const right = rightRecord?.assessment;
-  const comparable = left && right && identitiesMatch(left, right)
+  const comparable = left && right && left.comparability.key === right.comparability.key
     && left.coverage.comparisonEligible
     && right.coverage.comparisonEligible;
   return (
@@ -32,7 +32,7 @@ export default async function AssessmentComparisonPage({
       <AdminPageHeader
         eyebrow="Matched Website Health evidence"
         title="Report comparison"
-        description="Compare unified criteria only when registry, scanner, route-selection, evaluator, and evidence-completeness identities match."
+        description="Compare unified criteria only when evidence class, sampling profile, evaluator identities, registry, scanner, and evidence completeness match."
         actions={<Link className="button secondary" href="/admin/assessments">All reports</Link>}
       />
       <section className="panel">
@@ -83,10 +83,10 @@ function Comparison({ left, right }: { left: WebsiteAssessment; right: WebsiteAs
         <Metric label="Regressed criteria" value={`${regressed}`} />
         <Metric label="Author improvements" value={`${authorChanges.filter((item) => item.change === 1).length}`} />
         <Metric label="Author regressions" value={`${authorChanges.filter((item) => item.change === -1).length}`} />
-        <Metric label="Left grade / raw" value={`${left.grade?.value ?? "—"} / ${left.score.rawValue ?? "—"}`} />
-        <Metric label="Right grade / raw" value={`${right.grade?.value ?? "—"} / ${right.score.rawValue ?? "—"}`} />
-        <Metric label="Left author subscore" value={`${left.score.scopes.siteAuthor.value ?? "—"}`} />
-        <Metric label="Right author subscore" value={`${right.score.scopes.siteAuthor.value ?? "—"}`} />
+        <Metric label="Left measured health" value={`${left.grade?.value ?? "—"}${left.grade?.band ? ` · ${left.grade.band}` : " · band suppressed"}`} />
+        <Metric label="Right measured health" value={`${right.grade?.value ?? "—"}${right.grade?.band ? ` · ${right.grade.band}` : " · band suppressed"}`} />
+        <Metric label="Left author-controlled health" value={`${left.score.scopes.siteAuthor.value ?? "—"}`} />
+        <Metric label="Right author-controlled health" value={`${right.score.scopes.siteAuthor.value ?? "—"}`} />
       </section>
       <section className="panel">
         <h2>Comparison basis</h2>
@@ -140,14 +140,6 @@ function criterionMap(assessment: WebsiteAssessment) {
   ));
 }
 
-function identitiesMatch(left: WebsiteAssessment, right: WebsiteAssessment) {
-  return left.producer.rubricIdentity === right.producer.rubricIdentity
-    && left.producer.scannerIdentity === right.producer.scannerIdentity
-    && left.producer.routeSelectionIdentity === right.producer.routeSelectionIdentity
-    && left.routeSelection.requestedSlots.join("|") === right.routeSelection.requestedSlots.join("|")
-    && evaluatorIdentity(left) === evaluatorIdentity(right);
-}
-
 function evaluatorIdentity(assessment: WebsiteAssessment) {
   return assessment.evaluators
     .map((evaluator) => `${evaluator.kind}:${evaluator.identity}:${evaluator.status}`)
@@ -156,7 +148,7 @@ function evaluatorIdentity(assessment: WebsiteAssessment) {
 }
 
 function methodologySummary(assessment: WebsiteAssessment) {
-  return `${assessment.producer.rubricIdentity} · ${assessment.producer.scannerIdentity} · ${assessment.producer.routeSelectionIdentity} · ${evaluatorIdentity(assessment)} · comparison ${assessment.coverage.comparisonEligible ? "eligible" : "disabled"}`;
+  return `${assessment.comparability.key} · ${assessment.comparability.evidenceClass} · ${assessment.servingContract.kind} · ${assessment.comparability.sampledRouteCount} sampled routes · reference ${assessment.referenceAuthority.kind} · inventory ${assessment.comparability.inventoryIdentity} · ${evaluatorIdentity(assessment)} · comparison ${assessment.coverage.comparisonEligible ? "eligible" : "disabled"}`;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

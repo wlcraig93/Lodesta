@@ -3,6 +3,7 @@ import type {
   AssessmentCriterionInput,
   AssessmentCriterionStatus,
   AssessmentEvidence,
+  VisualQuality,
   WebsiteAssessment
 } from "./contracts";
 import { buildWebsiteAssessment } from "./engine";
@@ -11,17 +12,21 @@ import { agentReadinessForArtifact } from "./agent-readiness-adapters";
 import { evaluateArtifactVisualQuality } from "./visual-quality-artifact";
 import { siteToolchainIdentity } from "@/packages/site-contracts/platform-manifest";
 import {
-  inferWebsiteHealthPurposeTags,
-  selectWebsiteHealthRoutes
+  selectArtifactVisualRoutes
 } from "./route-selection";
 import { artifactVertical } from "./visual-quality-artifact";
 import { siteInventoryForArtifact } from "./site-inventory";
+import {
+  assessmentReferenceAuthorityFor,
+  assessmentServingContractFor
+} from "./comparability";
 
 export async function assessSiteArtifact(input: {
   artifact: SiteBuildArtifact;
   buildInput: SitePublicBuildInput;
   versionId?: string;
   assessmentId?: string;
+  visualQuality?: VisualQuality;
   signal?: AbortSignal;
 }): Promise<WebsiteAssessment> {
   const { artifact, buildInput } = input;
@@ -78,6 +83,9 @@ export async function assessSiteArtifact(input: {
     };
   }, { total: 0, matches: 0 });
   const brokenLinkFindings = findings.filter((item) => item.id.startsWith("link."));
+  const brokenImageFindings = artifactBrokenImageFindings(findings);
+  const headingStructureFindings = artifactHeadingStructureFindings(findings);
+  const axeCompleted = findings.some((item) => item.id === "accessibility.axe.complete");
   const orphanFindings = finding(/route\.orphan/);
   const serviceQualityFindings = finding(/route\.(?:thin_service_content|repetitive_content)|fact\.service_detail_source/);
   const altQualityFindings = finding(/render\.image_alt_quality/);
@@ -107,26 +115,10 @@ export async function assessSiteArtifact(input: {
     /^fact\.(?:link_mismatch|sdk_fact_missing|sdk_value_mismatch|sensitive_unsupported|metadata_unsupported)$/.test(item.id));
   const unboundClaimFindings = findings.filter((item) =>
     item.id === "fact.undeclared_marker");
-  const routeSelection = selectWebsiteHealthRoutes(artifact.routes.map((route) => {
-    const requirementIndex = buildInput.intent.pageRequirements.findIndex((requirement) =>
-      (requirement.slug ? `/${requirement.slug}` : "/") === route.path
-    );
-    const purpose = routePurposes.get(route.path);
-    return {
-      route: route.path,
-      purposeTags: purpose ? [purpose] : inferWebsiteHealthPurposeTags({
-        route: route.path,
-        title: route.title,
-        description: route.description
-      }),
-      contentLength: artifact.factBindings
-        .filter((binding) => binding.route === route.path)
-        .reduce((total, binding) => total + binding.text.length, 0),
-      priority: requirementIndex < 0
-        ? 0
-        : buildInput.intent.pageRequirements.length - requirementIndex
-    };
-  }));
+  const routeSelection = selectArtifactVisualRoutes(
+    artifact.routes,
+    buildInput.intent.pageRequirements
+  );
   const criteria: AssessmentCriterionInput[] = [
     artifactResult("trust.business_identity", buildInput.business.name && (buildInput.business.contacts.phone || buildInput.business.contacts.email || buildInput.business.locations.length) ? "pass" : "warning", artifact, generatedAt, `Verified business identity: ${buildInput.business.name}; public contact or location facts: ${Boolean(buildInput.business.contacts.phone || buildInput.business.contacts.email || buildInput.business.locations.length)}.`),
     artifactResult(
@@ -155,7 +147,7 @@ export async function assessSiteArtifact(input: {
       `${artifact.factBindings.filter((binding) => binding.origin === "structured_data").length} source-bound structured-data binding(s) and ${structuredDataMismatchFindings.length} structured-data mismatch finding(s) were retained.`
     ),
     artifactResult(
-      "truth.claim_support",
+      "release.claim_binding",
       unsupportedClaimFindings.length ? "fail" : unboundClaimFindings.length ? "warning" : "pass",
       artifact,
       generatedAt,
@@ -175,7 +167,7 @@ export async function assessSiteArtifact(input: {
         : "The retained artifact predates interactive navigation-reachability evidence."
     ),
     gateResult("functional.primary_external_destinations", "unknown", artifact, generatedAt, "", "The retained artifact gate did not independently probe third-party destinations."),
-    gateResult("functional.images_load", finding(/broken_image|asset\./).length ? "fail" : "pass", artifact, generatedAt, "No broken image or asset finding was recorded across browser-gated routes.", `${finding(/broken_image|asset\./).length} broken image or asset finding(s) were recorded.`),
+    gateResult("functional.images_load", brokenImageFindings.length ? "fail" : "pass", artifact, generatedAt, "No broken image or asset finding was recorded across browser-gated routes.", `${brokenImageFindings.length} broken image or asset finding(s) were recorded.`),
     gateResult(
       "functional.browser_errors",
       browserRuntimeFindings.length ? "warning" : "pass",
@@ -315,13 +307,22 @@ export async function assessSiteArtifact(input: {
       generatedAt,
       `Current retained browser evidence was checked for descriptive alt text on rendered business assets; ${altQualityFindings.length} rendered finding(s) were found.`
     ),
-    gateResult("accessibility.heading_structure", finding(/heading/i).length ? "fail" : "unknown", artifact, generatedAt, "", finding(/heading/i).length ? `${finding(/heading/i).length} heading-related finding(s) were recorded.` : "The retained artifact gate does not preserve a complete heading-outline audit."),
+    gateResult(
+      "accessibility.heading_structure",
+      headingStructureFindings.length ? "fail" : axeCompleted ? "pass" : "unknown",
+      artifact,
+      generatedAt,
+      "axe-core completed without a heading-order or primary-heading violation.",
+      headingStructureFindings.length
+        ? `${headingStructureFindings.length} heading-order or primary-heading violation(s) were recorded.`
+        : "The retained artifact predates a complete axe-core heading audit."
+    ),
     gateResult("accessibility.form_labels", formBindings.length === 0 ? "not_applicable" : finding(/capability\.form_label/).length ? "fail" : "pass", artifact, generatedAt, "All managed form fields passed the finalizer's label association check.", `${finding(/capability\.form_label/).length} form-label finding(s) were recorded.`)
   ];
   const location = buildInput.business.locations[0];
   const vertical = artifactVertical(artifact, buildInput);
   const agentReadiness = agentReadinessForArtifact({ artifact, buildInput, generatedAt });
-  const visualQuality = await evaluateArtifactVisualQuality({
+  const visualQuality = input.visualQuality ?? await evaluateArtifactVisualQuality({
     artifact,
     buildInput,
     observedAt: generatedAt,
@@ -357,6 +358,8 @@ export async function assessSiteArtifact(input: {
       serviceAreas: buildInput.business.serviceAreas.length > 0,
       proof: buildInput.business.proof.length > 0
     },
+    referenceAuthority: assessmentReferenceAuthorityFor(buildInput),
+    servingContract: assessmentServingContractFor({ targetKind: "site_artifact" }),
     routeSelection,
     siteInventory: siteInventoryForArtifact({ artifact, buildInput }),
     criteria,
@@ -386,6 +389,14 @@ export async function assessSiteArtifact(input: {
   });
 }
 
+export function artifactBrokenImageFindings(findings: SiteBuildArtifact["qa"]["findings"]) {
+  return findings.filter((item) => item.id === "render.broken_image" || item.id.startsWith("asset."));
+}
+
+export function artifactHeadingStructureFindings(findings: SiteBuildArtifact["qa"]["findings"]) {
+  return findings.filter((item) => /^accessibility\.axe\.[^.]+\.(?:heading-order|page-has-heading-one)$/.test(item.id));
+}
+
 function semanticRoutePurpose(input: {
   path: string;
   title: string;
@@ -395,8 +406,12 @@ function semanticRoutePurpose(input: {
 }) {
   if (input.declaredPurpose) return input.declaredPurpose;
   if (input.path === "/") return "home" as const;
-  if (/(?:^|\/)(?:contact|location|service-area|areas-served)(?:\/|$)/i.test(input.path)
-    || /\b(?:contact|location|service area|areas served)\b/i.test(input.title)) {
+  if (/(?:^|\/)(?:service-areas?|areas-served)(?:\/|$)/i.test(input.path)
+    || /\b(?:service areas?|areas served)\b/i.test(input.title)) {
+    return "location" as const;
+  }
+  if (/(?:^|\/)(?:contact|location)(?:\/|$)/i.test(input.path)
+    || /\b(?:contact|location)\b/i.test(input.title)) {
     return "contact" as const;
   }
   if (/(?:^|\/)about(?:\/|$)/i.test(input.path) || /\babout\b/i.test(input.title)) {
@@ -496,10 +511,14 @@ function contactValueMatches(rendered: string, verified: string) {
 function descriptiveRouteTitle(value: string, businessName: string) {
   const title = normalized(value);
   const business = normalizedBusinessNameForTitle(businessName);
+  const abbreviatedBrand = value
+    .split(/[|\-–—·]/)
+    .map((segment) => normalized(segment))
+    .find((segment) => segment.length >= 4 && business.startsWith(`${segment} `));
   return title.length >= 10
     && !/^(?:home|contact|services?|about|location)$/.test(title)
     && Boolean(business)
-    && title.includes(business);
+    && (title.includes(business) || Boolean(abbreviatedBrand));
 }
 
 function normalizedBusinessNameForTitle(value: string) {

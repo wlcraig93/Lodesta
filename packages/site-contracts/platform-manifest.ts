@@ -8,15 +8,21 @@ export const siteSandboxDurableObjectIdentity = "site-sandbox-durable-object@sha
 export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:49565a3bfd2348b4a3baa50be7641bccc4927a43d83b0222b4f262638509ff37";
 // Checked-in release identity for the compiler scaffold, including platform capability CSS.
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
-export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:2fdff1126a5ded7cd92c555a5fe2f21bb300d7a2e2fbc2e8de24a965a27b74e5";
-export const websiteManagerPromptIdentity = "website-manager@sha256:fbf163d754f290919f943ecbc4e5c22f432defa9dbdd823e7a15c73273171fe0";
+export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:ed09f13632d0af30ddfb0c305893d8bbd39fb9ae5e3c741045a9cbbaf7d2992c";
+export const websiteManagerPromptIdentity = "website-manager@sha256:17e292f25c7720bc6828beb1f6edc229ebfc9a346c6352eb57a15f7e700d783e";
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:eae1e92ea3eb70818e6a83cedab318494809320bae142a60b3691f46cc0e3a0d";
-export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:cacf7abcf827148fd1167599153b878c9ce6445ea9ce89238483c182a46502b9";
+export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:ff4b08a146fc55f67845626c9b3b6e54f6440fe0449d5fdb9a812e1734b9d7e7";
 export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:a9dc99a379ac4ccb9bd4a590bda1b4864ac05827a8d2e560fe06f46706974cab";
 
 export const siteTechnicalReleasePolicy = {
   schemaVersion: 1,
-  blockingPrefixes: ["capability.", "fact.", "identity."],
+  blockingPrefixes: [
+    "capability.",
+    "fact.",
+    "identity.",
+    "accessibility.axe.critical.",
+    "accessibility.axe.serious."
+  ],
   blockingIds: [
     "html.runtime_count",
     "html.runtime_identity",
@@ -37,9 +43,12 @@ export const siteTechnicalReleasePolicy = {
     "render.browser_default_document",
     "functional.navigation_toggle",
     "functional.navigation_reachability",
+    "functional.noninteractive_control",
     "functional.canonical_link",
     "functional.adjacent_duplicate_content",
     "functional.header_control_collision",
+    "functional.mobile_heading_measure",
+    "functional.text_measure",
     "functional.aria_reference",
     "functional.fragment_target"
   ]

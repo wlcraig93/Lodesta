@@ -1013,12 +1013,35 @@ export type SiteAgentFailureCode = z.infer<typeof siteAgentFailureCodeSchema>;
 export const siteAgentFailureCategorySchema = z.enum(["platform", "provider", "budget", "authoring", "worker"]);
 export type SiteAgentFailureCategory = z.infer<typeof siteAgentFailureCategorySchema>;
 
+export function isStaticSiteRoutePath(path: string) {
+  if (path === "/") return true;
+  if (
+    !path.startsWith("/")
+    || path.endsWith("/")
+    || path.length > 512
+    || path.includes("?")
+    || path.includes("#")
+    || path.includes("\\")
+  ) return false;
+  const segments = path.slice(1).split("/");
+  return segments.every((segment, index) => {
+    if (/^[a-z0-9][a-z0-9-]*$/.test(segment)) return true;
+    return index === segments.length - 1
+      && /^[a-z0-9][a-z0-9-]*\.(?:html?|php|aspx?)$/.test(segment);
+  });
+}
+
+const staticSiteRoutePathSchema = z.string()
+  .startsWith("/")
+  .max(512)
+  .refine(isStaticSiteRoutePath, "Expected / or lowercase static slug segments; the final segment may retain a legacy .html, .htm, .php, .asp, or .aspx extension.");
+
 export const siteArchitectureRouteSchema = z.object({
-  path: z.string().startsWith("/").max(512),
+  path: staticSiteRoutePathSchema,
   label: z.string().min(1).max(240),
   purpose: z.string().min(12).max(1000),
   pageType: z.string().min(1).max(120),
-  parentPath: z.string().startsWith("/").max(512).nullable(),
+  parentPath: staticSiteRoutePathSchema.nullable(),
   navigation: z.enum(["primary", "footer", "contextual", "none"]),
   sourcePaths: z.array(z.string().startsWith("/").max(2048))
 }).strict();
@@ -1027,7 +1050,7 @@ export type SiteArchitectureRoute = z.infer<typeof siteArchitectureRouteSchema>;
 export const siteArchitectureSourceDispositionSchema = z.object({
   sourcePath: z.string().startsWith("/").max(2048),
   disposition: z.enum(["preserved", "redirected", "canonical_duplicate", "retired"]),
-  targetPath: z.string().startsWith("/").max(512).nullable()
+  targetPath: staticSiteRoutePathSchema.nullable()
 }).strict();
 export type SiteArchitectureSourceDisposition = z.infer<typeof siteArchitectureSourceDispositionSchema>;
 
@@ -1035,7 +1058,7 @@ export const siteArchitecturePlanSchema = z.object({
   strategy: z.string().min(1).max(4000),
   primaryNavigation: z.array(z.object({
     label: z.string().min(1).max(120),
-    path: z.string().startsWith("/").max(512)
+    path: staticSiteRoutePathSchema
   }).strict()),
   routes: z.array(siteArchitectureRouteSchema).min(1),
   sourceDispositions: z.array(siteArchitectureSourceDispositionSchema),

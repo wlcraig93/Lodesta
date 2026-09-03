@@ -4,11 +4,12 @@ import { basename, resolve, sep } from "node:path";
 import { sha256, stableJson } from "../packages/business-data";
 import {
   configuredArtifactBlobStore,
+  LocalArtifactBlobStore,
   workspaceSourceSidecarKey,
   workspaceSourceSidecarSchema
 } from "../packages/site-artifacts";
 import { sitePublicBuildInputSchema, type AssetRevisionRef } from "../packages/site-contracts";
-import { sitePlatformRepository } from "../packages/platform-data";
+import { LocalSitePlatformRepository, sitePlatformRepository } from "../packages/platform-data";
 import { configuredSiteSandboxClientForDeployment } from "../packages/site-sandbox";
 import { prepareSiteArtifact, runArtifactBrowserGate } from "../packages/site-verification";
 
@@ -37,24 +38,37 @@ const allowedRoot = resolve(repositoryRoot, ".design");
 if (!reconstructionDirectory.startsWith(`${allowedRoot}${sep}`)) {
   throw new Error("The reconstruction directory must stay under .design/.");
 }
+const localRepositoryPath = process.env.LODESTA_LOCAL_DATA_PATH?.trim();
+const localBlobRoot = process.env.LODESTA_LOCAL_BLOB_DIR?.trim();
+if (Boolean(localRepositoryPath) !== Boolean(localBlobRoot)) {
+  throw new Error("LODESTA_LOCAL_DATA_PATH and LODESTA_LOCAL_BLOB_DIR must be provided together.");
+}
+const repository = localRepositoryPath
+  ? new LocalSitePlatformRepository(resolve(repositoryRoot, localRepositoryPath))
+  : sitePlatformRepository;
+const store = localBlobRoot
+  ? new LocalArtifactBlobStore(resolve(repositoryRoot, localBlobRoot))
+  : configuredArtifactBlobStore();
 
-const run = await sitePlatformRepository.getAgentRun(runId);
+const run = await repository.getAgentRun(runId);
 if (!run) throw new Error(`Unknown site-agent run ${runId}.`);
 if (!run.sandboxDeploymentId) throw new Error(`Run ${runId} has no pinned sandbox deployment.`);
 const candidateVersion = run.candidateVersionId
-  ? await sitePlatformRepository.getSiteVersion(run.candidateVersionId)
+  ? await repository.getSiteVersion(run.candidateVersionId)
   : undefined;
 if (run.candidateVersionId && !candidateVersion) throw new Error(`Candidate version ${run.candidateVersionId} is unavailable.`);
 const retainedBuildInputId = candidateVersion?.publicBuildInputId ?? run.publicBuildInputId;
 const [deployment, retainedBuildInput, events] = await Promise.all([
-  sitePlatformRepository.getSandboxDeployment(sandboxDeploymentOverrideId || run.sandboxDeploymentId),
-  sitePlatformRepository.getPublicBuildInput(retainedBuildInputId),
-  sitePlatformRepository.listAgentRunEvents(run.id, { limit: 5_000, order: "ascending" })
+  repository.getSandboxDeployment(sandboxDeploymentOverrideId || run.sandboxDeploymentId),
+  repository.getPublicBuildInput(retainedBuildInputId),
+  repository.listAgentRunEvents(run.id, { limit: 5_000, order: "ascending" })
 ]);
 if (!deployment) throw new Error(`Pinned sandbox deployment ${run.sandboxDeploymentId} is unavailable.`);
 if (!retainedBuildInput) throw new Error(`Retained public build input ${retainedBuildInputId} is unavailable.`);
+const retainedSourceSnapshots = (await Promise.all(
+  retainedBuildInput.sourceSnapshotIds.map((snapshotId) => repository.getSourceSnapshot(snapshotId))
+)).filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
 
-const store = configuredArtifactBlobStore();
 const adoptedAssets: AssetRevisionRef[] = [];
 for (const event of events.filter((item) => (
   item.kind === "tool_call"
@@ -90,7 +104,7 @@ const effectiveBuildInput = sitePublicBuildInputSchema.parse({
 
 const sourceDirectory = resolve(reconstructionDirectory, "workspace");
 const retainedWorkspaceRevision = candidateVersion
-  ? await sitePlatformRepository.getWorkspaceRevision(candidateVersion.workspaceRevisionId)
+  ? await repository.getWorkspaceRevision(candidateVersion.workspaceRevisionId)
   : undefined;
 if (candidateVersion && !retainedWorkspaceRevision) {
   throw new Error(`Retained workspace revision ${candidateVersion.workspaceRevisionId} is unavailable.`);
@@ -162,6 +176,7 @@ try {
   const prepared = prepareSiteArtifact({
     authoredArtifact,
     buildInput: effectiveBuildInput,
+    sourceSnapshots: retainedSourceSnapshots,
     runtimeSeriesId: effectiveBuildInput.capabilityConfiguration.trustedRuntimeSeries
   });
   for (let inspection = 1; inspection <= inspectionCount; inspection += 1) {

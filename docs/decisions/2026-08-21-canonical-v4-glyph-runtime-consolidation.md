@@ -1,6 +1,6 @@
 # Canonical V4 glyph and runtime consolidation
 
-Status: canonical validation complete; legacy retirement prepared for release
+Status: complete
 
 Date: 2026-08-21
 
@@ -55,6 +55,10 @@ The owner subsequently approved and applied the exact reset inventory. The separ
 Two fresh post-reset canonical generations passed the hard release gate: one rich automotive source and one sparse, dated wallcovering source. Both used `site-runtime-v4`, produced working managed modal navigation and custom managed forms, recorded zero `render.missing_glyph` findings, and completed every sandbox mutation on its first transport attempt without replay, recycle, or timeout. The sparse-source run required deterministic authoring repairs for copy, contrast, and typography, but never reconstructed navigation containment.
 
 The live retirement report then proved that every retained public input, workspace revision, artifact, and version references only the canonical series. No V1–V3 series is required for historical rendering. This satisfies the one-way-door precondition: the direct V4 source remains, promotion and rollback accept only V4, and the V1–V3 source transformations, capability-style branches, native SDK facade, R8 execution fixture, and obsolete cutover operators are removed together. Historical R8/V2 bytes remain available only in the sealed evidence archives.
+
+Under maintenance and exact confirmation `retire-legacy-runtimes:sha256:d76f1412d54d5f2b6ba9d0773adf7dbd854d199c822a6b83e1dfd545ac4db76e`, the operator deleted the three unreferenced V1–V3 series rows and their six patch rows. Postconditions proved that `site-runtime-v4` and patch `runtime_patch_76c31e69fbd1487b957c1e8290c0fa65` are the sole retained runtime authority, with no legacy references or active authoring work, and maintenance was released.
+
+The subsequent read-only blob audit found the six now-unreferenced legacy runtime files total only 69,635 bytes. The same report also found 111 unrelated transient managed orphans totaling about 16.5 MB and left 10,354 unknown-prefix objects untouched. No second write credential was created: deleting 69 KB did not justify another Cloudflare credential lifecycle or a broader unrelated purge. The inert blobs remain auditable and cannot be resolved through runtime authority.
 
 ## Promotion record correction
 

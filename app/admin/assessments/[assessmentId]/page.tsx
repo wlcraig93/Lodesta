@@ -53,9 +53,9 @@ function AssessmentInspector({ assessment }: { assessment: WebsiteAssessment }) 
   return (
     <>
       <section className="metric-row">
-        <Metric label="Canonical grade" value={assessment.grade ? `${assessment.grade.value} · ${assessment.grade.band}` : "Not scoreable"} />
+        <Metric label="Measured Website Health" value={assessment.grade ? `${assessment.grade.value}${assessment.grade.band ? ` · ${assessment.grade.band}` : ` · band ${assessment.grade.bandStatus.replaceAll("_", " ")}`}` : "Not scoreable"} />
         <Metric label="Uncapped raw score" value={assessment.score.rawValue === undefined ? "—" : `${assessment.score.rawValue}`} />
-        <Metric label="Author-only subscore" value={assessment.score.scopes.siteAuthor.value === undefined ? "—" : `${assessment.score.scopes.siteAuthor.value}`} />
+        <Metric label="Measured author-controlled health" value={assessment.score.scopes.siteAuthor.value === undefined ? "—" : `${assessment.score.scopes.siteAuthor.value}`} />
         <Metric label="Active weight" value={`${assessment.score.activeWeight}/100${assessment.score.renormalized ? " · renormalized" : ""}`} />
         <Metric label="Site evidence" value={`${Math.round(assessment.coverage.siteEvidence * 100)}%`} />
         <Metric label="Pipeline completeness" value={`${Math.round(assessment.coverage.pipelineCompleteness * 100)}%`} />
@@ -79,7 +79,7 @@ function AssessmentInspector({ assessment }: { assessment: WebsiteAssessment }) 
           </div>
         </div>
         <p className="muted">
-          Registry {assessment.producer.rubricIdentity} · Scanner {assessment.producer.scannerIdentity} · Route policy {assessment.producer.routeSelectionIdentity} · Input {assessment.producer.inputHash}
+          Registry {assessment.producer.rubricIdentity} · Scanner {assessment.producer.scannerIdentity} · Route policy {assessment.producer.routeSelectionIdentity} · Serving {assessment.servingContract.kind} · Reference {assessment.referenceAuthority.kind} · Input {assessment.producer.inputHash}
         </p>
       </section>
 

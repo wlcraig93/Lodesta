@@ -3,11 +3,13 @@ import type { AnyNode, Element } from "domhandler";
 import { canonicalSourceTokens } from "@/lib/source-text-blocks";
 import { scanSensitiveClaimText } from "@/lib/content-safety-scanners";
 import { isContinuousAvailabilityValue } from "@/packages/business-data/availability";
+import { googleAggregateRatingObservationFromSnapshot } from "@/packages/business-data/web-research";
 import {
   factBindingSchema,
   type FactBinding,
   type PublicFact,
-  type SitePublicBuildInput
+  type SitePublicBuildInput,
+  type SourceSnapshot
 } from "@/packages/site-contracts";
 import { factBindingPolicyIdentity } from "@/packages/site-contracts/platform-manifest";
 import type { ArtifactGateFinding } from "./contracts";
@@ -42,17 +44,22 @@ export class FactBindingValidator {
   validate(input: {
     routes: FactBindingValidationRoute[];
     buildInput: SitePublicBuildInput;
+    sourceSnapshots?: SourceSnapshot[];
   }): FactBindingValidationResult {
     const findings: ArtifactGateFinding[] = [];
+    const provisionalGoogleRatings = (input.sourceSnapshots ?? []).flatMap((snapshot) => {
+      const observation = googleAggregateRatingObservationFromSnapshot(snapshot);
+      return observation ? [observation.rating] : [];
+    });
     const facts = new Map(input.buildInput.publicFacts.map((fact) => [fact.id, fact]));
     const routes = input.routes.map((route) => visibleRoute(route, input.buildInput, facts, findings));
     const bindings = routes.flatMap((route) => route.bindings);
 
     for (const route of routes) {
-      findings.push(...bodyMarkerFindings(route, input.buildInput));
+      findings.push(...bodyMarkerFindings(route, input.buildInput, provisionalGoogleRatings));
       findings.push(...bodySensitiveFindings(route, input.buildInput));
-      findings.push(...metadataFindings(route, "title", route.title, input.buildInput));
-      findings.push(...metadataFindings(route, "description", route.description, input.buildInput));
+      findings.push(...metadataFindings(route, "title", route.title, input.buildInput, provisionalGoogleRatings));
+      findings.push(...metadataFindings(route, "description", route.description, input.buildInput, provisionalGoogleRatings));
       for (const renderedName of route.businessNameMarkerTexts) {
         if (normalizedText(renderedName) !== normalizedText(input.buildInput.business.name)) {
           findings.push(finding(
@@ -191,9 +198,9 @@ function visibleRoute(
   };
 }
 
-function bodyMarkerFindings(route: VisibleRoute, buildInput: SitePublicBuildInput) {
+function bodyMarkerFindings(route: VisibleRoute, buildInput: SitePublicBuildInput, provisionalGoogleRatings: number[]) {
   return factualMarkers(route.bodyText).flatMap((marker) => {
-    const supported = naturallySupportedFactualMarker(marker.text, buildInput)
+    const supported = naturallySupportedFactualMarker(marker.text, buildInput, provisionalGoogleRatings)
       || route.bindings.some((binding) => binding.span
       && marker.start >= binding.span.start
       && marker.end <= binding.span.end
@@ -225,7 +232,8 @@ function metadataFindings(
   route: VisibleRoute,
   surface: "title" | "description",
   text: string,
-  buildInput: SitePublicBuildInput
+  buildInput: SitePublicBuildInput,
+  provisionalGoogleRatings: number[]
 ) {
   const markers = factualMarkers(text).map((marker) => ({
     start: marker.start,
@@ -241,7 +249,7 @@ function metadataFindings(
       && exactTextOccurrenceContains(text, buildInput.business.name, match.start, match.end);
     const naturallySupported = match.category
       ? naturallySupportedSensitiveClaim(match as ReturnType<typeof scanSensitiveClaimText>[number], buildInput)
-      : naturallySupportedFactualMarker(match.matchedText, buildInput);
+      : naturallySupportedFactualMarker(match.matchedText, buildInput, provisionalGoogleRatings);
     const supported = canonicalNameSupported || naturallySupported || route.bindings.some((binding) => {
       if (!binding.span || !bindingSupportsText(binding, binding.text, buildInput)) return false;
       const occurrence = completeValueOccurrence(text, binding.text, match.start, match.end);
@@ -261,7 +269,13 @@ function metadataFindings(
   });
 }
 
-function naturallySupportedFactualMarker(text: string, buildInput: SitePublicBuildInput) {
+function naturallySupportedFactualMarker(
+  text: string,
+  buildInput: SitePublicBuildInput,
+  provisionalGoogleRatings: number[] = []
+) {
+  const rating = text.match(/^\s*(\d+(?:\.\d+)?)\s*stars?\s*$/i)?.[1];
+  if (rating && provisionalGoogleRatings.some((value) => String(value) === rating)) return true;
   return buildInput.publicFacts.some((fact) => (
     fact.kind === "phone" || fact.kind === "email"
   ) && factSupportsText(fact, text, true));

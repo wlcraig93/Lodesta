@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
 import type {
+  AssessmentAggregation,
   AssessmentApplicability,
   AssessmentControlOwner,
   AssessmentDimensionId,
+  AssessmentEvidenceTier,
   AssessmentEvaluatorType,
   AssessmentImpact,
-  AssessmentReleaseDisposition
+  AssessmentReleaseDisposition,
+  AssessmentScopeUnit
 } from "./contracts";
 import {
   agentReadinessCheckDefinitions,
@@ -106,6 +109,14 @@ export type AssessmentCriterionDefinition = {
   releaseDisposition: AssessmentReleaseDisposition;
   scoreEligible: boolean;
   publicEligible: boolean;
+  scopeUnit: AssessmentScopeUnit;
+  aggregation: AssessmentAggregation;
+  evidenceTier: AssessmentEvidenceTier;
+  anchors: {
+    pass: string;
+    warning: string;
+    fail: string;
+  };
   calibrationIdentity?: `calibration@sha256:${string}`;
   evidenceRequirements: string[];
   businessConsequence: string;
@@ -123,6 +134,10 @@ type CriterionOptions = {
   releaseDisposition?: AssessmentReleaseDisposition;
   scoreEligible?: boolean;
   publicEligible?: boolean;
+  scopeUnit?: AssessmentScopeUnit;
+  aggregation?: AssessmentAggregation;
+  evidenceTier?: AssessmentEvidenceTier;
+  anchors?: AssessmentCriterionDefinition["anchors"];
   calibrationIdentity?: `calibration@sha256:${string}`;
   evidenceRequirements?: string[];
 };
@@ -137,6 +152,7 @@ function criterion(
   options: CriterionOptions = {}
 ): AssessmentCriterionDefinition {
   const evaluatorType = options.evaluatorType ?? "deterministic";
+  const scopeUnit = options.scopeUnit ?? defaultScopeUnit(id);
   const definitionBase = {
     id,
     dimensionId,
@@ -163,12 +179,21 @@ function criterion(
     releaseDisposition: options.releaseDisposition ?? "advisory",
     scoreEligible: options.scoreEligible ?? impact !== "advisory",
     publicEligible: options.publicEligible ?? evaluatorType === "deterministic",
+    scopeUnit,
+    aggregation: options.aggregation ?? defaultAggregation(scopeUnit, evaluatorType),
+    evidenceTier: options.evidenceTier ?? defaultEvidenceTier(id, evaluatorType),
+    anchors: options.anchors ?? defaultAnchors(title, recommendation),
     ...(options.calibrationIdentity ? { calibrationIdentity: options.calibrationIdentity } : {}),
     evidenceRequirements: options.evidenceRequirements ?? ["retained criterion-specific evidence"],
     businessConsequence,
     recommendation,
     points: websiteAssessmentScoringPolicy.points[impact]
   };
+  if (definitionBase.aggregation === "worst_case"
+    && evaluatorType !== "deterministic"
+    && !options.calibrationIdentity) {
+    throw new Error(`Worst-case aggregation requires deterministic evidence or criterion calibration: ${id}`);
+  }
   return {
     ...definitionBase,
     definitionIdentity: contentIdentity("criterion", definitionBase) as `criterion@sha256:${string}`
@@ -180,10 +205,10 @@ const baseCriteria: AssessmentCriterionDefinition[] = [
   criterion("truth.phone_consistency", "business_truth", "Rendered phone numbers match the canonical business number", "critical", "A contradictory phone number sends customer calls to the wrong destination.", "Render only the publish-eligible canonical phone number.", { applicability: "business_specific", applicabilityRules: { requiredCanonicalFacts: ["phone"] }, controlOwner: "shared", releaseDisposition: "blocking", topics: ["phone", "factual_consistency"] }),
   criterion("truth.hours_consistency", "business_truth", "Rendered business hours do not contradict canonical hours", "critical", "Incorrect hours cause failed visits and missed calls.", "Render canonical hours exactly, or omit hours when no publish-eligible fact exists.", { applicability: "business_specific", applicabilityRules: { requiredCanonicalFacts: ["hours"] }, controlOwner: "shared", releaseDisposition: "blocking", topics: ["hours", "factual_consistency"] }),
   criterion("truth.structured_data_consistency", "business_truth", "Machine-readable business facts match canonical visible facts", "critical", "Conflicting structured data weakens trust and can propagate incorrect answers.", "Emit structured data only from publish-eligible canonical facts.", { applicability: "business_specific", controlOwner: "lodesta_platform", releaseDisposition: "blocking", topics: ["structured_data", "factual_consistency"] }),
-  criterion("truth.claim_support", "business_truth", "Specific factual and credibility claims are bound to canonical evidence", "critical", "Unsupported availability, credential, guarantee, longevity, contact, or metadata claims can mislead customers even when the rest of the site is polished.", "Bind each specific claim to a compatible publish-eligible fact or omit it.", { applicability: "business_specific", applicabilityRules: { targets: ["site_artifact"] }, controlOwner: "site_author", releaseDisposition: "blocking", topics: ["claim_support", "factual_consistency", "fact_binding"] }),
+  criterion("release.claim_binding", "business_truth", "Generated factual and credibility claims are bound to canonical evidence", "critical", "Unsupported availability, credential, guarantee, longevity, contact, or metadata claims can mislead customers even when the rest of the site is polished.", "Bind each specific generated claim to a compatible publish-eligible fact or omit it.", { applicability: "business_specific", applicabilityRules: { targets: ["site_artifact"] }, controlOwner: "site_author", releaseDisposition: "blocking", scoreEligible: false, publicEligible: false, topics: ["claim_support", "fact_binding"] }),
 
   criterion("functional.home_reachable", "functional_integrity", "Homepage returns a usable response", "critical", "Customers and search engines cannot use a site that does not load.", "Restore a successful HTTPS response for the canonical homepage.", { releaseDisposition: "blocking", controlOwner: "shared" }),
-  criterion("functional.https", "functional_integrity", "The website is served over HTTPS", "critical", "An insecure connection triggers browser warnings, weakens trust, and can expose customer data.", "Serve every public route over HTTPS and redirect HTTP requests to the canonical secure URL.", { releaseDisposition: "blocking", controlOwner: "lodesta_platform" }),
+  criterion("functional.https", "functional_integrity", "The website is served over HTTPS", "critical", "An insecure connection triggers browser warnings, weakens trust, and can expose customer data.", "Serve every public route over HTTPS and redirect HTTP requests to the canonical secure URL.", { releaseDisposition: "blocking", controlOwner: "lodesta_platform", applicabilityRules: { targets: ["public_url", "published_site"] } }),
   criterion("functional.internal_destinations", "functional_integrity", "Internal links reach valid destinations", "critical", "Broken internal paths interrupt customer journeys and waste search-engine crawl capacity.", "Repair or redirect every broken internal destination.", { releaseDisposition: "blocking" }),
   criterion("functional.navigation_reachability", "functional_integrity", "Primary navigation destinations are visibly reachable", "critical", "A destination that exists but cannot be activated is functionally unavailable to customers.", "Provide a visible, hit-testable link or interactive disclosure path to every primary destination at each breakpoint.", { releaseDisposition: "advisory", topics: ["navigation", "interaction"], evidenceRequirements: ["interactive hit-testing at desktop and mobile breakpoints", "disclosure activation evidence"] }),
   criterion("functional.primary_external_destinations", "functional_integrity", "Primary booking and ordering links work", "major", "A broken booking or ordering handoff loses customers at the point of intent.", "Replace or repair unavailable primary external destinations.", { releaseDisposition: "blocking", applicability: "capability", applicabilityRules: { capability: "external_booking_or_ordering" } }),
@@ -197,9 +222,9 @@ const baseCriteria: AssessmentCriterionDefinition[] = [
   criterion("responsive.target_size", "responsive_usability", "Interactive targets are comfortably usable on touch screens", "major", "Small or crowded targets create mis-taps and make navigation difficult.", "Increase target size and spacing for essential mobile controls.", { topics: ["touch_target", "mobile"], evidenceRequirements: ["computed control geometry at 390×844"] }),
   criterion("responsive.no_clipping_overlap", "responsive_usability", "Content and controls avoid clipping and overlap", "major", "Clipped or obscured content can hide key information and actions.", "Repair responsive layout constraints that clip or cover visible content.", { releaseDisposition: "blocking", topics: ["clipping", "overlap"], evidenceRequirements: ["browser geometry and hit-testing at required viewports"] }),
 
-  criterion("performance.lcp", "performance", "Largest Contentful Paint is healthy", "major", "Slow primary content increases abandonment before customers understand the offer.", "Reduce server delay, image weight, and render-blocking work to bring LCP within 2.5 seconds.", { controlOwner: "shared", evidenceRequirements: ["field metric or independent lab measurement"] }),
-  criterion("performance.inp", "performance", "Interaction to Next Paint is healthy", "major", "Sluggish interactions make calls, menus, and forms feel unresponsive.", "Reduce long main-thread tasks and third-party script work to bring INP within 200 ms.", { controlOwner: "shared", evidenceRequirements: ["field metric or supported interaction lab measurement"] }),
-  criterion("performance.cls", "performance", "Cumulative Layout Shift is healthy", "major", "Unexpected movement causes mis-clicks and undermines trust.", "Reserve media dimensions and stabilize late-loading content to keep CLS within 0.1.", { controlOwner: "shared", evidenceRequirements: ["field metric or independent lab measurement"] }),
+  criterion("performance.lcp", "performance", "Largest Contentful Paint is healthy", "major", "Slow primary content increases abandonment before customers understand the offer.", "Reduce server delay, image weight, and render-blocking work to bring LCP within 2.5 seconds.", { controlOwner: "shared", applicabilityRules: { targets: ["public_url", "published_site"] }, evidenceRequirements: ["field metric or independent lab measurement"] }),
+  criterion("performance.inp", "performance", "Interaction to Next Paint is healthy", "major", "Sluggish interactions make calls, menus, and forms feel unresponsive.", "Reduce long main-thread tasks and third-party script work to bring INP within 200 ms.", { controlOwner: "shared", applicabilityRules: { targets: ["public_url", "published_site"] }, evidenceRequirements: ["field metric or supported interaction lab measurement"] }),
+  criterion("performance.cls", "performance", "Cumulative Layout Shift is healthy", "major", "Unexpected movement causes mis-clicks and undermines trust.", "Reserve media dimensions and stabilize late-loading content to keep CLS within 0.1.", { controlOwner: "shared", applicabilityRules: { targets: ["public_url", "published_site"] }, evidenceRequirements: ["field metric or independent lab measurement"] }),
 
   criterion("accessibility.axe_critical", "accessibility", "No critical automated accessibility violations are detected", "critical", "Critical accessibility barriers can prevent customers from completing core tasks.", "Resolve every critical automated accessibility violation and verify with assistive technology.", { releaseDisposition: "blocking" }),
   criterion("accessibility.axe_serious", "accessibility", "No serious automated accessibility violations are detected", "major", "Serious accessibility defects make important content or controls unusable for some customers.", "Resolve serious automated violations, prioritizing forms, navigation, contrast, and names."),
@@ -209,18 +234,19 @@ const baseCriteria: AssessmentCriterionDefinition[] = [
 
   criterion("discoverability.title", "search_answer_discoverability", "Pages use descriptive, distinct titles", "major", "Weak or missing titles make pages harder to understand in search results.", "Give each important page a specific title describing the service and market.", { controlOwner: "shared" }),
   criterion("discoverability.meta_description", "search_answer_discoverability", "Pages provide useful, distinct search descriptions", "minor", "Missing or duplicated descriptions reduce control over how the business appears in search.", "Write a distinct, useful description for each important page.", { controlOwner: "shared" }),
-  criterion("discoverability.canonical", "search_answer_discoverability", "The homepage declares a canonical URL", "minor", "Ambiguous canonical URLs can split indexing signals.", "Declare the preferred canonical HTTPS URL.", { controlOwner: "lodesta_platform" }),
-  criterion("discoverability.robots", "search_answer_discoverability", "robots.txt is available and permits important pages", "major", "Accidental crawl restrictions can keep the site out of search and answer systems.", "Publish a valid robots.txt and allow important public routes.", { controlOwner: "lodesta_platform" }),
-  criterion("discoverability.sitemap", "search_answer_discoverability", "An XML sitemap is discoverable", "minor", "A sitemap helps search and answer systems consistently discover important pages.", "Publish and reference an XML sitemap containing canonical public routes.", { controlOwner: "lodesta_platform" }),
+  criterion("discoverability.canonical", "search_answer_discoverability", "The homepage declares a canonical URL", "minor", "Ambiguous canonical URLs can split indexing signals.", "Declare the preferred canonical HTTPS URL.", { controlOwner: "lodesta_platform", applicabilityRules: { targets: ["public_url", "published_site"] } }),
+  criterion("discoverability.robots", "search_answer_discoverability", "robots.txt is available and permits important pages", "major", "Accidental crawl restrictions can keep the site out of search and answer systems.", "Publish a valid robots.txt and allow important public routes.", { controlOwner: "lodesta_platform", applicabilityRules: { targets: ["public_url", "published_site"] } }),
+  criterion("discoverability.sitemap", "search_answer_discoverability", "An XML sitemap is discoverable", "minor", "A sitemap helps search and answer systems consistently discover important pages.", "Publish and reference an XML sitemap containing canonical public routes.", { controlOwner: "lodesta_platform", applicabilityRules: { targets: ["public_url", "published_site"] } }),
   criterion("discoverability.local_schema", "search_answer_discoverability", "Local business structured data is present", "minor", "Missing structured data makes business identity and local facts harder for machines to interpret.", "Add accurate LocalBusiness-compatible JSON-LD bound to verified business facts.", { controlOwner: "lodesta_platform" }),
 
   criterion("local_content.service_detail", "content_intent_coverage", "Core services have substantive detail", "major", "Thin service coverage gives customers and search engines little reason to choose the business.", "Explain scope, customer fit, process, and differentiators for each core service."),
   criterion("local_content.location_clarity", "content_intent_coverage", "The primary service location or area is clear", "major", "Customers cannot confidently act if they are unsure whether the business serves them.", "State the verified location or service area in prominent site content.", { applicability: "business_specific", controlOwner: "shared" }),
   criterion("local_content.service_area_depth", "content_intent_coverage", "Local service coverage is specific", "minor", "Generic location mentions do not answer local intent or establish market relevance.", "Add factual, non-duplicative content for the markets actually served.", { applicability: "business_specific", applicabilityRules: { requiredCanonicalFacts: ["serviceAreas"] }, controlOwner: "shared" }),
   criterion("local_content.vertical_requirements", "content_intent_coverage", "Vertical-specific customer questions are covered", "minor", "Missing category-specific details force customers to call for basic qualification.", "Cover the decision criteria customers expect for this business category.", { applicability: "vertical", evaluatorType: "model", scoreEligible: false, publicEligible: false, topics: ["vertical", "decision_support"] }),
-  criterion("content.five_second_clarity", "content_intent_coverage", "The business, service, and market are clear within five seconds", "major", "Visitors may leave when the opening does not quickly establish who the business helps and what it offers.", "Make the opening identify the business, primary offer, customer need, and market with a clear action.", { evaluatorType: "model", scoreEligible: false, publicEligible: false, topics: ["clarity", "hero"] }),
-  criterion("content.priority_intent_coverage", "content_intent_coverage", "The highest-priority customer intent has a substantive destination", "major", "A missing priority journey leaves the most valuable customer question unanswered.", "Publish and link substantive content for the highest-priority intent in SiteIntent.", { applicability: "business_specific", evidenceRequirements: ["retained SiteIntent priority slot and rendered semantic route evidence"] }),
-  criterion("content.decision_support", "content_intent_coverage", "Service content supports a customer decision", "major", "Generic service descriptions do not help customers judge fit, scope, process, or next steps.", "Add specific scope, qualification, process, proof, and next-step information.", { evaluatorType: "model", scoreEligible: false, publicEligible: false, topics: ["service_detail", "decision_support"] }),
+  criterion("content.five_second_clarity", "content_intent_coverage", "The business, service, and market are clear within five seconds", "major", "Visitors may leave when the opening does not quickly establish who the business helps and what it offers.", "Make the opening identify the business, primary offer, customer need, and market with a clear action.", { evaluatorType: "model", scoreEligible: false, publicEligible: false, topics: ["clarity", "hero"], scopeUnit: "page", aggregation: "fraction_passing", anchors: { pass: "The complete opening unit makes the business, primary offer, relevant customer need or value, market, and truthful next action immediately clear.", warning: "The opening becomes clear only after reading supporting material, or one important element is vague or weakly prioritized.", fail: "The opening could plausibly belong to many unrelated businesses or leaves the primary offer, market, or next action materially unclear." } }),
+  criterion("content.priority_intent_coverage", "content_intent_coverage", "The highest-priority customer intent has a substantive destination", "major", "A missing priority journey leaves the most valuable customer question unanswered.", "Publish and link substantive content for the highest-priority intent in SiteIntent.", { applicability: "business_specific", applicabilityRules: { targets: ["site_artifact", "published_site"] }, evidenceRequirements: ["retained SiteIntent priority slot and rendered semantic route evidence"], scopeUnit: "route_family", aggregation: "any_failure" }),
+  criterion("content.decision_support", "content_intent_coverage", "Service content supports a customer decision", "major", "Generic service descriptions do not help customers judge fit, scope, process, or next steps.", "Add specific scope, qualification, process, proof, and next-step information.", { evaluatorType: "model", scoreEligible: false, publicEligible: false, topics: ["service_detail", "decision_support"], scopeUnit: "route_family", aggregation: "fraction_passing", anchors: { pass: "The assessed service routes give customers specific, evidence-grounded help judging fit, scope, process, proof, and next steps.", warning: "The routes provide useful service information but leave one or more important decision questions generic, repetitive, or incomplete.", fail: "The routes are predominantly boilerplate, duplicative, or too thin to help a customer judge fit or take the next step." } }),
+  criterion("content.route_family_distinctiveness", "content_intent_coverage", "Route families provide distinct customer value", "major", "A large site built from repeated shells can look complete while giving customers little additional help.", "Give each retained route a distinct customer question, evidence set, or decision-support job; consolidate routes that cannot earn one.", { evaluatorType: "model", scoreEligible: false, publicEligible: false, topics: ["route_family", "distinctiveness", "content_depth"], scopeUnit: "route_family", aggregation: "fraction_passing", anchors: { pass: "Each assessed route earns its existence through a distinct customer question, evidence set, or decision-support purpose.", warning: "Most routes are useful, but some repeat the same structure or argument without enough additional customer value.", fail: "The route family is substantially composed of interchangeable pages whose primary difference is substituted service or location wording." } }),
   criterion("content.hours_presence", "content_intent_coverage", "Verified business hours are available when applicable", "advisory", "Customers may have to leave the site to learn when the business is available.", "Display publish-eligible canonical hours in clear local-time notation.", { applicability: "business_specific", applicabilityRules: { requiredCanonicalFacts: ["hours"] }, controlOwner: "shared", topics: ["hours", "coverage"] }),
 
   criterion("trust.about", "trust_proof", "The site explains who is behind the business", "minor", "Local customers use people, history, and approach to judge credibility.", "Add a factual about section or page grounded in verified business information.", { controlOwner: "shared" }),
@@ -235,6 +261,11 @@ const baseCriteria: AssessmentCriterionDefinition[] = [
   criterion("conversion.service_navigation", "conversion_usability", "Services are represented by navigable destinations", "major", "Customers cannot evaluate fit when offerings are buried on a generic homepage.", "Create and link useful destinations for the business's core offerings."),
   criterion("conversion.contact_page", "conversion_usability", "A contact or location destination is easy to reach", "major", "Customers need a reliable destination for contact details, hours, and directions.", "Publish and link a dedicated contact or location destination."),
   criterion("conversion.mobile_persistent_action", "conversion_usability", "A persistent mobile action is available", "advisory", "A persistent action can shorten the path from evaluation to contact.", "Consider a restrained sticky call, book, or request action on mobile."),
+
+  criterion("copy.opening_specificity", "visual_editorial_craft", "Opening copy is specific to this business", "major", "Generic opening language weakens differentiation and makes otherwise polished work feel generated.", "Use source-earned category, market, customer-situation, proof, or differentiator language that nearby competitors could not adopt unchanged.", { evaluatorType: "human", scoreEligible: false, publicEligible: false, topics: ["copy_quality", "opening", "specificity"], scopeUnit: "page", aggregation: "fraction_passing", evidenceTier: "human", anchors: { pass: "The opening is unmistakably specific to this business and passes the counterfactual-swap test.", warning: "The opening is clear but relies partly on reusable local-business language or underuses available differentiating evidence.", fail: "The opening is primarily generic, slogan-led, or interchangeable with nearby competitors." } }),
+  criterion("copy.customer_decision_language", "visual_editorial_craft", "Copy uses concrete customer language and supports decisions", "major", "Polished but vague copy can increase reading without reducing customer uncertainty.", "Use ordinary customer situations and concrete scope, process, proof, and next-step language.", { evaluatorType: "human", scoreEligible: false, publicEligible: false, topics: ["copy_quality", "decision_support", "customer_language"], scopeUnit: "route_family", aggregation: "fraction_passing", evidenceTier: "human", anchors: { pass: "The assessed routes use concrete customer language and answer the questions needed to judge fit and act.", warning: "The copy is readable and accurate but leaves recurring decision questions vague or relies on broad process language.", fail: "The copy is dominated by internal, abstract, repetitive, or promotional language that does not help customers decide." } }),
+  criterion("copy.cross_route_coherence", "visual_editorial_craft", "Copy remains coherent without becoming repetitive across routes", "minor", "Voice drift and repeated arguments make a multi-page site feel assembled rather than authored.", "Maintain one recognizable voice while giving each route a distinct message and purpose.", { evaluatorType: "human", scoreEligible: false, publicEligible: false, topics: ["copy_quality", "route_family", "coherence"], scopeUnit: "route_family", aggregation: "fraction_passing", evidenceTier: "human", anchors: { pass: "The route family has a coherent voice and argument while each route contributes distinct, useful language.", warning: "Voice is mostly consistent, but several routes repeat phrasing, structure, or calls to action too closely.", fail: "The site shows material voice drift or extensive repeated copy across important routes." } }),
+  criterion("copy.action_truthfulness", "visual_editorial_craft", "Calls to action are specific and capability-truthful", "major", "An attractive but unsupported action misleads high-intent customers at the point of conversion.", "Name the real next step and bind it to an available call, form, booking, ordering, or approved external destination.", { evaluatorType: "human", scoreEligible: false, publicEligible: false, topics: ["copy_quality", "cta", "capability"], scopeUnit: "capability", aggregation: "any_failure", evidenceTier: "human", anchors: { pass: "Every assessed primary action names a real, available next step in clear customer language.", warning: "Actions are truthful but one or more labels are generic, weakly prioritized, or imprecise about the next step.", fail: "A primary action implies an unavailable capability, destination, timing, outcome, or transaction." } }),
 ];
 
 const duplicateAgentIds = new Set([
@@ -407,6 +438,38 @@ function duplicates(values: string[]) {
     seen.add(value);
   }
   return [...duplicatesFound];
+}
+
+function defaultScopeUnit(id: string): AssessmentScopeUnit {
+  if (/form|booking|ordering|protocol|commerce|capability/.test(id)) return "capability";
+  if (/route|service_detail|service_navigation|intent_coverage/.test(id)) return "route_family";
+  if (/render|responsive|mobile|typography|heading|image|title|description|visual/.test(id)) return "page";
+  return "site";
+}
+
+function defaultAggregation(
+  scopeUnit: AssessmentScopeUnit,
+  evaluatorType: AssessmentEvaluatorType
+): AssessmentAggregation {
+  if (scopeUnit === "site" || scopeUnit === "capability") return "site_wide";
+  return evaluatorType === "deterministic" ? "any_failure" : "fraction_passing";
+}
+
+function defaultEvidenceTier(id: string, evaluatorType: AssessmentEvaluatorType): AssessmentEvidenceTier {
+  if (evaluatorType === "human") return "human";
+  if (evaluatorType === "model") return "model";
+  if (/render|responsive|mobile|images_load|browser|axe|heading|form_labels|navigation_reachability/.test(id)) {
+    return "browser";
+  }
+  return "deterministic";
+}
+
+function defaultAnchors(title: string, recommendation: string) {
+  return {
+    pass: `Retained evidence supports the criterion: ${title}.`,
+    warning: `Retained evidence shows a limited or inconsistent opportunity. ${recommendation}`,
+    fail: `Retained evidence shows a clear material failure. ${recommendation}`
+  };
 }
 
 function contentIdentity(name: string, value: unknown) {

@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { isContinuousAvailabilityValue as controllerAvailability } from "../packages/business-data/availability";
+import {
+  googleAggregateRatingObservationFromSnapshot,
+  retainedProspectGoogleAggregateRatingSnapshot
+} from "../packages/business-data/web-research";
 import { sitePublicBuildInputSchema, sourceSnapshotPageSchema, sourceSnapshotSchema, type SitePublicBuildInput } from "../packages/site-contracts";
 import { continuousAvailabilityConformanceVectors } from "../packages/site-contracts/availability-conformance";
 import {
   agentAuthoredArtifactSchema,
+  routeFamilyContactSheetRouteGroups,
   finalizePreparedArtifact,
   normalizeAgentAuthoredArtifact,
   prepareSiteArtifact,
@@ -29,6 +34,14 @@ assert.deepEqual(
   ),
   ["/services", "/"],
   "A bounded route-family inspection did not preserve its requested available route scope."
+);
+assert.deepEqual(
+  routeFamilyContactSheetRouteGroups(
+    ["/", "/services", "/services/ants", "/services/rodents", "/contact"].map((route) => ({ route })),
+    ["/", "/services", "/services/ants", "/services/rodents", "/contact"]
+  ),
+  [["/", "/services", "/services/ants"], ["/services/rodents", "/contact"]],
+  "A five-route family comparison did not remain readable across two sheets."
 );
 assert.deepEqual(
   retainedVisualInspectionRoutePaths([{ path: "/" }]),
@@ -145,6 +158,56 @@ assert.deepEqual(
 );
 assert.equal("areaServed" in baselineStructuredData, false, "Structured data invented a service area.");
 assert.equal("geo" in baselineStructuredData, false, "Structured data invented coordinates.");
+
+const privacySourceText = [
+  "Privacy Policy",
+  "We collect contact information that you choose to provide when requesting an estimate or contacting our repair shop.",
+  "We use that information to respond to your request, schedule service, maintain business records, and improve customer support.",
+  "We do not sell personal information. We may share information with service providers that help operate this website or deliver requested services.",
+  "You may contact Northstar Collision Repair to ask about your information, request a correction, or raise a privacy concern.",
+  "We retain information only as long as reasonably necessary for the purposes described here and applicable legal obligations."
+].join(" ");
+const privacySourcePage = sourcePage("source_page_privacy", "/privacy", "Privacy Policy", 92, privacySourceText);
+const summarizedPrivacy = prepareSiteArtifact({
+  authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: input.business.name,
+    sharedCss: "body{font:16px Arial,sans-serif}",
+    routes: [
+      { path: "/", title: input.business.name, description: "Collision repair in Austin.", bodyHtml: validBody },
+      { path: "/privacy", title: "Privacy Policy", description: "How the shop handles contact information.", bodyHtml: "<main><h1>Privacy Policy</h1><p>We respect your privacy and use submitted information to reply to you.</p></main>" }
+    ]
+  })),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourcePages: [privacySourcePage]
+});
+assert(
+  errors(summarizedPrivacy).some((finding) => finding.id === "fact.legal_source_preservation" && finding.route === "/privacy"),
+  "A generated legal summary replaced substantive source provisions without a hard finding."
+);
+assert.equal(finalizeForTest(summarizedPrivacy, input).qa.hardGate, "failed", "A materially summarized source legal page passed release verification.");
+
+const preservedPrivacy = prepareSiteArtifact({
+  authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: input.business.name,
+    sharedCss: "body{font:16px Arial,sans-serif}",
+    routes: [
+      { path: "/", title: input.business.name, description: "Collision repair in Austin.", bodyHtml: validBody },
+      { path: "/privacy", title: "Privacy Policy", description: "How the shop handles contact information.", bodyHtml: `<main><h1>Privacy Policy</h1><p>${privacySourceText}</p></main>` }
+    ]
+  })),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourcePages: [privacySourcePage]
+});
+assert(
+  !errors(preservedPrivacy).some((finding) => finding.id === "fact.legal_source_preservation"),
+  "A substantively preserved legal source page was rejected."
+);
 
 const serviceAreaFact = {
   ...phone,
@@ -529,6 +592,24 @@ assert(
   errors(unsupportedSafeRemoval).some((finding) => finding.id === "fact.sensitive_unsupported"),
   "An unsupported safe service-performance claim passed without canonical evidence."
 );
+const unsupportedSafeHandling = prepareSiteArtifact({
+  authoredArtifact: artifact("<main><h1>Wildlife control</h1><p>The team helps residents safely address nuisance pests and wildlife.</p></main>"),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4"
+});
+assert(
+  errors(unsupportedSafeHandling).some((finding) => finding.id === "fact.sensitive_unsupported"),
+  "An unsupported safely-address service claim escaped the factual gate."
+);
+const unsupportedSaferFeelingOutcome = prepareSiteArtifact({
+  authoredArtifact: artifact("<main><h1>Pest control</h1><p>Clearer rooms, safer-feeling yards, fewer unwanted insects.</p></main>"),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4"
+});
+assert(
+  errors(unsupportedSaferFeelingOutcome).some((finding) => finding.id === "fact.sensitive_unsupported"),
+  "An unsupported safer-feeling outcome claim escaped the factual gate."
+);
 const unsupportedServiceCadence = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Pest control</h1><p>Routine service visits are offered every 2 months.</p></main>"),
   buildInput: input,
@@ -600,6 +681,82 @@ assert.equal(blockedFactArtifact.qa.hardGate, "failed", "an unsupported factual 
 assert(
   blockedFactArtifact.qa.findings.some((finding) => finding.id === "fact.sensitive_unsupported" && finding.severity === "error"),
   "the unsupported factual claim was downgraded instead of remaining a blocker"
+);
+const aggregateRatingSnapshot = sourceSnapshotSchema.parse({
+  schemaVersion: 1,
+  id: "source_google_aggregate_rating",
+  businessId: input.businessId,
+  sourceType: "web_research",
+  sourceUrl: "https://northstar.example/",
+  contentHash: `sha256:${"4".repeat(64)}`,
+  capturedAt: "2026-08-31T12:00:00.000Z",
+  payload: {
+    kind: "google_aggregate_rating_research",
+    observation: {
+      kind: "google_aggregate_rating",
+      status: "matched",
+      provider: "google",
+      businessName: "Northstar Collision Repair",
+      locality: "Austin, TX",
+      rating: 4.8,
+      reviewCount: 127,
+      observedAt: "2026-08-31T12:00:00.000Z",
+      identityEvidence: "Name, locality, and first-party website matched."
+    }
+  }
+});
+const retainedProspectRatingSnapshot = retainedProspectGoogleAggregateRatingSnapshot({
+  businessId: input.businessId,
+  businessName: "Northstar Collision Repair",
+  sourceUrl: "https://northstar.example/",
+  rating: 4.8,
+  reviewCount: 127,
+  locality: "Austin, TX",
+  googleBusinessName: "Northstar Collision Repair",
+  observedAt: "2026-08-31T12:00:00.000Z"
+});
+assert(retainedProspectRatingSnapshot, "A valid retained browser prospect rating was not materialized.");
+assert.deepEqual(
+  googleAggregateRatingObservationFromSnapshot(retainedProspectRatingSnapshot),
+  {
+    kind: "google_aggregate_rating",
+    status: "matched",
+    provider: "google",
+    businessName: "Northstar Collision Repair",
+    locality: "Austin, TX",
+    rating: 4.8,
+    reviewCount: 127,
+    observedAt: "2026-08-31T12:00:00.000Z",
+    identityEvidence: "Retained browser prospect observation matched to the exact first-party website."
+  },
+  "Retained browser prospect evidence did not preserve the exact aggregate fact."
+);
+assert.equal(retainedProspectGoogleAggregateRatingSnapshot({
+  businessId: input.businessId,
+  businessName: "Northstar Collision Repair",
+  sourceUrl: "https://northstar.example/",
+  rating: 5.2,
+  observedAt: "2026-08-31T12:00:00.000Z"
+}), undefined, "An invalid retained prospect rating was accepted.");
+const supportedAggregateRating = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main><h1>Collision repair with local trust</h1><p>4.8 stars on Google</p></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourceSnapshots: [aggregateRatingSnapshot]
+});
+assert(
+  !errors(supportedAggregateRating).some((finding) => finding.id === "fact.undeclared_marker"),
+  "The exact retained aggregate rating was rejected by factual verification."
+);
+const mismatchedAggregateRating = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main><h1>Collision repair with local trust</h1><p>4.9 stars on Google</p></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourceSnapshots: [aggregateRatingSnapshot]
+});
+assert(
+  errors(mismatchedAggregateRating).some((finding) => finding.id === "fact.undeclared_marker"),
+  "A rating that did not match the retained web observation passed factual verification."
 );
 const unboundReturnServicePromise = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Service that stands behind the work</h1><p>If pests return within your service coverage period, we will come back and re-treat your home at no additional cost.</p></main>"),
@@ -963,9 +1120,15 @@ const researchSnapshot = sourceSnapshotSchema.parse({
     coverage: "researched"
   }
 });
+const ratingContextSnapshot = sourceSnapshotSchema.parse({
+  ...researchSnapshot,
+  id: "source_google_rating_context_fixture",
+  contentHash: `sha256:${"3".repeat(64)}`,
+  payload: aggregateRatingSnapshot.payload
+});
 const researchedContext = createSiteAuthoringContext({
   buildInput: input,
-  snapshots: [structuredContextSnapshot, researchSnapshot],
+  snapshots: [structuredContextSnapshot, researchSnapshot, ratingContextSnapshot],
   pages: [
     sourcePage("source_page_home", "/", "Northstar Collision Repair", 550),
     sourcePage("source_page_collision", "/collision-repair", "Collision Repair", 900),
@@ -976,8 +1139,17 @@ assert.equal(researchedContext.publishableBusiness.contacts.phone, input.busines
 assert(researchedContext.ownerAuthority.ownerConfirmedFacts.every((fact) => fact.source.ownerConfirmed));
 assert.equal(researchedContext.ownerAuthority.ownerOperationalRevision, input.ownerOperationalRevision);
 assert.equal(researchedContext.ownerAuthority.ownerIntentRevision, input.ownerIntentRevision);
-assert.equal(researchedContext.provisionalSources.length, 2);
+assert.equal(researchedContext.provisionalSources.length, 3);
 assert(JSON.stringify(researchedContext.provisionalSources).includes("directory.example"), "Raw provisional research was not made available to the authoring agent.");
+assert.deepEqual(researchedContext.provisionalObservations.googleAggregateRating, {
+  rating: 4.8,
+  displayText: "4.8 stars on Google",
+  provider: "google",
+  observedAt: "2026-08-31T12:00:00.000Z",
+  sourceSnapshotId: ratingContextSnapshot.id,
+  untrusted: true,
+  destination: "not_authorized_unless_present_in_managed_links"
+});
 assert.equal(researchedContext.provisionalSources[0]?.websiteInventory?.pages.length, 3, "The complete compact page inventory was not included in authoring context.");
 assert(researchedContext.provisionalSources[0]?.websiteInventory?.groupings.linkCommunities.length, "Neutral link-community groupings were not included in authoring context.");
 assert.deepEqual(researchedContext.managedCapabilities.forms, input.forms);
@@ -1061,7 +1233,7 @@ function errors(preparedArtifact: ReturnType<typeof prepareSiteArtifact>) {
   return preparedArtifact.findings.filter((finding) => finding.severity === "error");
 }
 
-function sourcePage(id: string, path: string, title: string, wordCount: number) {
+function sourcePage(id: string, path: string, title: string, wordCount: number, extractedText = `${title} retained source content`) {
   return sourceSnapshotPageSchema.parse({
     schemaVersion: 1,
     id,
@@ -1083,7 +1255,7 @@ function sourcePage(id: string, path: string, title: string, wordCount: number) 
     rawContentHash: `sha256:${"c".repeat(64)}`,
     templateSignature: `sha256:${"a".repeat(64)}`,
     linkProminence: path === "/" ? 3 : 1,
-    extractedText: `${title} retained source content`,
+    extractedText,
     textContentHash: `sha256:${"d".repeat(64)}`,
     producer: "test",
     inputHash: `sha256:${"c".repeat(64)}`,

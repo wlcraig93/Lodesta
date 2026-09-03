@@ -75,6 +75,43 @@ const home = prepared.routes.find((route) => route.path === "/")!.html;
 const contact = prepared.routes.find((route) => route.path === "/contact")!.html;
 assert(home.includes('href="site.css"') && home.includes('href="contact/"'), "Homepage paths are not portable.");
 assert(contact.includes('href="../site.css"') && contact.includes('href="../"'), "Nested route paths are not portable.");
+const legacyFileRoutePrepared = prepareSiteArtifact({
+  buildInput,
+  runtimeSeriesId: "site-runtime-v4",
+  authoredArtifact: {
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: String(name.value),
+    sharedCss: "body{font:16px Arial,sans-serif}",
+    routes: [
+      {
+        path: "/",
+        title: String(name.value),
+        description: "Fixture homepage with a retained legacy service URL.",
+        bodyHtml: `<main><h1 data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</h1><a href="/legacy-service.html">Legacy service</a></main>`
+      },
+      {
+        path: "/legacy-service.html",
+        title: `Legacy service | ${name.value}`,
+        description: "Fixture service retained at its exact legacy file-like URL.",
+        bodyHtml: `<main><h1>Legacy service</h1><a href="/">Home</a></main>`
+      }
+    ],
+    capabilityBindings: []
+  }
+});
+const legacyFileRouteHome = legacyFileRoutePrepared.routes.find((route) => route.path === "/")!.html;
+assert(
+  legacyFileRouteHome.includes('href="legacy-service.html"')
+    && !legacyFileRouteHome.includes('href="legacy-service.html/"'),
+  "The finalizer rewrote an exact legacy file-like route into a trailing-slash URL."
+);
+const structuredData = JSON.parse(home.match(/<script type="application\/ld\+json">([^<]+)<\/script>/)?.[1] ?? "null");
+assert.deepEqual(
+  structuredData?.makesOffer?.map((offer: { itemOffered?: { name?: string } }) => offer.itemOffered?.name),
+  buildInput.business.offerings.map((offering) => offering.name),
+  "Structured offerings did not come exclusively from normalized BusinessOffering authority."
+);
 
 const browser = await runArtifactBrowserGate({
   prepared,
@@ -375,6 +412,42 @@ assert(
   "An empty first viewport with both the main heading and conversion below the fold escaped advisory author feedback."
 );
 
+const mobileFormBeforeHeadingPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/contact"
+    ? {
+        ...route,
+        html: route.html.replace(
+          '<section class="panel">',
+          '<section class="panel"><a class="button mobile-leading-action" href="/contact">Request help</a>'
+        )
+      }
+    : route),
+  files: prepared.files.map((file) => file.path === "site.css"
+    ? {
+        ...file,
+        bytes: Buffer.from(`${file.bytes.toString("utf8")}\n@media(max-width:640px){main{display:flex;flex-direction:column}.panel{order:-1}}`)
+      }
+    : file)
+};
+const mobileFormBeforeHeadingBrowser = await runArtifactBrowserGate({
+  prepared: mobileFormBeforeHeadingPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-mobile-form-before-heading",
+  routePaths: ["/contact"],
+  viewports: [{ name: "mobile", width: 390, height: 844 }]
+});
+const mobileFormBeforeHeadingFinding = mobileFormBeforeHeadingBrowser.findings.find((finding) =>
+  finding.id === "render.primary_geometry" && finding.route === "/contact");
+assert(
+  mobileFormBeforeHeadingFinding?.severity === "warning"
+    && mobileFormBeforeHeadingFinding.message.includes("heading precedes main action: false")
+    && mobileFormBeforeHeadingFinding.message.includes("do not reorder a form or action above the page purpose")
+    && !isTechnicalReleaseBlocker(mobileFormBeforeHeadingFinding),
+  "A mobile conversion block visually reordered ahead of its page heading escaped advisory author feedback."
+);
+
 const misleadingCallMarkup = '<a class="misleading-call" href="#contact">Call Northstar</a>';
 const crampedCallMarkup = `<a class="cramped-call" href="tel:${phone.value}">Call(${phone.value})</a>`;
 const misleadingCallPrepared = {
@@ -471,6 +544,33 @@ const paddedLogoPng = await sharp({
 }).composite([{
   input: Buffer.from('<svg width="150" height="150" xmlns="http://www.w3.org/2000/svg"><rect x="55" y="65" width="40" height="20" fill="#315a46"/></svg>')
 }]).png().toBuffer();
+const undersizedPhotoFixture = await retainedPhotoFixture(paddedLogoPng, "undersized-prominent");
+const undersizedProminentRasterMarkup = `<img class="undersized-project-photo" alt="Finished wallcovering installation" src="/_lodesta/assets/${undersizedPhotoFixture.revisionId}" style="display:block;width:360px;height:240px;object-fit:cover">`;
+const undersizedProminentRasterPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</main>", `${undersizedProminentRasterMarkup}</main>`) }
+    : route),
+  files: prepared.files.map((file) => file.path === "index.html"
+    ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${undersizedProminentRasterMarkup}</main>`)) }
+    : file)
+};
+const undersizedProminentRasterBrowser = await runArtifactBrowserGate({
+  prepared: undersizedProminentRasterPrepared,
+  buildInput: undersizedPhotoFixture.buildInput,
+  blobStore: undersizedPhotoFixture.blobStore,
+  capturePrefix: "verification/site-authoring-render-undersized-prominent-raster",
+  routePaths: ["/"],
+  viewports: [{ name: "desktop", width: 1280, height: 900 }]
+});
+const undersizedProminentRasterFinding = undersizedProminentRasterBrowser.findings.find((finding) => finding.id === "render.raster_image_upscale");
+assert(
+  undersizedProminentRasterFinding?.severity === "warning"
+    && undersizedProminentRasterFinding.message.includes("undersized-project-photo")
+    && undersizedProminentRasterFinding.message.includes("360×240px")
+    && undersizedProminentRasterFinding.message.includes("150×150px"),
+  `A prominent raster enlarged beyond its intrinsic pixels escaped the source-suitability advisory: ${undersizedProminentRasterBrowser.findings.map((finding) => `${finding.id}:${finding.message}`).join(" | ")}`
+);
 const preparedSourceLogo = await materializeSourceLogo({
   bytes: paddedLogoPng,
   mimeType: "image/png",
@@ -647,8 +747,9 @@ assert(
   missingOfficialLogoBrowser.findings.some((finding) =>
     finding.id === "render.primary_logo_missing"
     && finding.severity === "warning"
-    && finding.message.includes("active official logo revision")),
-  "A homepage that ignored the exact active official logo escaped the retained-brand advisory."
+    && finding.message.includes("active logo-classified asset revision")
+    && finding.message.includes("Judge the asset by its pixels")),
+  "A homepage that ignored an active logo-classified asset escaped the pixel-aware retained-brand advisory."
 );
 const renderedOfficialLogoMarkup = `<img class="masthead-art" alt="Northstar Collision Repair" src="/_lodesta/assets/${officialLogoRevisionId}" style="display:block;width:150px;height:60px;object-fit:contain">`;
 const renderedOfficialLogoPrepared = {
@@ -1064,7 +1165,7 @@ const fragmentedHeadingPrepared = {
       return { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${fragmentedHeadingMarkup}</main>`)) };
     }
     return file.path === "site.css"
-      ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.fragmented-heading{display:grid;grid-template-columns:64px 1fr;gap:18px}.fragmented-heading h2{font-size:42px;line-height:1}`) }
+      ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.fragmented-heading{display:grid;grid-template-columns:64px 1fr;gap:18px}.fragmented-heading h2{width:24px;font-size:42px;line-height:1;overflow-wrap:anywhere}`) }
       : file;
   })
 };
@@ -1075,10 +1176,44 @@ const fragmentedHeadingBrowser = await runArtifactBrowserGate({
   capturePrefix: "verification/site-authoring-render-fragmented-heading",
   routePaths: ["/"]
 });
-const fragmentedHeadingFinding = fragmentedHeadingBrowser.findings.find((finding) => finding.id === "render.mobile_heading_measure");
+const fragmentedHeadingFinding = fragmentedHeadingBrowser.findings.find((finding) => finding.id === "functional.mobile_heading_measure");
 assert(
   fragmentedHeadingFinding?.severity === "error" && fragmentedHeadingFinding.message.includes("Good care for the places"),
   "A heading collapsed into one- and two-character mobile fragments escaped the functional readable-measure gate."
+);
+
+const fragmentedBodyMarkup = '<section class="fragmented-body"><h2>Wallpaper removal</h2><ol><li><strong>Protect the room.</strong> Cover floors and account for runoff before working on a wall.</li></ol></section>';
+const fragmentedBodyPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</main>", `${fragmentedBodyMarkup}</main>`) }
+    : route),
+  files: prepared.files.map((file) => {
+    if (file.path === "index.html") {
+      return { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${fragmentedBodyMarkup}</main>`)) };
+    }
+    return file.path === "site.css"
+      ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.fragmented-body ol{list-style:none}.fragmented-body li{display:grid;grid-template-columns:2.5rem 1fr;gap:.8rem}.fragmented-body li:before{content:'01'}.fragmented-body li strong{display:block}`) }
+      : file;
+  })
+};
+const fragmentedBodyBrowser = await runArtifactBrowserGate({
+  prepared: fragmentedBodyPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-fragmented-body",
+  routePaths: ["/"],
+  viewports: [
+    { name: "desktop", width: 1280, height: 900 },
+    { name: "mobile", width: 390, height: 844 }
+  ]
+});
+const fragmentedBodyFinding = fragmentedBodyBrowser.findings.find((finding) => finding.id === "functional.text_measure");
+assert(
+  fragmentedBodyFinding?.severity === "error"
+    && fragmentedBodyFinding.message.includes("Cover floors")
+    && isTechnicalReleaseBlocker(fragmentedBodyFinding),
+  `Anonymous grid text collapsed into an unreadable strip escaped the functional readable-measure gate: ${JSON.stringify(fragmentedBodyBrowser.findings)}`
 );
 
 const mediaContainerOverflowMarkup = '<section class="overflowing-media"><div class="overflowing-media-frame"><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Technician portrait"></div><div class="overflowing-media-copy"><h2>Good pest control is personal.</h2><p>Adjacent copy must not be painted underneath an overflowing photograph.</p></div></section>';
@@ -1276,7 +1411,7 @@ assert(
   "An article header inside main was mistaken for page-level chrome and reported as covering its own content."
 );
 
-const syntheticIdentityAndRepeatedImageMarkup = `<section class="identity-device-fixture"><a class="wordmark-dot-fixture" href="#">24 Seven Pest Control</a><img class="official-brand-logo" src="/_lodesta/assets/${paddedSourceLogoFixture.revisionId}" alt="Northstar Collision"><div class="compact-brand-stamp">SURGE<br><span>PEST CONTROL</span></div><div class="area-stamp" aria-hidden="true"><span>TX</span><small>Local service</small></div><div class="approach-stamp" aria-hidden="true"><span>Kind</span><span>by nature</span></div><div class="approach-marker" aria-hidden="true"><span>K</span></div><div class="aside-mark" aria-hidden="true">✳</div><div class="evidence-free-marker" aria-hidden="true" style="position:relative;width:156px;height:156px;border:1px solid #1266a6"><i></i></div><div class="hero-mark-fixture" aria-hidden="true"><span class="mark-line-fixture"></span><span class="mark-leaf-fixture">⌁</span><small>Care for your space, without the guesswork.</small></div><div class="leaf-shape" aria-hidden="true"><span>kind. by design</span></div><div class="art-panel"><span>Kind by nature</span><span class="art-number">01</span><p>Clean, green, and effective.</p></div><div class="hero-visual-word-poster"><div class="hero-visual-word">kind<span>.</span></div></div><div class="logo-poster-mark"><span>The Kind Difference</span><img class="poster-business-logo" src="/_lodesta/assets/${paddedSourceLogoFixture.revisionId}" alt="Collision repair"><span class="logo-poster-number">01</span><small>People · Earth · Pet</small></div><img class="first-proof-photo" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Technician at work"></section><section class="geography-orbit-fixture"><p>For homes in Austin and nearby communities.</p></section><div class="decorative-orbit-art" aria-hidden="true"><span>care</span></div><div class="decorative-shadow-rings"><span>kind.</span></div><div class="hero-mark-two-rings"><span class="hero-ring-one"></span><span class="hero-ring-two"></span><div>Start with the signs.</div></div><section class="hero-fixture"><h2>A clearer way home</h2></section><section class="false-affordance-list"><article class="service-row-fixture"><h3>Ant control</h3><span class="row-mark-fixture" aria-hidden="true">+</span></article><article class="service-row-fixture"><h3>Termite control</h3><span class="row-mark-fixture" aria-hidden="true">+</span></article><article class="service-row-fixture"><h3>Mosquito control</h3><span class="row-mark-fixture" aria-hidden="true">+</span></article></section><section class="repeated-photo-fixture"><img class="second-proof-photo" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Technician at work"></section>`;
+const syntheticIdentityAndRepeatedImageMarkup = `<section class="identity-device-fixture"><a class="wordmark-dot-fixture" href="#">24 Seven Pest Control</a><img class="official-brand-logo" src="/_lodesta/assets/${paddedSourceLogoFixture.revisionId}" alt="Northstar Collision"><div class="compact-brand-stamp">SURGE<br><span>PEST CONTROL</span></div><div class="area-stamp" aria-hidden="true"><span>TX</span><small>Local service</small></div><div class="approach-stamp" aria-hidden="true"><span>Kind</span><span>by nature</span></div><div class="approach-marker" aria-hidden="true"><span>K</span></div><div class="aside-mark" aria-hidden="true">✳</div><div class="evidence-free-marker" aria-hidden="true" style="position:relative;width:156px;height:156px;border:1px solid #1266a6"><i></i></div><div class="hero-mark-fixture" aria-hidden="true"><span class="mark-line-fixture"></span><span class="mark-leaf-fixture">⌁</span><small>Care for your space, without the guesswork.</small></div><div class="leaf-shape" aria-hidden="true"><span>kind. by design</span></div><div class="art-panel"><span>Kind by nature</span><span class="art-number">01</span><p>Clean, green, and effective.</p></div><div class="hero-visual-word-poster"><div class="hero-visual-word">kind<span>.</span></div></div><div class="logo-poster-mark"><span>The Kind Difference</span><img class="poster-business-logo" src="/_lodesta/assets/${paddedSourceLogoFixture.revisionId}" alt="Collision repair"><span class="logo-poster-number">01</span><small>People · Earth · Pet</small></div><img class="first-proof-photo" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Technician at work"></section><section class="geography-orbit-fixture"><p>For homes in Austin and nearby communities.</p></section><div class="decorative-orbit-art" aria-hidden="true"><span>care</span></div><div class="decorative-shadow-rings"><span>kind.</span></div><div class="hero-mark-two-rings"><span class="hero-ring-one"></span><span class="hero-ring-two"></span><div>Start with the signs.</div></div><section class="hero-fixture"><h2>A clearer way home</h2></section><section class="false-affordance-list"><article class="service-row-fixture"><h3>Ant control</h3><span class="row-mark-fixture" aria-hidden="true">+</span></article><article class="service-row-fixture"><h3>Termite control</h3><span class="row-mark-fixture" aria-hidden="true">+</span></article><article class="service-row-fixture"><h3>Mosquito control</h3><span class="row-mark-fixture" aria-hidden="true">+</span></article></section><div class="fake-search-fixture">Search by state or city ↗</div><section class="repeated-photo-fixture"><img class="second-proof-photo" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Technician at work"></section>`;
 const duplicateHeaderActionMarkup = '<a class="header-cta-fixture" href="/contact">Contact ↗</a><button class="desktop-dual-nav-fixture" type="button" data-lodesta-menu-toggle aria-controls="desktop-menu-fixture" aria-label="Open navigation">Menu</button><div id="desktop-menu-fixture" hidden></div>';
 const syntheticIdentityAndRepeatedImagePrepared = {
   ...prepared,
@@ -1289,7 +1424,7 @@ const syntheticIdentityAndRepeatedImagePrepared = {
     }
     return file.path === "site.css"
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}
-.identity-device-fixture,.geography-orbit-fixture,.repeated-photo-fixture{position:relative;padding:40px}.desktop-dual-nav-fixture{display:none}@media(min-width:900px){.desktop-dual-nav-fixture{display:block}}.wordmark-dot-fixture{display:inline-flex;align-items:center}.wordmark-dot-fixture::before{content:"";display:inline-block;width:10px;height:10px;margin-right:9px;background:#d9ed72;border-radius:50%}.official-brand-logo{display:block;width:120px;height:60px}.compact-brand-stamp{display:grid;width:130px;height:55px;place-items:center;background:#ffcc00;font-size:15px;line-height:1;transform:rotate(-5deg)}.compact-brand-stamp span{font-size:12px}.area-stamp,.approach-stamp{display:grid;width:180px;aspect-ratio:1;place-items:center;border:1px solid #1266a6;border-radius:50%;transform:rotate(-8deg)}.area-stamp span{font-size:64px}.approach-stamp{font-size:14px;width:118px}.approach-marker{display:grid;width:132px;height:132px;place-items:center;border:1px solid #1266a6;font-size:72px}.aside-mark{font-size:180px;line-height:.8;color:#5bc681}.hero-mark-fixture{display:grid;width:300px;height:300px;place-items:center;border-radius:50%;background:#dcebdd}.mark-line-fixture{width:58px;height:116px;border:1px solid #1266a6;border-bottom:0;border-radius:80% 20% 0 0;transform:rotate(24deg)}.mark-leaf-fixture{font-size:58px;transform:rotate(-30deg)}.leaf-shape{display:grid;place-items:center;width:250px;height:300px;background:#087b3d;color:white;border-radius:80% 20% 70% 30%;font-size:50px;transform:rotate(-26deg)}.art-panel{display:flex;flex-direction:column;justify-content:space-between;width:225px;height:280px;padding:22px;background:#1266a6;color:white;transform:rotate(-7deg)}.art-number{font-size:90px}.hero-visual-word-poster{display:grid;width:300px;height:300px;place-items:center;background:#1266a6}.hero-visual-word{font-size:120px}.logo-poster-mark{display:grid;width:300px;height:300px;place-items:center;border:1px solid #1266a6;background:#f2f3e8}.logo-poster-mark img{display:block;width:180px;height:90px}.logo-poster-number{font-size:72px}.geography-orbit-fixture{min-height:360px}.geography-orbit-fixture::after{content:"";position:absolute;width:300px;height:300px;inset:20px auto auto 20px;border:1px solid #1266a6;border-radius:50%;pointer-events:none}.decorative-orbit-art,.decorative-shadow-rings{position:relative;display:grid;width:320px;height:320px;place-items:center;border:1px solid #1266a6;border-radius:50%;font-size:64px}.decorative-orbit-art::before,.decorative-orbit-art::after,.decorative-shadow-rings::after,.hero-fixture::before,.hero-fixture::after{content:"";position:absolute;border:1px solid #1266a6;border-radius:50%}.decorative-orbit-art::before{inset:36px}.decorative-orbit-art::after{inset:72px}.decorative-shadow-rings::after{width:220px;height:220px;box-shadow:0 0 0 28px rgba(18,102,166,.2),0 0 0 56px rgba(18,102,166,.1)}.hero-mark-two-rings{position:relative;display:grid;place-items:center;width:400px;height:400px}.hero-ring-one,.hero-ring-two{position:absolute;width:390px;height:390px;border:1px solid #1266a6;border-radius:50%}.hero-ring-two{width:280px;height:280px}.hero-fixture{position:relative;min-height:520px}.hero-fixture::before{width:460px;height:460px;right:-160px;top:10px}.hero-fixture::after{width:260px;height:260px;right:20px;top:110px}.false-affordance-list{padding:40px}.service-row-fixture{display:grid;grid-template-columns:1fr auto;align-items:center;min-height:72px;border-bottom:1px solid #999}.row-mark-fixture{font-size:24px}.first-proof-photo,.second-proof-photo{display:block;width:240px;height:180px}`) }
+.identity-device-fixture,.geography-orbit-fixture,.repeated-photo-fixture{position:relative;padding:40px}.desktop-dual-nav-fixture{display:none}@media(min-width:900px){.desktop-dual-nav-fixture{display:block}}.wordmark-dot-fixture{display:inline-flex;align-items:center}.wordmark-dot-fixture::before{content:"";display:inline-block;width:10px;height:10px;margin-right:9px;background:#d9ed72;border-radius:50%}.official-brand-logo{display:block;width:120px;height:60px}.compact-brand-stamp{display:grid;width:130px;height:55px;place-items:center;background:#ffcc00;font-size:15px;line-height:1;transform:rotate(-5deg)}.compact-brand-stamp span{font-size:12px}.area-stamp,.approach-stamp{display:grid;width:180px;aspect-ratio:1;place-items:center;border:1px solid #1266a6;border-radius:50%;transform:rotate(-8deg)}.area-stamp span{font-size:64px}.approach-stamp{font-size:14px;width:118px}.approach-marker{display:grid;width:132px;height:132px;place-items:center;border:1px solid #1266a6;font-size:72px}.aside-mark{font-size:180px;line-height:.8;color:#5bc681}.hero-mark-fixture{display:grid;width:300px;height:300px;place-items:center;border-radius:50%;background:#dcebdd}.mark-line-fixture{width:58px;height:116px;border:1px solid #1266a6;border-bottom:0;border-radius:80% 20% 0 0;transform:rotate(24deg)}.mark-leaf-fixture{font-size:58px;transform:rotate(-30deg)}.leaf-shape{display:grid;place-items:center;width:250px;height:300px;background:#087b3d;color:white;border-radius:80% 20% 70% 30%;font-size:50px;transform:rotate(-26deg)}.art-panel{display:flex;flex-direction:column;justify-content:space-between;width:225px;height:280px;padding:22px;background:#1266a6;color:white;transform:rotate(-7deg)}.art-number{font-size:90px}.hero-visual-word-poster{display:grid;width:300px;height:300px;place-items:center;background:#1266a6}.hero-visual-word{font-size:120px}.logo-poster-mark{display:grid;width:300px;height:300px;place-items:center;border:1px solid #1266a6;background:#f2f3e8}.logo-poster-mark img{display:block;width:180px;height:90px}.logo-poster-number{font-size:72px}.geography-orbit-fixture{min-height:360px}.geography-orbit-fixture::after{content:"";position:absolute;width:300px;height:300px;inset:20px auto auto 20px;border:1px solid #1266a6;border-radius:50%;pointer-events:none}.decorative-orbit-art,.decorative-shadow-rings{position:relative;display:grid;width:320px;height:320px;place-items:center;border:1px solid #1266a6;border-radius:50%;font-size:64px}.decorative-orbit-art::before,.decorative-orbit-art::after,.decorative-shadow-rings::after,.hero-fixture::before,.hero-fixture::after{content:"";position:absolute;border:1px solid #1266a6;border-radius:50%}.decorative-orbit-art::before{inset:36px}.decorative-orbit-art::after{inset:72px}.decorative-shadow-rings::after{width:220px;height:220px;box-shadow:0 0 0 28px rgba(18,102,166,.2),0 0 0 56px rgba(18,102,166,.1)}.hero-mark-two-rings{position:relative;display:grid;place-items:center;width:400px;height:400px}.hero-ring-one,.hero-ring-two{position:absolute;width:390px;height:390px;border:1px solid #1266a6;border-radius:50%}.hero-ring-two{width:280px;height:280px}.hero-fixture{position:relative;min-height:520px}.hero-fixture::before{width:460px;height:460px;right:-160px;top:10px}.hero-fixture::after{width:260px;height:260px;right:20px;top:110px}.false-affordance-list{padding:40px}.service-row-fixture{display:grid;grid-template-columns:1fr auto;align-items:center;min-height:72px;border-bottom:1px solid #999}.row-mark-fixture{font-size:24px}.fake-search-fixture{width:320px;min-height:56px;padding:12px;border:1px solid #999}.first-proof-photo,.second-proof-photo{display:block;width:240px;height:180px}`) }
       : file;
   })
 };
@@ -1325,6 +1460,32 @@ assert(
     && syntheticIdentityDeviceFinding.message.includes("The Kind Difference 01 People · Earth · Pet")
     && !isTechnicalReleaseBlocker(syntheticIdentityDeviceFinding),
   `A text-and-CSS locality or slogan stamp competing with the official identity escaped the brand-fidelity advisory: ${syntheticIdentityDeviceFinding?.message}`
+);
+const compactAlphanumericMonogramMarkup = '<span class="brand-mark-fixture" aria-hidden="true" style="display:grid;width:38px;height:38px;place-items:center;background:#1266a6;color:#fff">L3</span>';
+const compactAlphanumericMonogramPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</main>", `${compactAlphanumericMonogramMarkup}</main>`) }
+    : route),
+  files: prepared.files.map((file) => file.path === "index.html"
+    ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${compactAlphanumericMonogramMarkup}</main>`)) }
+    : file)
+};
+const compactAlphanumericMonogramBrowser = await runArtifactBrowserGate({
+  prepared: compactAlphanumericMonogramPrepared,
+  buildInput: paddedSourceLogoFixture.buildInput,
+  blobStore: paddedSourceLogoFixture.blobStore,
+  capturePrefix: "verification/site-authoring-render-compact-alphanumeric-monogram",
+  routePaths: ["/"]
+});
+const compactAlphanumericMonogramFinding = compactAlphanumericMonogramBrowser.findings.find((finding) =>
+  finding.id === "render.synthetic_identity_device");
+assert(
+  compactAlphanumericMonogramFinding?.severity === "warning"
+    && compactAlphanumericMonogramFinding.message.includes("brand-mark-fixture")
+    && compactAlphanumericMonogramFinding.message.includes('"L3"')
+    && !isTechnicalReleaseBlocker(compactAlphanumericMonogramFinding),
+  `A compact alphanumeric CSS monogram escaped the identity advisory: ${compactAlphanumericMonogramFinding?.message ?? "missing finding"}`
 );
 const geographyCircleFinding = syntheticIdentityAndRepeatedImageBrowser.findings.find((finding) =>
   finding.id === "render.geography_circle");
@@ -1431,6 +1592,14 @@ assert(
     && falseAffordanceFinding.message.includes("3 repeated peers")
     && !isTechnicalReleaseBlocker(falseAffordanceFinding),
   "Repeated plus symbols on non-interactive service rows escaped the false-affordance advisory."
+);
+const noninteractiveControlFinding = syntheticIdentityAndRepeatedImageBrowser.findings.find((finding) =>
+  finding.id === "functional.noninteractive_control");
+assert(
+  noninteractiveControlFinding?.severity === "error"
+    && noninteractiveControlFinding.message.includes("fake-search-fixture")
+    && isTechnicalReleaseBlocker(noninteractiveControlFinding),
+  "A field-like search affordance without interactive behavior escaped the functional release gate."
 );
 const repeatedSourceImageFinding = syntheticIdentityAndRepeatedImageBrowser.findings.find((finding) =>
   finding.id === "render.repeated_source_image");
@@ -1550,6 +1719,29 @@ assert(
   `A redundant authored suffix beside canonical text escaped advisory browser feedback: ${adjacentDuplicateTextFinding?.message ?? "missing finding"}`
 );
 
+const sentenceBoundaryRepeatMarkup = '<p class="sentence-boundary-repeat">Tell us how to reach you. You can also call directly.</p>';
+const sentenceBoundaryRepeatPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</main>", `${sentenceBoundaryRepeatMarkup}</main>`) }
+    : route),
+  files: prepared.files.map((file) => file.path === "index.html"
+    ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${sentenceBoundaryRepeatMarkup}</main>`)) }
+    : file)
+};
+const sentenceBoundaryRepeatBrowser = await runArtifactBrowserGate({
+  prepared: sentenceBoundaryRepeatPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-sentence-boundary-repeat",
+  routePaths: ["/"]
+});
+assert(
+  !sentenceBoundaryRepeatBrowser.findings.some((finding) =>
+    finding.id === "render.adjacent_duplicate_text" && finding.message.includes("sentence-boundary-repeat")),
+  "A natural sentence-boundary pronoun repeat was misclassified as duplicated authored text."
+);
+
 const adjacentDuplicateContentMarkup = '<section class="duplicate-content-fixture" style="min-height:180px;padding:32px"><h2>Ready when you are</h2><p>Tell us what is happening and we will help you find the right next step.</p><a href="/contact">Contact us</a></section><section class="duplicate-content-fixture" style="min-height:180px;padding:32px"><h2>Ready when you are</h2><p>Tell us what is happening and we will help you find the right next step.</p><a href="/contact">Contact us</a></section>';
 const adjacentDuplicateContentPrepared = {
   ...prepared,
@@ -1576,6 +1768,33 @@ assert(
     && adjacentDuplicateContentFinding.message.includes("ready when you are")
     && isTechnicalReleaseBlocker(adjacentDuplicateContentFinding),
   `Two substantial adjacent sections with identical visible content escaped the functional release gate: ${adjacentDuplicateContentFinding?.message ?? "missing finding"}`
+);
+
+const duplicateHeaderIdentityMarkup = `<span data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</span>`;
+const duplicateHeaderIdentityPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</header>", `${duplicateHeaderIdentityMarkup}</header>`) }
+    : route),
+  files: prepared.files.map((file) => file.path === "index.html"
+    ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</header>", `${duplicateHeaderIdentityMarkup}</header>`)) }
+    : file)
+};
+const duplicateHeaderIdentityBrowser = await runArtifactBrowserGate({
+  prepared: duplicateHeaderIdentityPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-duplicate-header-identity",
+  routePaths: ["/"],
+  viewports: [{ name: "desktop", width: 1280, height: 900 }]
+});
+const duplicateHeaderIdentityFinding = duplicateHeaderIdentityBrowser.findings.find((finding) =>
+  finding.id === "identity.duplicate_header_identity");
+assert(
+  duplicateHeaderIdentityFinding?.severity === "error"
+    && duplicateHeaderIdentityFinding.message.includes(String(name.value))
+    && isTechnicalReleaseBlocker(duplicateHeaderIdentityFinding),
+  `Two visible copies of the canonical business identity escaped the release gate: ${duplicateHeaderIdentityFinding?.message ?? "missing finding"}`
 );
 
 const internalProvenanceMarkup = '<section class="internal-provenance"><p>The retained mission is relationship-based service.</p><p>Comment text and related information are retained indefinitely for follow-up.</p><p>Our Georgetown service page lists common household pests.</p><details><summary>What do you treat?</summary><p>The Georgetown page recommends service every two months.</p><p>The service language includes ants and termites.</p><p>The source service describes its products as family friendly.</p><p>The products are described as family friendly.</p><p>The company describes bi-monthly residential visits.</p><p>Kind Pest Control describes its work as environmentally kind.</p><p>This site turns those ideas into a clear next step.</p><p>Choose a city for local service information.</p><p>Our public story is built around careful service.</p><p>Our source material emphasizes friendly technicians.</p><p>The service guidance emphasizes a focused response.</p><p>The service material centers eco-friendly approaches.</p><p>Our residential service material focuses on careful treatment.</p><p>The company centers family-conscious methods.</p></details></section>';
@@ -2539,6 +2758,32 @@ assert(
     .join("; ")}`
 );
 
+const openedDrawerCallSpacingPrepared = {
+  ...ownerDrawerPrepared,
+  routes: ownerDrawerPrepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</nav></div></div>", '<a href="tel:+18049148120">Call<span>(804) 914-8120</span></a></nav></div></div>') }
+    : route),
+  files: ownerDrawerPrepared.files.map((file) => file.path === "index.html"
+    ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</nav></div></div>", '<a href="tel:+18049148120">Call<span>(804) 914-8120</span></a></nav></div></div>')) }
+    : file)
+};
+const openedDrawerCallSpacingBrowser = await runArtifactBrowserGate({
+  prepared: openedDrawerCallSpacingPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-open-navigation-call-spacing",
+  routePaths: ["/"],
+  viewports: [{ name: "mobile", width: 390, height: 844 }]
+});
+assert(
+  openedDrawerCallSpacingBrowser.findings.some((finding) =>
+    finding.route === "/"
+    && finding.id === "render.call_action_label_spacing"
+    && finding.severity === "warning"
+    && finding.message.includes("opened mobile navigation")),
+  "A Call/phone label joined only inside the opened mobile navigation escaped the existing spacing advisory."
+);
+
 const edgeAnchoredDrawerPrepared = {
   ...ownerDrawerPrepared,
   files: ownerDrawerPrepared.files.map((file) => file.path === "site.css"
@@ -3004,6 +3249,39 @@ async function canonicalLogoFixture(
         width: metadata.width,
         height: metadata.height,
         origin,
+        sourceFactIds: [],
+        activeForFutureBuilds: true
+      }]
+    },
+    assetRevisionIds: [revisionId]
+  };
+  const blobStore = new MemoryBlobStore();
+  await blobStore.putImmutable({ key: storageKey, bytes, contentType: "image/png", contentHash });
+  return { revisionId, buildInput: fixtureBuildInput, blobStore };
+}
+
+async function retainedPhotoFixture(bytes: Buffer, suffix: string) {
+  const normalizedSuffix = suffix.replace(/[^a-z0-9_-]/gi, "_");
+  const revisionId = `asset_revision_photo_${normalizedSuffix}`;
+  const storageKey = `verification/assets/${revisionId}.png`;
+  const contentHash = sha256(bytes);
+  const metadata = await sharp(bytes).metadata();
+  assert(metadata.width && metadata.height);
+  const fixtureBuildInput = {
+    ...buildInput,
+    business: {
+      ...buildInput.business,
+      assets: [{
+        assetId: `asset_photo_${normalizedSuffix}`,
+        revisionId,
+        kind: "photo" as const,
+        contentHash,
+        storageKey,
+        mimeType: "image/png" as const,
+        alt: "Finished wallcovering installation",
+        width: metadata.width,
+        height: metadata.height,
+        origin: "source_website" as const,
         sourceFactIds: [],
         activeForFutureBuilds: true
       }]

@@ -3,9 +3,13 @@ import {
   siteBuildArtifactSchema,
   type FactBinding,
   type SiteBuildArtifact,
-  type SitePublicBuildInput
+  type SitePublicBuildInput,
+  type SourceSnapshot,
+  type SourceSnapshotPage
 } from "@/packages/site-contracts";
 import { sha256, stableJson } from "@/packages/business-data";
+import { isLegalSourcePagePath, normalizedSourcePagePath } from "@/packages/business-data/source-page-classification";
+import { canonicalSourceTokens } from "@/lib/source-text-blocks";
 import { FactBindingValidator } from "./fact-declarations";
 import {
   agentAuthoredArtifactSchema,
@@ -17,6 +21,8 @@ import { sanitizeAgentCss, sanitizeAgentHtml } from "./sanitizer";
 import { platformCapabilityStylesFor } from "../../workers/site-sandbox/scaffold/platform/capability-styles";
 import { platformFontStyles } from "../../workers/site-sandbox/scaffold/platform/font-library";
 import { siteTechnicalReleasePolicy } from "@/packages/site-contracts/platform-manifest";
+import { directionsHrefForLocation as platformDirectionsHrefForLocation } from "../../workers/site-sandbox/scaffold/platform/presentation";
+import { buildInformationArchitectureAdvisory, type InformationArchitectureAdvisoryReport } from "./ia-advisory";
 
 export type PreparedArtifactFile = {
   path: string;
@@ -34,6 +40,7 @@ export type PreparedSiteArtifact = {
   findings: ArtifactGateFinding[];
   qualityMetrics: {
     routeSimilarity: Array<{ left: string; right: string; jaccard: number; smallerPageContainment: number }>;
+    informationArchitecture: InformationArchitectureAdvisoryReport;
   };
 };
 
@@ -48,6 +55,8 @@ export function prepareSiteArtifact(input: {
   authoredArtifact: AgentAuthoredArtifact;
   buildInput: SitePublicBuildInput;
   runtimeSeriesId: string;
+  sourceSnapshots?: SourceSnapshot[];
+  sourcePages?: SourceSnapshotPage[];
 }) {
   const authored = agentAuthoredArtifactSchema.parse(input.authoredArtifact);
   const routes = new Set(authored.routes.map((route) => normalizeRoutePath(route.path)));
@@ -81,13 +90,29 @@ export function prepareSiteArtifact(input: {
 
   findings.push(...validateCapabilityBindings(authored, input.buildInput));
   findings.push(...validateLeadForms(sanitized, input.buildInput));
+  findings.push(...validateSourceSensitiveLegalRoutes(sanitized, input.sourcePages ?? []));
   const factBindings = new FactBindingValidator().validate({
     routes: sanitized.map((route) => ({ path: route.path, html: route.bodyHtml, title: route.title, description: route.description })),
-    buildInput: input.buildInput
+    buildInput: input.buildInput,
+    sourceSnapshots: input.sourceSnapshots
   });
   findings.push(...factBindings.findings);
-  const qualityMetrics = { routeSimilarity: routeSimilarityMetrics(sanitized) };
+  const sourcePaths = (input.sourcePages ?? []).map((page) => page.path);
+  const informationArchitecture = buildInformationArchitectureAdvisory({
+    routes: sanitized.map((route) => ({
+      path: route.path,
+      title: route.title,
+      description: route.description,
+      html: route.bodyHtml
+    })),
+    sourcePaths
+  });
+  const qualityMetrics = {
+    routeSimilarity: routeSimilarityMetrics(sanitized),
+    informationArchitecture: informationArchitecture.report
+  };
   findings.push(...validateSiteStructure({ routes: sanitized, similarities: qualityMetrics.routeSimilarity }));
+  findings.push(...informationArchitecture.findings);
 
   const structured = structuredDataFor(input.buildInput);
   const structuredBindings = structured.factBindings;
@@ -207,10 +232,10 @@ export function finalizePreparedArtifact(input: {
  * finalized artifact unsafe or technically unusable control publication. Inputs
  * already neutralized by the sanitizer do not force another authoring turn.
  * Factual identity and canonical fact violations remain blockers. Subjective
- * content structure, visual quality, and accessibility findings stay advisory
- * while the product learns what models produce. Deterministic viewport overflow,
- * clipping, and solid-color text/control contrast are functional blockers when
- * they hide or make content and controls unreadable.
+ * content structure and visual quality stay advisory while the product learns
+ * what models produce. Canonical axe critical/serious violations, deterministic
+ * viewport overflow, clipping, and solid-color text/control contrast are
+ * functional blockers when they hide or make content and controls unusable.
  */
 export function isTechnicalReleaseBlocker(finding: ArtifactGateFinding) {
   if (finding.severity !== "error") return false;
@@ -322,6 +347,63 @@ function visibleBodyText(html: string) {
     if (node.type === "tag") DomUtils.removeElement(node);
   }
   return DomUtils.textContent(document).replace(/\s+/g, " ").trim();
+}
+
+function validateSourceSensitiveLegalRoutes(
+  routes: Array<{ path: string; bodyHtml: string }>,
+  sourcePages: SourceSnapshotPage[]
+) {
+  const findings: ArtifactGateFinding[] = [];
+  const authoredByPath = new Map(routes.map((route) => [normalizedSourcePagePath(route.path), route]));
+  const richestLegalSourceByPath = new Map<string, string[]>();
+
+  for (const page of sourcePages) {
+    if (page.outcome !== "fetched" || !isLegalSourcePagePath(page.path)) continue;
+    const path = normalizedSourcePagePath(page.path);
+    const tokens = canonicalSourceTokens(page.extractedText).map((token) => token.value);
+    const prior = richestLegalSourceByPath.get(path);
+    if (!prior || tokens.length > prior.length) richestLegalSourceByPath.set(path, tokens);
+  }
+
+  for (const [path, sourceTokens] of richestLegalSourceByPath) {
+    const authored = authoredByPath.get(path);
+    if (!authored) {
+      findings.push(gateFinding(
+        "fact.legal_source_preservation",
+        "claim",
+        `Source-sensitive legal route ${path} must remain available at its exact source path.`,
+        path
+      ));
+      continue;
+    }
+
+    // Very short utility notices do not provide enough evidence for a stable
+    // similarity decision. Their exact route is still required above.
+    if (sourceTokens.length < 30) continue;
+    const renderedTokens = canonicalSourceTokens(visibleBodyText(authored.bodyHtml)).map((token) => token.value);
+    const sourceShingles = tokenShingles(sourceTokens, 5);
+    const renderedShingles = tokenShingles(renderedTokens, 5);
+    const retained = [...sourceShingles].filter((shingle) => renderedShingles.has(shingle)).length;
+    const recall = sourceShingles.size ? retained / sourceShingles.size : 1;
+    if (recall < 0.85) {
+      findings.push(gateFinding(
+        "fact.legal_source_preservation",
+        "claim",
+        `Source-sensitive legal route ${path} retains only ${(recall * 100).toFixed(1)}% of the source provisions; preserve the substantive source text instead of summarizing or replacing it.`,
+        path
+      ));
+    }
+  }
+
+  return findings;
+}
+
+function tokenShingles(tokens: string[], size: number) {
+  const shingles = new Set<string>();
+  for (let index = 0; index <= tokens.length - size; index += 1) {
+    shingles.add(tokens.slice(index, index + size).join(" "));
+  }
+  return shingles;
 }
 
 function fiveWordShingles(value: string) {
@@ -521,10 +603,20 @@ function structuredDataFor(buildInput: SitePublicBuildInput) {
       factBindings.push(structuredBinding(`jsonld:area-served:${fact.id}`, String(fact.value), fact.id));
     }
   }
-  const offeringFacts = buildInput.publicFacts.filter((fact) => fact.kind === "offering");
-  if (offeringFacts.length) {
-    value.makesOffer = offeringFacts.map((fact) => ({ "@type": "Offer", itemOffered: { "@type": "Service", name: String(fact.value) } }));
-    for (const fact of offeringFacts) factBindings.push(structuredBinding(`jsonld:offering:${fact.id}`, String(fact.value), fact.id));
+  if (buildInput.business.offerings.length) {
+    value.makesOffer = buildInput.business.offerings.map((offering) => ({
+      "@type": "Offer",
+      itemOffered: { "@type": "Service", name: offering.name }
+    }));
+    for (const offering of buildInput.business.offerings) {
+      factBindings.push({
+        id: `jsonld:offering:${offering.id}`,
+        route: "/",
+        text: offering.name,
+        origin: "structured_data",
+        sourceFactIds: offering.sourceFactIds
+      });
+    }
   }
   return { value, factBindings };
 }
@@ -607,7 +699,7 @@ function allowedExternalHrefsFor(buildInput: SitePublicBuildInput) {
     ...buildInput.business.links.map((link) => link.url),
     ...buildInput.business.locations.flatMap((location) => [
       legacyMapHrefForLocation(location),
-      directionsHrefForLocation(location)
+      platformDirectionsHrefForLocation(location)
     ])
   ];
   return new Set(values.map((value) => new URL(value).toString()));
@@ -616,12 +708,6 @@ function allowedExternalHrefsFor(buildInput: SitePublicBuildInput) {
 function legacyMapHrefForLocation(location: SitePublicBuildInput["business"]["locations"][number]) {
   const address = [location.street, location.city, location.region, location.postalCode].filter(Boolean).join(", ");
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || location.label)}`;
-}
-
-function directionsHrefForLocation(location: SitePublicBuildInput["business"]["locations"][number]) {
-  const address = [location.street, location.city, location.region, location.postalCode, location.country].filter(Boolean).join(", ");
-  const query = address || location.label;
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`;
 }
 
 function comparablePhone(value: string) {
@@ -666,7 +752,7 @@ function relativeSitePath(fromRoute: string, target: string) {
   const prefix = "../".repeat(depth);
   const cleanTarget = target.replace(/^\/+|\/+$/g, "");
   if (!cleanTarget) return prefix || "./";
-  const suffix = target.endsWith(".css") ? "" : "/";
+  const suffix = target.endsWith(".css") || /\.(?:html?|php|aspx?)$/i.test(cleanTarget) ? "" : "/";
   return `${prefix}${cleanTarget}${suffix}`;
 }
 

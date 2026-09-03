@@ -50,9 +50,10 @@ export function formatLocalAddress(location: {
   country?: string;
 }) {
   assertUsCountry(location.country);
+  const street = normalizedStreet(location.street);
   const locality = [location.city, location.region].filter(Boolean).join(", ");
   const localityAndPostal = [locality, location.postalCode].filter(Boolean).join(" ");
-  return [location.street, localityAndPostal].filter(Boolean).join(", ");
+  return [street, localityAndPostal].filter(Boolean).join(", ");
 }
 
 export function directionsHrefForLocation(location: {
@@ -63,8 +64,12 @@ export function directionsHrefForLocation(location: {
   postalCode?: string;
   country?: string;
 }) {
-  const address = [location.street, location.city, location.region, location.postalCode, location.country].filter(Boolean).join(", ");
+  const address = [normalizedStreet(location.street), location.city, location.region, location.postalCode, location.country].filter(Boolean).join(", ");
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address || location.label)}`;
+}
+
+function normalizedStreet(value: string | undefined) {
+  return value?.trim().replace(/,+\s*$/, "");
 }
 
 export function assertUsCountry(value: string | undefined) {

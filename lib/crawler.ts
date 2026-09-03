@@ -86,6 +86,7 @@ export type CrawlPagePurposeTag =
 const defaultMaxInternalPages = 12;
 const hardMaxInternalPages = 16;
 const maxMainTextCharsPerPage = 2800;
+const titleSegmentSeparator = /\s+(?:\|+|[\u2013\u2014-])\s+/;
 
 export type ExtractedBusinessFacts = {
   name?: string;
@@ -281,7 +282,7 @@ export function canonicalFromLinkHeader(linkHeader: string | null | undefined, s
 
 function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSummary["source"]): CrawlPageSummary {
   const sourcePage = new URL(sourceUrl);
-  const title = extractTagContent(html, "title");
+  const title = boundedUnicodeText(extractTagContent(html, "title"), 500);
   const metaDescription = extractMetaContent(html, "description");
   const summary: CrawlPageSummary = {
     url: sourcePage.href,
@@ -327,6 +328,12 @@ function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSu
     }
   }
   return summary;
+}
+
+function boundedUnicodeText(value: string | undefined, maximumCodepoints: number) {
+  if (!value) return undefined;
+  const bounded = [...value].slice(0, maximumCodepoints).join("").trim();
+  return bounded || undefined;
 }
 
 function extractMainText(html: string, maxChars: number) {
@@ -778,11 +785,10 @@ function normalizeLinkReference(
     const normalized = stripTracking(url);
     const host = normalized.hostname.replace(/^www\./, "");
     const sourceHost = sourceHostname.replace(/^www\./, "");
-    const pathAndText = `${normalized.pathname} ${text ?? ""}`;
     const kind: CrawlLinkReference["kind"] =
-      isOrderingHost(host) || /order|menu|takeout|delivery/i.test(pathAndText)
+      isOrderingLink(normalized, host === sourceHost, text)
         ? "ordering"
-        : isBookingHost(host) || /book|appointment|reserve|schedule/i.test(pathAndText)
+        : isBookingLink(normalized, host === sourceHost, text)
           ? "booking"
           : isPressOrVideoHost(host)
             ? "press_video"
@@ -824,6 +830,11 @@ function extractBusinessFacts(
   facts.name = normalizeBusinessNameCandidate(facts.name, base.hostname);
   facts.name ||= normalizeBusinessNameCandidate(cleanText(extractMetaContent(html, "og:site_name")), base.hostname);
   facts.name ||= inferNameFromTitle(page.title, base.hostname);
+  facts.name = preferBusinessNameCandidate(
+    facts.name,
+    extractVisibleBusinessNameCandidate(html, base.hostname),
+    base.hostname
+  );
   facts.hours ||= extractVisibleHours(html);
   facts.address ||= extractVisibleAddress(html);
   facts.serviceAreas = unique([...facts.serviceAreas, ...extractVisibleServiceAreas(html)]);
@@ -836,18 +847,11 @@ function extractBusinessFacts(
   facts.phone ||= normalizePhone(extractTelLinks(html)[0] ?? extractPhoneFromText(html));
   facts.email ||= normalizeEmail(extractMailtoLinks(html)[0] ?? extractEmailFromText(html));
 
-  for (const href of extractHrefs(html)) {
-    try {
-      const resolved = new URL(href, page.finalUrl ?? page.url);
-      const normalized = stripTracking(resolved);
-      const host = normalized.hostname.replace(/^www\./, "");
-      if (isSocialHost(host)) facts.socialLinks.push(normalized.href);
-      if (isOrderingHost(host) || /order|menu|takeout|delivery/i.test(normalized.pathname)) facts.orderingLinks.push(normalized.href);
-      if (isBookingHost(host) || /book|appointment|reserve|schedule/i.test(normalized.pathname)) facts.bookingLinks.push(normalized.href);
-      if (isPressOrVideoHost(host)) facts.pressLinks.push(normalized.href);
-    } catch {
-      // Ignore malformed external links during fact extraction.
-    }
+  for (const reference of extractLinkReferences(html, page.finalUrl ?? page.url, base.hostname)) {
+    if (reference.kind === "social") facts.socialLinks.push(reference.href);
+    if (reference.kind === "ordering") facts.orderingLinks.push(reference.href);
+    if (reference.kind === "booking") facts.bookingLinks.push(reference.href);
+    if (reference.kind === "press_video") facts.pressLinks.push(reference.href);
   }
 
   facts.categories = unique(facts.categories).slice(0, 8);
@@ -1090,7 +1094,7 @@ function extractVisibleServices(html: string, page: { url: string; title?: strin
   const candidates: string[] = [];
   const pageUrl = new URL(page.url);
   if (isServicePath(pageUrl.pathname)) {
-    const titleCandidate = page.title?.split(/\s+[|-]\s+/)[0];
+    const titleCandidate = page.title?.split(titleSegmentSeparator)[0];
     if (titleCandidate && safeTextId(titleCandidate) !== safeTextId(businessName)) candidates.push(titleCandidate);
     const pathCandidate = serviceNameFromPath(pageUrl.pathname);
     if (pathCandidate) candidates.push(pathCandidate);
@@ -1113,7 +1117,27 @@ function extractVisibleServices(html: string, page: { url: string; title?: strin
     }
   }
 
+  candidates.push(...extractServiceSectionHeadings(html));
+
   return unique(candidates.map(cleanServiceCandidate).filter((service): service is string => Boolean(service))).slice(0, 12);
+}
+
+function extractServiceSectionHeadings(html: string) {
+  const headings = [...html.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)]
+    .map((match) => ({ level: Number(match[1]), text: cleanText(match[2]) }))
+    .filter((heading): heading is { level: number; text: string } => Boolean(heading.text));
+  const values: string[] = [];
+  for (let index = 0; index < headings.length; index += 1) {
+    const heading = headings[index];
+    if (!/^(?:(?:our|pest control|wildlife) )?(?:services|treatments|solutions)|what we (?:do|treat|handle|help with)$/i.test(heading.text)) continue;
+    for (let candidateIndex = index + 1; candidateIndex < headings.length; candidateIndex += 1) {
+      const candidate = headings[candidateIndex];
+      if (candidate.level <= heading.level) break;
+      values.push(candidate.text);
+      if (values.length >= 20) return values;
+    }
+  }
+  return values;
 }
 
 function extractVisibleHours(html: string): Record<string, string> | undefined {
@@ -1148,14 +1172,15 @@ function extractVisibleHours(html: string): Record<string, string> | undefined {
   return normalizeObservedBusinessHours(entries);
 }
 
+const usStateNameOrCodePatternSource =
+  "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY|DC|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Iowa|Idaho|Illinois|Indiana|Kansas|Kentucky|Louisiana|Massachusetts|Maryland|Maine|Michigan|Minnesota|Missouri|Mississippi|Montana|North Carolina|North Dakota|Nebraska|New Hampshire|New Jersey|New Mexico|Nevada|New York|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Virginia|Vermont|Washington|Wisconsin|West Virginia|Wyoming|District of Columbia";
+
 function extractVisibleAddress(html: string): ExtractedBusinessFacts["address"] | undefined {
   const text = htmlToTextLines(html).join(" ");
-  const statePattern =
-    "(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY|DC|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Iowa|Idaho|Illinois|Indiana|Kansas|Kentucky|Louisiana|Massachusetts|Maryland|Maine|Michigan|Minnesota|Missouri|Mississippi|Montana|North Carolina|North Dakota|Nebraska|New Hampshire|New Jersey|New Mexico|Nevada|New York|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Virginia|Vermont|Washington|Wisconsin|West Virginia|Wyoming|District of Columbia)";
   const match = text.match(
     new RegExp(
       "\\b(\\d{2,6}\\s+(?:[A-Za-z0-9'.#-]+\\s+){1,8}(?:Street|St\\.?|Avenue|Ave\\.?|Road|Rd\\.?|Boulevard|Blvd\\.?|Drive|Dr\\.?|Lane|Ln\\.?|Court|Ct\\.?|Circle|Cir\\.?|Way|Highway|Hwy\\.?|Parkway|Pkwy\\.?|Place|Pl\\.?)\\.?(?:\\s+(?:Suite|Ste\\.?|Unit|#)\\s*[A-Za-z0-9-]+)?)\\s*,?\\s+([A-Z][A-Za-z'. -]{2,60}?),?\\s+" +
-        statePattern +
+        `(${usStateNameOrCodePatternSource})` +
         "\\s+(\\d{5}(?:-\\d{4})?)\\b",
       "i"
     )
@@ -1351,10 +1376,22 @@ function extractAreas(node: Record<string, unknown>) {
 function extractVisibleServiceAreas(html: string) {
   const values: string[] = [];
   for (const line of htmlToTextLines(html)) {
+    const operatingScope = line.match(/\b(?:install(?:s|ed|ing)?|provid(?:e|es|ed|ing)|offer(?:s|ed|ing)?|perform(?:s|ed|ing)?|work(?:s|ed|ing)?)\b[^.!?]{0,180}\bin\s+([^.!?]{2,220})/i)?.[1];
+    if (operatingScope) {
+      const namedStates = operatingScope.match(new RegExp(`\\b(?:${usStateNameOrCodePatternSource})\\b`, "gi")) ?? [];
+      if (namedStates.length >= 2) values.push(...namedStates.map(cleanText).filter((state): state is string => Boolean(state)));
+    }
+    const localityServiceHeading = line.match(new RegExp(
+      `\\bservices?\\s+in\\s+(?:the\\s+)?([A-Z][A-Za-z'.-]*(?:\\s+[A-Z][A-Za-z'.-]*){0,3})\\s*,\\s*(?:${usStateNameOrCodePatternSource})\\b`,
+      "i"
+    ));
+    const headingArea = cleanText(localityServiceHeading?.[1]);
+    if (headingArea && plausibleVisibleServiceArea(headingArea)) values.push(headingArea);
     const match = line.match(/\b(?:service areas?(?:\s+(?:include|are))?|areas? (?:we )?serve|we (?:proudly )?serve|serving)\s*(?::|-)?\s+(.{2,240})/i);
     if (!match) continue;
     const list = match[1]
       .split(/[.!?]/, 1)[0]
+      .replace(/\s+since\s+(?:19|20)\d{2}\b.*$/i, "")
       .replace(/\b(?:and|plus)\s+(?:the\s+)?surrounding areas?\b.*$/i, "")
       .replace(/([A-Za-z][A-Za-z .'-]{1,60}),\s*([A-Z]{2})(?=$|[,;]|\s+(?:and|&)\s+)/g, "$1 $2");
     for (const candidate of list.split(/\s*(?:,|;|\||\s+(?:and|&)\s+)\s*/)) {
@@ -1441,7 +1478,7 @@ function isPlaceholderEmail(email: string) {
 
 function inferNameFromTitle(title: string | undefined, hostname: string) {
   const candidates = title
-    ?.split(/\s+(?:[|\u2013\u2014-])\s+/)
+    ?.split(titleSegmentSeparator)
     .map((candidate) => cleanText(candidate))
     .filter((candidate): candidate is string => Boolean(candidate && candidate.length >= 2 && candidate.length <= 80));
   const scored = (candidates ?? [])
@@ -1459,12 +1496,33 @@ function inferNameFromTitle(title: string | undefined, hostname: string) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function extractVisibleBusinessNameCandidate(html: string, hostname: string) {
+  const candidates: string[] = [];
+  for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
+    const tag = match[0];
+    const signature = `${extractAttribute(tag, "id") ?? ""} ${extractAttribute(tag, "class") ?? ""} ${extractAttribute(tag, "src") ?? ""}`;
+    if (!/logo|brand/i.test(signature)) continue;
+    const alt = cleanText(extractAttribute(tag, "alt"))?.replace(/\s+logo$/i, "").trim();
+    const candidate = normalizeBusinessNameCandidate(alt, hostname);
+    if (candidate && !/^(?:logo|brand)$/i.test(candidate)) candidates.push(candidate);
+  }
+  for (const match of html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)) {
+    const candidate = normalizeBusinessNameCandidate(cleanText(match[1]), hostname);
+    if (candidate) candidates.push(candidate);
+  }
+  return candidates
+    .map((candidate, index) => ({ candidate, score: businessNameCandidateScore(candidate, hostname), index }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .find(({ score }) => score > 0)
+    ?.candidate;
+}
+
 function normalizeBusinessNameCandidate(value: string | undefined, hostname: string) {
   if (!value) return undefined;
   const cleaned = cleanText(value);
   if (!cleaned) return undefined;
   const candidates = cleaned
-    .split(/\s+(?:[|\u2013\u2014-])\s+/)
+    .split(titleSegmentSeparator)
     .map((candidate) => cleanText(candidate))
     .filter((candidate): candidate is string => Boolean(candidate && candidate.length >= 2 && candidate.length <= 80))
     .filter((candidate) => !/^(home|about us|contact us|contact|gallery|portfolio|privacy policy|terms)$/i.test(candidate));
@@ -1499,6 +1557,34 @@ function isOrderingHost(host: string) {
 
 function isBookingHost(host: string) {
   return /(?:opentable|resy|booksy|vagaro|mindbodyonline|fresha|calendly|acuityscheduling|squareup)\.com$/.test(host);
+}
+
+function isOrderingLink(url: URL, sameSite: boolean, text?: string) {
+  const host = url.hostname.replace(/^www\./, "");
+  if (isOrderingHost(host)) return true;
+  const actionText = normalizedLinkActionText(text);
+  if (/^(?:order(?: now| online| pickup| delivery)?|view (?:the )?menu|get delivery|start (?:an )?order)$/.test(actionText)) {
+    return true;
+  }
+  return sameSite && /\/(?:order|order-online|online-ordering|menu|takeout|delivery)(?:\/|$)/i.test(url.pathname);
+}
+
+function isBookingLink(url: URL, sameSite: boolean, text?: string) {
+  const host = url.hostname.replace(/^www\./, "");
+  if (isBookingHost(host)) return true;
+  const actionText = normalizedLinkActionText(text);
+  if (/^(?:book(?: now| online| service| an? appointment| a service call)?|schedule(?: now| online| service| an? appointment| a service call)?|request (?:service|an? appointment)|make an? appointment|reserve(?: now| a time)?)$/.test(actionText)) {
+    return true;
+  }
+  return sameSite && /\/(?:book|book-now|book-online|booking|schedule|schedule-service|appointments?|request-service|request-appointment|reserve|reservations?)(?:\/|$)/i.test(url.pathname);
+}
+
+function normalizedLinkActionText(value?: string) {
+  return (value ?? "")
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function isPressOrVideoHost(host: string) {
@@ -1600,19 +1686,17 @@ function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: Extrac
 }
 
 function mergeHours(left: Record<string, string> | undefined, right: Record<string, string> | undefined) {
-  if (!left && !right) return undefined;
-  return { ...right, ...left };
+  if (!left) return right;
+  if (!right) return left;
+  return Object.keys(left).length >= Object.keys(right).length ? left : right;
 }
 
 function mergeAddress(left: ExtractedBusinessFacts["address"], right: ExtractedBusinessFacts["address"]) {
-  if (!left && !right) return undefined;
-  return {
-    street: left?.street ?? right?.street,
-    city: left?.city ?? right?.city,
-    region: left?.region ?? right?.region,
-    postalCode: left?.postalCode ?? right?.postalCode,
-    country: left?.country ?? right?.country
-  };
+  if (!left) return right;
+  if (!right) return left;
+  const completeness = (value: NonNullable<ExtractedBusinessFacts["address"]>) =>
+    [value.street, value.city, value.region, value.postalCode, value.country].filter(Boolean).length;
+  return completeness(left) >= completeness(right) ? left : right;
 }
 
 function formReferenceKey(reference: CrawlFormReference) {

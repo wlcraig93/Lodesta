@@ -24,6 +24,11 @@ import {
   websiteHealthRequestedRouteSlots,
   websiteHealthRouteSelectionIdentity
 } from "./route-selection";
+import {
+  assessmentInventoryIdentity,
+  assessmentReferenceAuthorityFor,
+  assessmentServingContractFor
+} from "./comparability";
 
 export type BuildWebsiteAssessmentInput = {
   id?: string;
@@ -37,6 +42,8 @@ export type BuildWebsiteAssessmentInput = {
   };
   siteUnderstanding: WebsiteAssessment["siteUnderstanding"];
   canonicalFactAvailability?: WebsiteAssessment["canonicalFactAvailability"];
+  referenceAuthority?: WebsiteAssessment["referenceAuthority"];
+  servingContract?: WebsiteAssessment["servingContract"];
   routeSelection?: WebsiteAssessment["routeSelection"];
   siteInventory: WebsiteAssessment["siteInventory"];
   criteria: AssessmentCriterionInput[];
@@ -55,6 +62,11 @@ export function buildWebsiteAssessment(input: BuildWebsiteAssessmentInput): Webs
   const generatedAt = input.generatedAt ?? new Date().toISOString();
   const canonicalFactAvailability = input.canonicalFactAvailability ?? emptyCanonicalFactAvailability();
   const routeSelection = input.routeSelection ?? defaultRouteSelection(input);
+  const referenceAuthority = input.referenceAuthority ?? assessmentReferenceAuthorityFor(undefined);
+  const servingContract = input.servingContract ?? assessmentServingContractFor({
+    targetKind: input.target.kind,
+    sourceUrl: input.target.sourceUrl
+  });
   const supplied = suppliedCriteria(input);
   const criteria = assessmentCriteria.map((definition) =>
     materializeCriterion({
@@ -125,6 +137,23 @@ export function buildWebsiteAssessment(input: BuildWebsiteAssessmentInput): Webs
   const insufficientEvidence = dimensions.some(
     (dimension) => dimension.state === "insufficient_evidence"
   );
+  const renormalized = activeWeight > 0 && activeWeight < 100;
+  const provisional = insufficientEvidence || siteCoverage < 1 || !comparisonEligible;
+  const evaluators = evaluatorsFor(input, generatedAt);
+  const evaluatorIdentities = evaluators
+    .map((evaluator) => `${evaluator.kind}:${evaluator.identity}:${evaluator.status}`)
+    .sort();
+  const comparabilityBase = {
+    evidenceClass: evidenceClassFor(input.target.kind),
+    registryIdentity: websiteAssessmentRubricIdentity,
+    scannerIdentity: websiteAssessmentScannerIdentity,
+    samplingProfileIdentity: routeSelection.identity,
+    sampledRouteCount: routeSelection.selected.filter((selection) => Boolean(selection.route)).length,
+    servingContractIdentity: servingContract.identity,
+    referenceAuthorityIdentity: referenceAuthority.identity,
+    inventoryIdentity: assessmentInventoryIdentity(input.siteInventory),
+    evaluatorIdentities
+  };
   const failed = criteria
     .filter((criterion) => criterion.status === "fail")
     .sort((left, right) => impactRank(left.impact) - impactRank(right.impact));
@@ -133,7 +162,7 @@ export function buildWebsiteAssessment(input: BuildWebsiteAssessmentInput): Webs
   const criticalFailures = failed.filter((criterion) => criterion.impact === "critical");
 
   return websiteAssessmentSchema.parse({
-    schemaVersion: 2,
+    schemaVersion: 3,
     kind: "website-health-report",
     id: input.id ?? `website_health_${randomUUID().replaceAll("-", "")}`,
     target: input.target,
@@ -148,6 +177,8 @@ export function buildWebsiteAssessment(input: BuildWebsiteAssessmentInput): Webs
     },
     siteUnderstanding: input.siteUnderstanding,
     canonicalFactAvailability,
+    referenceAuthority,
+    servingContract,
     routeSelection,
     siteInventory: input.siteInventory,
     coverage: {
@@ -158,25 +189,41 @@ export function buildWebsiteAssessment(input: BuildWebsiteAssessmentInput): Webs
       comparisonEligible,
       limitations
     },
+    comparability: {
+      key: `comparison@${hashInput(comparabilityBase)}`,
+      evidenceClass: comparabilityBase.evidenceClass,
+      samplingProfileIdentity: comparabilityBase.samplingProfileIdentity,
+      sampledRouteCount: comparabilityBase.sampledRouteCount,
+      servingContractIdentity: comparabilityBase.servingContractIdentity,
+      referenceAuthorityIdentity: comparabilityBase.referenceAuthorityIdentity,
+      inventoryIdentity: comparabilityBase.inventoryIdentity,
+      evaluatorIdentities
+    },
     score: {
       rawValue,
       activeWeight,
-      renormalized: activeWeight > 0 && activeWeight < 100,
+      renormalized,
       scopes: {
         siteAuthor: siteAuthorScope(criteria, dimensions)
       }
     },
     ...(cappedValue === undefined ? {} : {
       grade: {
+        label: "Measured Website Health",
         value: cappedValue,
-        band: websiteAssessmentGradeBandFor(cappedValue),
-        provisional: insufficientEvidence || siteCoverage < 1 || !comparisonEligible,
+        ...(renormalized || provisional ? {} : { band: websiteAssessmentGradeBandFor(cappedValue) }),
+        bandStatus: renormalized
+          ? "suppressed_unscored_dimensions"
+          : provisional
+            ? "suppressed_provisional"
+            : "available",
+        provisional,
         appliedCaps
       }
     }),
     release,
     dimensions,
-    evaluators: evaluatorsFor(input, generatedAt),
+    evaluators,
     summary: {
       strengths: passes.slice(0, 6).map((criterion) => criterion.explanation),
       opportunities: [...failed, ...warnings]
@@ -252,6 +299,10 @@ function materializeCriterion(input: {
     releaseDisposition: definition.releaseDisposition,
     scoreEligible: definition.scoreEligible,
     publicEligible: definition.publicEligible,
+    scopeUnit: definition.scopeUnit,
+    aggregation: definition.aggregation,
+    evidenceTier: definition.evidenceTier,
+    anchors: definition.anchors,
     unknownReason,
     explanation,
     businessConsequence: definition.businessConsequence,
@@ -427,15 +478,18 @@ function criterionCoverage(
   criteria: AssessmentCriterion[],
   scope: "site" | "pipeline"
 ) {
-  if (!criteria.length) return 1;
+  const observable = criteria.filter((criterion) =>
+    criterion.unknownReason !== "target_structurally_unobservable"
+  );
+  if (!observable.length) return 1;
   if (scope === "pipeline") {
-    const complete = criteria.filter((criterion) =>
+    const complete = observable.filter((criterion) =>
       criterion.status !== "unknown"
       || !["collector_unavailable", "evidence_not_retained"].includes(criterion.unknownReason ?? "")
     );
-    return complete.length / criteria.length;
+    return complete.length / observable.length;
   }
-  const siteAttributable = criteria.filter((criterion) =>
+  const siteAttributable = observable.filter((criterion) =>
     criterion.status !== "unknown"
     || !["collector_unavailable", "evidence_not_retained"].includes(criterion.unknownReason ?? "")
   );
@@ -503,6 +557,13 @@ function inferUnknownReason(
 ): AssessmentUnknownReason {
   const normalized = explanation.toLowerCase();
   if (
+    normalized.includes("structurally unobservable")
+    || normalized.includes("not observable from this target")
+    || normalized.includes("cannot be observed at this boundary")
+  ) {
+    return "target_structurally_unobservable";
+  }
+  if (
     normalized.includes("unavailable")
     || normalized.includes("could not be audited")
     || normalized.includes("could not be independently")
@@ -531,6 +592,11 @@ function inferUnknownReason(
     return "site_evidence_missing";
   }
   return "inconclusive";
+}
+
+function evidenceClassFor(targetKind: WebsiteAssessmentTargetKind) {
+  if (targetKind === "site_artifact") return "artifact_authority" as const;
+  return "public_observation" as const;
 }
 
 function defaultRouteSelection(

@@ -35,9 +35,15 @@ import {
 } from "../packages/website-assessment/route-selection";
 import { inferAssessmentVertical } from "../packages/website-assessment/vertical";
 import { compareRetainedSourcePreparations } from "../packages/business-data/source-preparation-diff";
+import { artifactScreenshots } from "../packages/website-assessment/visual-quality-artifact";
+import {
+  artifactBrokenImageFindings,
+  artifactHeadingStructureFindings
+} from "../packages/website-assessment/site-artifact-adapter";
 import {
   businessStateSchema,
-  sourceSnapshotSchema
+  sourceSnapshotSchema,
+  type SiteBuildArtifact
 } from "../packages/site-contracts";
 
 const now = "2026-07-27T12:00:00.000Z";
@@ -45,6 +51,7 @@ const digest = (character: string) => `sha256:${character.repeat(64)}`;
 const routeSelection = selectWebsiteHealthRoutes([
   { route: "/", purposeTags: ["home"], priority: 100 },
   { route: "/water-heaters", purposeTags: ["service_detail"], priority: 90, contentLength: 1_200 },
+  { route: "/drain-cleaning", purposeTags: ["service_detail"], priority: 85, contentLength: 1_000 },
   { route: "/contact", purposeTags: ["contact"], priority: 80 }
 ]);
 
@@ -61,8 +68,41 @@ const artifactVisualRoutes = selectArtifactVisualRoutes([
 ]);
 assert.deepEqual(
   artifactVisualRoutes.selected.map((selection) => selection.route),
-  ["/", "/pest-control", "/contact"],
+  ["/", "/pest-control", undefined, "/contact"],
   "Artifact verification and evaluation must share one deterministic representative-route selection."
+);
+const advisoryLogoFinding = {
+  id: "render.primary_logo_missing",
+  severity: "warning",
+  area: "render",
+  message: "The retained business record supplies one active logo-classified asset.",
+  route: "/"
+} as SiteBuildArtifact["qa"]["findings"][number];
+const primaryGeometryFinding = {
+  id: "render.primary_geometry",
+  severity: "info",
+  area: "render",
+  message: "Primary heading above fold: true.",
+  route: "/"
+} as SiteBuildArtifact["qa"]["findings"][number];
+assert.equal(artifactBrokenImageFindings([advisoryLogoFinding]).length, 0, "Logo advisories must not become broken-image failures merely because their message says asset.");
+assert.equal(artifactHeadingStructureFindings([primaryGeometryFinding]).length, 0, "Primary-heading geometry evidence must not become a heading-outline failure.");
+assert.equal(artifactBrokenImageFindings([{ ...advisoryLogoFinding, id: "render.broken_image" }]).length, 1);
+assert.equal(artifactHeadingStructureFindings([{ ...primaryGeometryFinding, id: "accessibility.axe.serious.heading-order" }]).length, 1);
+const artifactNavigationFrames = artifactScreenshots({
+  routes: [{ path: "/" }],
+  qa: {
+    screenshotKeys: [
+      "captures/home-desktop-top.png",
+      "captures/home-mobile-top.png",
+      "captures/home-mobile-navigation.png"
+    ]
+  }
+} as SiteBuildArtifact, ["/"]);
+assert.deepEqual(
+  artifactNavigationFrames.map((frame) => `${frame.viewport}:${frame.frame}`),
+  ["desktop:top", "mobile:top", "mobile:navigation"],
+  "Artifact quality review must retain the opened mobile navigation state."
 );
 const siteInventory: WebsiteAssessment["siteInventory"] = {
   source: "complete_crawl",
@@ -132,6 +172,9 @@ function report(input: {
   kind?: WebsiteAssessmentTargetKind;
   criteria?: AssessmentCriterionInput[];
   canonicalFacts?: Partial<WebsiteAssessment["canonicalFactAvailability"]>;
+  sourceUrl?: string;
+  siteInventory?: WebsiteAssessment["siteInventory"];
+  referenceAuthority?: WebsiteAssessment["referenceAuthority"];
   deterministicReleaseBlockers?: string[];
 } = {}) {
   const kind = input.kind ?? "public_url";
@@ -140,7 +183,7 @@ function report(input: {
     target: {
       kind,
       sourceKey: `${kind}:fixture`,
-      sourceUrl: kind === "site_artifact" ? undefined : "https://example.com/",
+      sourceUrl: kind === "site_artifact" ? undefined : input.sourceUrl ?? "https://example.com/",
       siteId: kind === "public_url" ? undefined : "site_fixture",
       artifactId: kind === "site_artifact" ? "artifact_fixture" : undefined,
       versionId: kind === "published_site" ? "version_fixture" : undefined
@@ -165,8 +208,9 @@ function report(input: {
       proof: true,
       ...input.canonicalFacts
     },
+    referenceAuthority: input.referenceAuthority,
     routeSelection,
-    siteInventory,
+    siteInventory: input.siteInventory ?? siteInventory,
     criteria: input.criteria ?? criterionInputs(),
     agentReadinessChecks: [],
     deterministicReleaseBlockers: input.deterministicReleaseBlockers,
@@ -181,6 +225,15 @@ record("registry_contract", "The unified registry has stable unique definitions,
   assert.equal(new Set(assessmentCriteria.map((criterion) => criterion.definitionIdentity)).size, assessmentCriteria.length);
   assert.equal(assessmentDimensions.length, 10);
   assert.equal(assessmentDimensions.reduce((sum, dimension) => sum + dimension.weight, 0), 100);
+  for (const definition of assessmentCriteria) {
+    assert(definition.scopeUnit);
+    assert(definition.aggregation);
+    assert(definition.evidenceTier);
+    assert(definition.anchors.pass && definition.anchors.warning && definition.anchors.fail);
+    assert(!(definition.aggregation === "worst_case"
+      && definition.evaluatorType !== "deterministic"
+      && !definition.calibrationIdentity));
+  }
   for (const id of [
     "functional.navigation_reachability",
     "conversion.click_to_call",
@@ -203,14 +256,18 @@ record("registry_contract", "The unified registry has stable unique definitions,
 });
 
 const perfect = report();
-record("v2_scoring", "A complete report uses v2, renormalizes inactive uncalibrated craft weight, and preserves a separate author score.", () => {
+record("v3_scoring", "A complete report uses v3, labels its diagnostic score honestly, suppresses an uncalibrated band, and preserves a separate author score.", () => {
   assert.equal(websiteAssessmentSchema.safeParse(perfect).success, true);
-  assert.equal(perfect.schemaVersion, 2);
+  assert.equal(perfect.schemaVersion, 3);
   assert.equal(perfect.kind, "website-health-report");
   assert.equal(perfect.score.rawValue, 100);
   assert.equal(perfect.score.activeWeight, 92);
   assert.equal(perfect.score.renormalized, true);
   assert.equal(perfect.score.scopes.siteAuthor.value, 100);
+  assert.equal(perfect.grade?.label, "Measured Website Health");
+  assert.equal(perfect.grade?.band, undefined);
+  assert.equal(perfect.grade?.bandStatus, "suppressed_unscored_dimensions");
+  assert(perfect.comparability.key.startsWith("comparison@sha256:"));
   assert.equal(perfect.dimensions.find((dimension) => dimension.id === "visual_editorial_craft")?.state, "not_yet_scored");
   assert.equal(perfect.dimensions.find((dimension) => dimension.id === "visual_editorial_craft")?.capEligible, false);
 });
@@ -318,7 +375,7 @@ record("grade_bands", "Grade bands preserve exact 90, 80, 70, and 50 boundaries.
   assert.equal(websiteAssessmentGradeBandFor(49.9), "poor");
 });
 
-record("typed_unknowns", "Pipeline outages do not lower site coverage, while missing site evidence does.", () => {
+record("typed_unknowns", "Pipeline outages, missing site evidence, and structurally unobservable targets have distinct coverage semantics.", () => {
   const id = assessmentCriteria.find((criterion) => criterion.scoreEligible)?.id;
   assert(id);
   const outage = report({
@@ -333,10 +390,18 @@ record("typed_unknowns", "Pipeline outages do not lower site coverage, while mis
       unknownReasons: { [id]: "site_evidence_missing" }
     })
   });
+  const structurallyUnobservable = report({
+    criteria: criterionInputs({
+      statuses: { [id]: "unknown" },
+      unknownReasons: { [id]: "target_structurally_unobservable" }
+    })
+  });
   assert.equal(outage.coverage.siteEvidence, 1);
   assert(outage.coverage.pipelineCompleteness < 1);
   assert(missing.coverage.siteEvidence < 1);
   assert.equal(missing.coverage.pipelineCompleteness, 1);
+  assert.equal(structurallyUnobservable.coverage.siteEvidence, 1);
+  assert.equal(structurallyUnobservable.coverage.pipelineCompleteness, 1);
 });
 
 record("release_authority", "Artifact hard-gate blockers cap the grade and remain separate from advisory navigation evidence.", () => {
@@ -384,7 +449,28 @@ record("target_equivalence", "External, artifact, and published adapters share c
   assert.deepEqual(common[1], common[2]);
 });
 
-record("semantic_route_selection", "Different route counts resolve through the same three semantic slots and methodology identity.", () => {
+record("comparability_contract", "Formal comparisons require matching serving, reference, inventory, sampling, and evaluator identities.", () => {
+  const left = report();
+  const right = report();
+  const published = report({ kind: "published_site" });
+  const preview = report({ sourceUrl: "https://example.com/preview/token" });
+  const artifact = report({ kind: "site_artifact" });
+  const differentInventory = report({
+    siteInventory: { ...siteInventory, eligiblePages: siteInventory.eligiblePages + 1 }
+  });
+  assert.equal(left.comparability.key, right.comparability.key);
+  assert.equal(left.comparability.key, published.comparability.key);
+  assert.notEqual(left.comparability.key, preview.comparability.key);
+  assert.notEqual(left.comparability.key, artifact.comparability.key);
+  assert.notEqual(left.comparability.key, differentInventory.comparability.key);
+  assert.equal(left.comparability.evidenceClass, "public_observation");
+  assert.equal(artifact.comparability.evidenceClass, "artifact_authority");
+  assert.equal(left.servingContract.kind, "anonymous_public");
+  assert.equal(preview.servingContract.kind, "private_preview");
+  assert.equal(left.comparability.sampledRouteCount, 4);
+});
+
+record("semantic_route_selection", "Different route counts resolve through the same four semantic slots and methodology identity.", () => {
   const short = selectWebsiteHealthRoutes([
     { route: "/", purposeTags: ["home"] },
     { route: "/repair", purposeTags: ["service_detail"], priority: 10 },
@@ -406,7 +492,8 @@ record("semantic_route_selection", "Different route counts resolve through the s
   assert.equal(short.identity, websiteHealthRouteSelectionIdentity);
   assert.equal(long.identity, websiteHealthRouteSelectionIdentity);
   assert.equal(long.selected[1]?.route, "/service-0");
-  assert.equal(long.selected[2]?.route, "/contact-us");
+  assert.equal(long.selected[2]?.route, "/service-1");
+  assert.equal(long.selected[3]?.route, "/contact-us");
   assert.equal(perfect.producer.routeSelectionIdentity, websiteHealthRouteSelectionIdentity);
 });
 
@@ -429,7 +516,16 @@ record("semantic_route_selection_fallback", "Finalized route semantics select re
     ["contact"],
     []
   ]);
-  assert.deepEqual(selection.selected.map((item) => item.route), ["/", "/ant-control", "/contact"]);
+  assert.deepEqual(selection.selected.map((item) => item.route), ["/", "/ant-control", undefined, "/contact"]);
+  assert.deepEqual(
+    inferWebsiteHealthPurposeTags({
+      route: "/request-estimate",
+      title: "Request a Roofing Estimate | Western Roof Company",
+      description: "Request an estimate for roofing or gutter installation."
+    }),
+    ["contact"],
+    "A plainly named estimate route was omitted from conversion evidence."
+  );
 });
 
 record("artifact_vertical_evidence", "Retained business and route text classify category fit without a separate vertical catalog.", () => {
@@ -587,7 +683,7 @@ await recordAsync("malformed_visual_strip", "A 390×4482 full-page strip cannot 
   }]), /expected a labeled 390×844 native viewport frame/);
 });
 
-record("public_projection", "The public report is a projection of v2 and withholds its grade pending calibration approval.", () => {
+record("public_projection", "The public report is a stable projection of canonical v3 and withholds its grade pending calibration approval.", () => {
   const projection = publicWebsiteAssessmentProjection(perfect);
   assert.equal(projection.schemaVersion, 2);
   assert.equal(projection.kind, "public-website-health-report");
@@ -603,32 +699,46 @@ record("public_projection", "The public report is a projection of v2 and withhol
   assert.equal("rawValue" in projection, false);
 });
 
-record("stale_v1", "Schema-v1 assessments remain inspectable storage records but are not accepted by the v2 application contract.", () => {
+record("stale_versions", "Schema-v1 and schema-v2 assessments remain inspectable storage records but are not accepted by the v3 application contract.", () => {
   assert.equal(websiteAssessmentSchema.safeParse({
     schemaVersion: 1,
     id: "legacy",
     target: { kind: "public_url", sourceKey: "legacy" }
   }).success, false);
+  assert.equal(websiteAssessmentSchema.safeParse({
+    schemaVersion: 2,
+    kind: "website-health-report",
+    id: "legacy_v2"
+  }).success, false);
 });
 
 record("calibration_pins", "Calibration binds retained inputs, semantic slots, and screenshot hashes and rejects reviewer drift.", () => {
+  const referenceAuthority = perfect.referenceAuthority;
   const pins = {
-    sourceSnapshots: [{ id: "snapshot_1", hash: digest("a") }],
-    businessState: { revision: 1, hash: digest("b") },
-    siteIntent: { revision: 1, hash: digest("c") },
-    publicBuildInput: { id: "input_1", hash: digest("d") },
-    artifact: { id: "artifact_1", versionId: "version_1" },
+    target: {
+      kind: "public_url" as const,
+      sourceKey: "fixture:public",
+      sourceUrl: "https://example.com/"
+    },
+    referenceAuthority,
     report: { id: "report_1", hash: digest("e"), inputHash: digest("f") },
     screenshotSetHash: digest("1"),
+    comparability: {
+      key: perfect.comparability.key,
+      servingContractIdentity: perfect.comparability.servingContractIdentity,
+      referenceAuthorityIdentity: perfect.comparability.referenceAuthorityIdentity,
+      inventoryIdentity: perfect.comparability.inventoryIdentity
+    },
     routeSelectionIdentity: websiteHealthRouteSelectionIdentity,
-    selectedSlots: [
+    selectedRoutes: [
       { slot: "home" as const, resolvedPath: "/" },
       { slot: "primary_service" as const, resolvedPath: "/water-heaters" },
-      { slot: "contact_or_about" as const, resolvedPath: "/contact" }
+      { slot: "secondary_same_family" as const, resolvedPath: "/drain-cleaning" },
+      { slot: "conversion_or_faq" as const, resolvedPath: "/contact" }
     ] as const
   };
   const base = {
-    schemaVersion: 2 as const,
+    schemaVersion: 3 as const,
     kind: "website-health-calibration" as const,
     registryIdentity: websiteAssessmentRubricIdentity,
     scannerIdentity: websiteAssessmentScannerIdentity,
@@ -640,23 +750,23 @@ record("calibration_pins", "Calibration binds retained inputs, semantic slots, a
       reviewedAt: now,
       pins: {
         ...pins,
-        report: { ...pins.report, id: `report_${index + 1}` },
-        artifact: { ...pins.artifact, id: `artifact_${index + 1}` }
+        target: { ...pins.target, sourceKey: `fixture:public:${index}` },
+        report: { ...pins.report, id: `report_${index + 1}` }
       },
-      automatedRankScore: 90 - index * 10,
-      humanRankScore: 92 - index * 11,
+      readinessDisposition: "ship" as const,
       criteria: [{
         criterionId: "visual.brand.distinctiveness",
         certainty: "inferred" as const,
         scoreEligible: true,
         automatedStatus: "warning" as const,
-        expectedStatus: "warning" as const
+        expectedStatus: "warning" as const,
+        evidence: ["Frozen native-viewport evidence supports the label."]
       }]
     }))
   };
   const summary = summarizeAssessmentCalibration(base);
   assert.equal(summary.reviewedSites, 3);
-  assert.equal(summary.rankingAgreement, 1);
+  assert.equal(summary.criteria[0]?.agreement, 1);
   assert.equal(summary.readiness.minimumReviewedSitesMet, false);
   assert.equal(summary.readiness.publicScoreApproved, false);
   const duplicateWithDrift = {

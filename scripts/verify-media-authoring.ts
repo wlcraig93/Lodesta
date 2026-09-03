@@ -377,6 +377,7 @@ const releasePlanRuntime = new WorkspaceManagerRuntime<string>({
   releasePlan: {
     routePaths: ["/", "/services"],
     browserRoutePaths: ["/"],
+    visualReviewRoutePaths: ["/", "/services"],
     redirects: [{ sourcePath: "/old-services", destinationPath: "/services", reason: "Approved consolidation." }],
     retiredSourcePaths: [{ sourcePath: "/old-author", reason: "Approved retirement." }]
   },

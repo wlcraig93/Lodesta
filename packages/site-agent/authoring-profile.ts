@@ -32,12 +32,12 @@ export type ManagerAuthoringProfile = {
   profileId: CanonicalAuthoringProfileId;
   taskSkill: ManagerTaskSkill;
   systemPrompt: "compact-full-site-pull-source";
-  architectureMode: "commercial-core-pull";
+  architectureMode: "commercial-core-message-target";
   architectureEvidenceMode: "indexed-pull-preview-readable";
-  architectureBrowserCoverage: "all-page-types";
+  architectureBrowserCoverage: "all-routes";
   disabledTools: readonly ["create_image"];
   sourceEvidenceReferences?: readonly ManagerSourceEvidenceReference[];
-  sourceEvidenceLimit: 4;
+  sourceEvidenceLimit: 8;
   sourceEvidencePresentation: "contact-sheet";
   assetEvidenceLimit: 2;
   assetEvidencePresentation: "contact-sheet";
@@ -58,11 +58,11 @@ export function canonicalAuthoringProfile(kind: ManagerTaskKind): ManagerAuthori
     profileId: canonicalAuthoringProfileId,
     taskSkill: canonicalTaskSkillFor(kind),
     systemPrompt: "compact-full-site-pull-source",
-    architectureMode: "commercial-core-pull",
+    architectureMode: "commercial-core-message-target",
     architectureEvidenceMode: "indexed-pull-preview-readable",
-    architectureBrowserCoverage: "all-page-types",
+    architectureBrowserCoverage: "all-routes",
     disabledTools: ["create_image"],
-    sourceEvidenceLimit: 4,
+    sourceEvidenceLimit: 8,
     sourceEvidencePresentation: "contact-sheet",
     assetEvidenceLimit: 2,
     assetEvidencePresentation: "contact-sheet",
@@ -94,6 +94,7 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
     assetEvidencePresentation: profile.assetEvidencePresentation,
     sourceInventoryMode: profile.sourceInventoryMode,
     visualInspectionImageDetail: profile.visualInspectionImageDetail,
+    architectureMode: profile.architectureMode,
     architectureEvidenceMode: profile.architectureEvidenceMode,
     architectureBrowserCoverage: profile.architectureBrowserCoverage,
     visualInspectionFeedback: profile.visualInspectionFeedback,

@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 export const websiteHealthRequestedRouteSlots = [
   "home",
   "primary_service",
-  "contact_or_about"
+  "secondary_same_family",
+  "conversion_or_faq"
 ] as const;
 
 export type WebsiteHealthRouteSlot = (typeof websiteHealthRequestedRouteSlots)[number];
@@ -45,13 +46,14 @@ export type WebsiteHealthRouteSelection = {
 };
 
 export const websiteHealthRouteSelectionPolicy = {
-  version: 2,
+  version: 4,
   requestedSlots: websiteHealthRequestedRouteSlots,
-  maximumRoutes: 3,
+  maximumRoutes: 4,
   selection: {
     home: "canonical homepage or primary crawl entry",
     primaryService: "highest-priority service-intent route; specificity, declared priority, and substantive content break ties",
-    contactOrAbout: "contact/location, otherwise about, otherwise the second service-intent route",
+    secondarySameFamily: "a second route from the primary material family when one exists",
+    conversionOrFaq: "contact/location, otherwise FAQ, otherwise about, otherwise the strongest remaining route",
     missingSlot: "retain the requested slot without a resolved route"
   },
   semanticPurposeTags: {
@@ -71,6 +73,7 @@ export const websiteHealthRouteSelectionPolicy = {
   },
   framePolicy: {
     positions: ["top", "middle", "bottom"],
+    interactiveStates: ["navigation"],
     overview: "low-resolution rhythm-only evidence",
     malformedViewportRejection: "reject images whose pixel dimensions do not match the declared native viewport frame"
   }
@@ -99,8 +102,13 @@ export function inferWebsiteHealthPurposeTags(
   const lastSegment = routeSegments.at(-1) ?? "";
 
   if (matchesSegment(lastSegment, [
-    "contact", "contact-us", "get-in-touch", "request-a-quote", "get-a-quote", "quote"
-  ]) || matchesPhrase(titleWords, ["contact", "contact us", "get in touch", "request a quote"])) {
+    "contact", "contact-us", "get-in-touch", "request-a-quote", "get-a-quote", "quote",
+    "request-estimate", "request-an-estimate", "get-estimate", "get-an-estimate", "estimate",
+    "request-service", "service-request"
+  ]) || matchesPhrase(titleWords, [
+    "contact", "contact us", "get in touch", "request a quote", "request estimate",
+    "request an estimate", "get an estimate", "request service"
+  ])) {
     return ["contact"];
   }
   if (matchesSegment(lastSegment, [
@@ -113,8 +121,12 @@ export function inferWebsiteHealthPurposeTags(
     return ["about"];
   }
 
+  if (routeSegments.some((segment) => matchesSegment(segment, ["faq", "faqs", "frequently-asked-questions"]))) {
+    return ["faq"];
+  }
+
   if (routeSegments.some((segment) => matchesSegment(segment, [
-    "blog", "blogs", "guide", "guides", "resources", "faq", "faqs", "privacy", "terms", "accessibility"
+    "blog", "blogs", "guide", "guides", "resources", "privacy", "terms", "accessibility"
   ]))) {
     return [];
   }
@@ -147,18 +159,45 @@ export function selectWebsiteHealthRoutes(
     .filter((candidate) => candidate !== home && hasPurpose(candidate, ["service_detail", "service", "services"]))
     .sort((left, right) => routeRank(right) - routeRank(left));
   const contact = normalized.find((candidate) =>
-    candidate !== home && hasPurpose(candidate, ["contact", "location"])
+    candidate !== home && hasPurpose(candidate, ["contact"])
+  ) ?? normalized.find((candidate) =>
+    candidate !== home && hasPurpose(candidate, ["location"])
   );
   const about = normalized.find((candidate) =>
     candidate !== home && candidate !== contact && hasPurpose(candidate, ["about"])
   );
+  const faq = normalized.find((candidate) =>
+    candidate !== home && candidate !== contact && candidate !== about && hasPurpose(candidate, ["faq"])
+  );
+  const primary = services[0];
+  const secondary = services.find((candidate) => candidate !== primary);
+  const used = new Set([home, primary, secondary].filter(Boolean));
+  const remaining = normalized
+    .filter((candidate) => !used.has(candidate))
+    .sort((left, right) => routeRank(right) - routeRank(left));
   const selections = [
     selection("home", home, "home"),
-    selection("primary_service", services[0], "primary service intent"),
+    selection("primary_service", primary, "primary service intent"),
     selection(
-      "contact_or_about",
-      contact ?? about ?? services[1],
-      contact ? "contact or location" : about ? "about" : services[1] ? "secondary service intent" : undefined
+      "secondary_same_family",
+      secondary,
+      secondary ? "second route from the primary material family" : undefined
+    ),
+    selection(
+      "conversion_or_faq",
+      (!used.has(contact) ? contact : undefined)
+        ?? (!used.has(faq) ? faq : undefined)
+        ?? (!used.has(about) ? about : undefined)
+        ?? remaining[0],
+      contact && !used.has(contact)
+        ? "contact or location"
+        : faq && !used.has(faq)
+          ? "frequently asked questions"
+          : about && !used.has(about)
+            ? "about"
+            : remaining[0]
+              ? "strongest remaining customer route"
+              : undefined
     )
   ] satisfies WebsiteHealthRouteSelection["selected"];
 
@@ -182,7 +221,7 @@ export function selectArtifactVisualRoutes(
     requirement.slug ? `/${requirement.slug}` : "/",
     { requirement, index }
   ]));
-  return selectWebsiteHealthRoutes(routes.map((route) => {
+  return selectWebsiteHealthRoutes(routes.map((route, routeIndex) => {
     const matched = requirementByRoute.get(route.path);
     return {
       route: route.path,
@@ -196,7 +235,7 @@ export function selectArtifactVisualRoutes(
       contentLength: route.description.length,
       priority: matched
         ? pageRequirements.length - matched.index
-        : 0
+        : routes.length - routeIndex
     };
   }));
 }
@@ -206,57 +245,8 @@ export function selectArtifactReviewRoutePaths(
   routes: ArtifactVisualRouteInput[],
   pageRequirements: ArtifactVisualPageRequirement[]
 ) {
-  const normalizedRoutes = routes.map((route) => ({ ...route, path: normalizeRoute(route.path) }));
-  const routeByPath = new Map(normalizedRoutes.map((route) => [route.path, route]));
-  const requirementByPath = new Map(pageRequirements.map((requirement, index) => [
-    requirement.slug ? normalizeRoute(requirement.slug) : "/",
-    { requirement, index }
-  ]));
-  const rank = (route: ArtifactVisualRouteInput) => {
-    const matched = requirementByPath.get(route.path);
-    return matched ? pageRequirements.length - matched.index : 0;
-  };
-  const purpose = (route: ArtifactVisualRouteInput) => requirementByPath.get(route.path)?.requirement.purpose
-    ?? inferWebsiteHealthPurposeTags({ route: route.path, title: route.title, description: route.description })[0]
-    ?? "";
-  const prominence = [...normalizedRoutes]
-    .filter((route) => route.path !== "/")
-    .sort((left, right) => rank(right) - rank(left)
-      || right.description.length - left.description.length
-      || left.path.localeCompare(right.path));
-  const selected: string[] = [];
-  const add = (path?: string) => {
-    if (path && routeByPath.has(path) && !selected.includes(path)) selected.push(path);
-  };
-  add(routeByPath.has("/") ? "/" : normalizedRoutes[0]?.path);
-  const primary = prominence[0];
-  add(primary?.path);
-  if (primary) {
-    const primaryPurpose = routeFamilyPurpose(purpose(primary));
-    const primaryParent = primary.path.split("/").filter(Boolean)[0] ?? "";
-    add(prominence.find((route) => route.path !== primary.path && (
-      (primaryPurpose && routeFamilyPurpose(purpose(route)) === primaryPurpose)
-      || (!primaryPurpose && primaryParent && route.path.split("/").filter(Boolean)[0] === primaryParent)
-    ))?.path);
-  }
-  const remaining = prominence.filter((route) => !selected.includes(route.path));
-  const conversion = remaining.find((route) => /(?:^|\/)(?:contact|contact-us|get-a-quote|request-a-quote|quote)(?:\/|$)/i.test(route.path))
-    ?? remaining.find((route) => /(?:^|\/)(?:faq|faqs|frequently-asked-questions)(?:\/|$)/i.test(route.path))
-    ?? remaining[0];
-  add(conversion?.path);
-  for (const route of prominence) {
-    if (selected.length >= 4) break;
-    add(route.path);
-  }
-  return selected.slice(0, 4);
-}
-
-function routeFamilyPurpose(value: string) {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-  if (/service|treatment|solution|product/.test(normalized)) return "service";
-  if (/location|service_area/.test(normalized)) return "location";
-  if (/resource|blog|guide|article/.test(normalized)) return "resource";
-  return normalized;
+  return selectArtifactVisualRoutes(routes, pageRequirements).selected
+    .flatMap((item) => item.route ? [item.route] : []);
 }
 
 function selection(
@@ -275,9 +265,9 @@ function selection(
 }
 
 function routeRank(candidate: WebsiteHealthRouteCandidate) {
-  const specificity = candidate.purposeTags.includes("service_detail") ? 1_000_000 : 0;
-  return specificity
-    + (candidate.priority ?? 0) * 10_000
+  const specificity = candidate.purposeTags.includes("service_detail") ? 100_000 : 0;
+  return (candidate.priority ?? 0) * 1_000_000
+    + specificity
     + Math.min(candidate.contentLength ?? 0, 9_999);
 }
 

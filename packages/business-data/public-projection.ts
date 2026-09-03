@@ -33,21 +33,31 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
   if (nonUsLocation) {
     throw new Error(`Public build input supports US locations only; ${nonUsLocation.id} uses ${nonUsLocation.country}.`);
   }
-  const eligibleFactIds = new Set(state.facts
-    .filter((fact) => fact.publicEligible && (fact.source.ownerConfirmed || fact.source.evidenceClass === "first_party"))
-    .map((fact) => fact.id));
+  const eligibleFacts = state.facts
+    .filter((fact) => fact.publicEligible && (fact.source.ownerConfirmed || fact.source.evidenceClass === "first_party"));
+  const eligibleFactById = new Map(eligibleFacts.map((fact) => [fact.id, fact]));
+  const eligibleFactIds = new Set(eligibleFactById.keys());
   const proof = state.proof.filter((item) => item.status === "confirmed"
     && !isExpired(item.expiresAt)
     && item.sourceFactIds.length > 0
     && item.sourceFactIds.every((factId) => eligibleFactIds.has(factId)));
   const confirmedProofFactIds = new Set(proof.flatMap((item) => item.sourceFactIds));
-  const publicFacts = state.facts
-    .filter((fact) => fact.publicEligible && (fact.source.ownerConfirmed || fact.source.evidenceClass === "first_party"))
+  const offerings = state.offerings.filter((offering) => offering.status === "confirmed" && offering.visibility === "public");
+  for (const offering of offerings) {
+    const sources = offering.sourceFactIds.map((factId) => eligibleFactById.get(factId));
+    if (!sources.length
+      || sources.some((fact) => !fact || fact.kind !== "offering")
+      || !sources.some((fact) => sameFactValue(fact!.value, offering.name))) {
+      throw new Error(`Published offering ${offering.id} must reference an eligible canonical offering fact with the same name.`);
+    }
+  }
+  const publishedOfferingFactIds = new Set(offerings.flatMap((offering) => offering.sourceFactIds));
+  const publicFacts = eligibleFacts
     .filter((fact) => fact.kind !== "proof" || confirmedProofFactIds.has(fact.id))
+    .filter((fact) => fact.kind !== "offering" || publishedOfferingFactIds.has(fact.id))
     .map((fact) => publicFactSchema.parse(fact));
   const publicFactById = new Map(publicFacts.map((fact) => [fact.id, fact]));
   const eligibleSource = (ids: string[]) => ids.some((id) => publicFactById.has(id));
-  const offerings = state.offerings.filter((offering) => offering.status === "confirmed" && offering.visibility === "public");
   const assets = state.assets.filter((asset) => asset.activeForFutureBuilds);
   const links = state.links.filter((link) => link.publicEligible && eligibleSource(link.sourceFactIds));
   const serviceAreas = state.serviceAreas.filter((area) => eligibleSource(area.sourceFactIds));

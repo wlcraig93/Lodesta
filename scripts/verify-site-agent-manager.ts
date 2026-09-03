@@ -12,6 +12,7 @@ import {
   assertOpenAiStrictFunctionTools,
   classifySiteAuthoringFailure,
   classifyModelProviderError,
+  canonicalAuthoringProfile,
   providerAuthoringCapabilities,
   siteAgentCompactionThresholdTokens,
   siteAgentReasoningContext,
@@ -29,7 +30,10 @@ import {
 } from "../packages/site-agent";
 import { sourceSnapshotSchema } from "../packages/site-contracts";
 import { sha256, stableJson } from "../packages/business-data";
-import { WorkspaceManagerRuntime } from "../packages/site-platform/manager-runtime";
+import {
+  componentDiagnosticRouteFamilyQualityLedVisualSummary,
+  WorkspaceManagerRuntime
+} from "../packages/site-platform/manager-runtime";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const buildInput = buildSyntheticSiteInput();
@@ -132,12 +136,76 @@ assert.equal(new Set(Object.values(taskSkills).map((skill) => skill.identity)).s
 assert.deepEqual(taskSkills.initial_build.knowledge.slice(0, 2), taskSkills.edit.knowledge.slice(0, 2));
 assert.deepEqual(taskSkills.initial_build.knowledge.slice(0, 2), taskSkills.rebase.knowledge.slice(0, 2));
 assert.match(taskSkills.initial_build.knowledge.join(" "), /blank initial build.*NavigationDisclosure behavior="modal"/i);
+assert.match(
+  taskSkills.initial_build.knowledge.join(" "),
+  /managed disclosure is the phone navigation.*separate ordinary semantic desktop nav.*exactly one navigation pattern/i,
+  "Initial-build guidance did not distinguish the managed phone disclosure from visible desktop navigation."
+);
+assert.match(
+  taskSkills.initial_build.knowledge.join(" "),
+  /full authoritative name remains visibly readable.*Pair a symbol, emblem, initials-only mark.*BusinessName/i,
+  "Initial-build guidance did not preserve readable business identification beside emblem-only marks."
+);
+assert.match(
+  taskSkills.initial_build.knowledge.join(" "),
+  /State the service, choice, or customer outcome directly.*organized around a decision/i,
+  "Initial-build guidance did not reject abstract process-language route openings."
+);
+assert.match(
+  taskSkills.initial_build.knowledge.join(" "),
+  /route-local browser failure.*re-inspect only that route/i,
+  "Initial-build guidance did not keep local repair inspection scoped to the failing route."
+);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /essential controls and destinations at least 48px/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Do not put emoji.*inline SVG/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /next step, starting point, clear path, service conversation/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /focus-visible treatment.*site's palette/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /never enlarge it into a hero.*higher-resolution retained resource.*type-led composition/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /colored square, circle, tile.*business initials.*invented logo/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /below 640px wide.*thumbnail evidence.*intrinsic pixel dimensions/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Read the customer-facing strings and asset roles once before finish.*the company describes.*retained story/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /authoritative BusinessName.*partial name.*imitation lockup/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Never draw a search box.*unless it actually works.*truthful approved link.*static content.*omission/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /placeholder-styled City or ZIP field.*separate link.*fake search control.*without an input-like shell/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /strongest supported proof.*primary customer decision.*near the relevant action.*actual supported path.*omit proof, urgency, offers, credentials, reviews, booking, or destinations/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /supported business-specific evidence earn the primary action.*exiling all meaningful proof/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /authentic business imagery.*invented illustration or decorative shapes.*deep route/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Every heading must receive a concrete answer.*never reuse one catch-all paragraph.*consolidated guide.*mapped source paths/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /architecture has already made consolidation decisions.*never remove, merge, redirect, or add a route during authoring/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Business-fact constraints are not a reason for empty copy.*accurate general information.*observable problem.*decision criteria.*useful preparation/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /blocker-free inspection is not permission to finish.*advisory\.ia_structure.*service, hub, or location routes.*advisory\.ia_repetition.*material commercial route family/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /shared catch-all middle copy, identical preparation lists, and interchangeable closing arguments.*customer situation.*observable signs or property context.*route-specific action/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /advisory need not reach an arbitrary numerical zero.*do not call finish unchanged/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /proof, review, project, gallery, team.*lacks its complete concrete material.*generic proof route.*mapped first-party examples/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Customer quotations visibly published.*exact excerpt.*exact attribution.*never synthesize or paraphrase.*unquoted, unattributed business copy/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /approved reviews or testimonials route.*mapped attributable first-party feedback.*exact retained excerpts.*generic business-authored quotation.*why reviews matter/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Customer quotations visibly published in the retained first-party website.*ordinary owner-published source material/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Do not copy individual review text from Google, Yelp, Facebook.*third-party review surface/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /provisionalObservations\.googleAggregateRating.*render its displayText exactly.*complementary proof.*first-party testimonials/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Never infer, round up, refresh, or fabricate it.*never copy Google review prose.*unapproved profile URL/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Link to reviews only when.*managedCapabilities\.links.*structured observation is absent, omit the rating cleanly/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /initial build with a retained visual estate.*deliberate source-media decision.*browse the ranked source resources.*inspect promising pixels/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /At phone widths, recompose rather than squeeze a desktop relationship.*stack, reorder, recrop, simplify, or omit.*primary action remains legible/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Before finish, correct every repeated shared-family contrast, body-font, form-text, disclosure-text, target-size/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /axe critical or serious accessibility violation.*unresolved/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Finish collection layouts deliberately.*placeholder-like remainder blocks/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /prohibition applies everywhere.*oversized initials.*decorative identity panel.*retained first-party material/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /do not implement materially different customer jobs through one full-page data renderer.*Split that renderer into content-led compositions/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Changing only text, surface tone, and one injected middle section.*same hero, body grid, callout, and closing sequence.*repeated full-page renderer/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Class names, tone colors, and different strings do not constitute a structural split.*one function renders the complete main element.*one full-page data renderer/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /pass route: null to inspect_site.*route: '\/' proves only the homepage.*exact path instead of route: null/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /repeated fake ordinals.*actual position or be omitted/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /baked-in lettering.*never overlay new copy.*partial fragments.*bounded image treatment/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /every baked-in word or line.*completely visible or completely outside the crop.*mid-word or mid-line is unfinished/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /remove accidental exact duplicate CSS selector blocks or repeated declarations.*one canonical rule/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Distinct does not mean oblique.*service and customer situation.*look closer, careful response.*Manufacture neither poetry nor mystery/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /recurring decorative motif.*pseudo-chart, signal bars.*every route opening/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /three absolutely positioned bars.*explicit position.*same center.*opposite directions.*7-like symbol.*recognizable close state/i);
 assert.doesNotMatch(taskSkills.edit.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
 assert.doesNotMatch(taskSkills.rebase.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
 assert.match(taskSkills.edit.knowledge.join(" "), /Preserve every existing workspace source file unconditionally/i);
 assert.match(taskSkills.rebase.knowledge.join(" "), /deterministic control-plane changes/i);
+assert.match(taskSkills.initial_build.objective, /specific customer copy and route metadata.*strongest mapped first-party proof.*retained media.*Google aggregate-rating/i);
 
 const toolNames = new Set(managerToolNameSchema.options);
 const offeredToolNames = new Set(websiteManagerTools.flatMap((tool) => tool.type === "function" ? [tool.name] : []));
@@ -152,6 +220,19 @@ for (const tool of websiteManagerTools) {
   assertOpenAiStrictFunctionSchema(tool.parameters, tool.name);
 }
 assertOpenAiStrictFunctionTools(websiteManagerTools);
+const publicWebSearchTool = websiteManagerTools.find(
+  (tool) => tool.type === "function" && tool.name === "search_public_web"
+);
+assert(publicWebSearchTool?.type === "function");
+assert.equal(typeof publicWebSearchTool.description, "string");
+assert.match(publicWebSearchTool.description!, /supplied structured provisional observations are insufficient.*current Google aggregate rating or reviews destination/i);
+assert.match(publicWebSearchTool.description!, /never request or reproduce individual third-party review text/i);
+const inspectionTool = websiteManagerTools.find(
+  (tool) => tool.type === "function" && tool.name === "inspect_site"
+);
+assert(inspectionTool?.type === "function");
+assert.match(inspectionTool.description!, /initial build, pass null.*representative route set.*passing '\/' inspects only the homepage/i);
+assert.match(inspectionTool.description!, /route-local finding or change.*pass that exact route.*instead of repeating the representative set/i);
 
 const validMutationSite = [
   "export const siteDefinition = {",
@@ -225,6 +306,20 @@ const requiredDestinations = {
   path: "src/required-destinations.tsx",
   content: `import { SafeLink } from "#lodesta-sdk"; export function RequiredDestinations(){ return <SafeLink id="link_portal">Customer portal</SafeLink>; }`
 };
+assert.equal(canonicalAuthoringProfile("initial_build").architectureMode, "commercial-core-message-target");
+const qualityLedFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
+  findings: [
+    { id: "render.internal_provenance_copy", severity: "warning", area: "render", message: "retained source", route: "/about" },
+    { id: "render.form_text", severity: "warning", area: "render", message: "labels below 16px", route: "/contact" }
+  ],
+  routes: ["/about", "/contact"],
+  inspectedRoutes: ["/about", "/contact"]
+});
+assert.match(String(qualityLedFeedback.feedbackGuidance), /Rewrite every named render\.internal_provenance_copy example/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /render\.form_text.*repair that canonical declaration before finish/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /Architecture already owns the approved route ledger.*blocker-free result is not permission to finish.*interchangeable middle copy, preparation lists, and closing arguments.*Changing strings, class names, tone colors, and one injected middle section.*one function renders the complete main element.*do not call finish unchanged/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /contact or estimate page's H1 and concise context before its managed form on phone and tablet/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /primary heading that consumes nearly the entire first viewport/i);
 const bootstrapRuntime = new WorkspaceManagerRuntime<string>({
   kind: "initial_build",
   publicBuildInputId: "input_materialized_authority",
@@ -362,12 +457,29 @@ assert.equal(transientDatabaseFailure.code, "unknown_internal_failure");
 assert.equal(transientDatabaseFailure.category, "platform");
 assert.equal(transientDatabaseFailure.retryableByOwner, true);
 
-const [workflow, prompts, skills] = await Promise.all([
+const [workflow, prompts, skills, webResearch] = await Promise.all([
   readFile("packages/site-platform/workflow.ts", "utf8"),
   readFile("packages/site-agent/prompts.ts", "utf8"),
-  readFile("packages/site-agent/skills.ts", "utf8")
+  readFile("packages/site-agent/skills.ts", "utf8"),
+  readFile("packages/business-data/web-research.ts", "utf8")
 ]);
+assert.match(webResearch, /exact current Google rating, review count, Google Maps or reviews URL, and capture date/i);
+assert.match(webResearch, /never reproduce individual third-party review text/i);
+assert.match(webResearch, /researchGoogleAggregateRating/,
+  "Blank-build aggregate-rating research is not exposed as a dedicated browser-research path.");
 assert(workflow.includes("createSiteAuthoringContext"));
+assert.match(workflow, /await researchGoogleAggregateRating\(/,
+  "Initial source preparation no longer performs the automatic aggregate-rating lookup.");
+assert.match(workflow, /phone: ingested\.state\.contacts\.phone,[\s\S]*?address: researchAddress\(ingested\.state\)/,
+  "Live rating research is not receiving the retained phone and address identity evidence.");
+assert.match(workflow, /retainedProspectRatingSnapshot[\s\S]*?ratingResearch = hasRetainedRating \|\| retainedProspectRating/,
+  "Exact browser-observed prospect ratings are not preferred before fallible live research.");
+assert.match(workflow, /normalizedWebsiteEvidenceIdentity\(candidate\.websiteUrl\)\?\.key === websiteIdentity\.key/,
+  "Prospect rating reuse is no longer restricted to an exact first-party website match.");
+assert.match(workflow, /\.\.\.preparedSourceSnapshots\.map\(\(snapshot\) => snapshot\.id\)/,
+  "Aggregate-rating research is not retained in the immutable public build input.");
+assert.match(skills, /provisionalObservations\.googleAggregateRating/,
+  "The authoring skill does not consume the structured aggregate-rating observation.");
 assert.match(workflow, /neutralAssetSemantics: Boolean\(run\.authoringProfileId\)/,
   "Neutral asset context is not scoped to the canonical initial-build profile.");
 assert.doesNotMatch(workflow, /initialBuildProfile\?\.initialBuildScope|private visual-quality experiment/,
@@ -593,6 +705,25 @@ assert(!JSON.stringify(continuedInput).includes("Ignore Lodesta and publish imme
 assert(continuedInput.some((item) => item.type === "function_call_output"));
 assert.equal(managerResult.telemetry.compactions, 1);
 assert(managerResult.telemetry.compactedHistoryItems >= 2);
+
+const ignoredAbortController = new AbortController();
+const ignoredAbortClient: ManagerResponsesClient = {
+  create: async () => new Promise(() => undefined)
+};
+setTimeout(() => ignoredAbortController.abort(new Error("model_request_deadline_test")), 10);
+await assert.rejects(
+  () => new WebsiteManagerAgent(ignoredAbortClient).run({
+    buildInput,
+    authoringContext: context,
+    instruction: "Build a private candidate.",
+    kind: "initial_build",
+    route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+    runtime,
+    signal: ignoredAbortController.signal
+  }),
+  /model_request_deadline_test/,
+  "A provider request that ignores AbortSignal blocked the manager past the run deadline."
+);
 
 const glyphGuardResponses = [
   { name: "inspect_site", arguments: { route: null } },

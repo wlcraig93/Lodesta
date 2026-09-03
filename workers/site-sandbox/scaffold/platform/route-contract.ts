@@ -16,13 +16,21 @@ function isStaticRoutePath(path: string) {
   if (path === "/") return true;
   if (!path.startsWith("/") || path.endsWith("/") || path.includes("?") || path.includes("#") || path.includes("\\")) return false;
   // Retained source URLs may legitimately end a slug segment with a hyphen.
+  // Some retained storefront paths also begin a segment with one.
   // Keep validation linear so long legacy paths cannot trigger regex backtracking.
   const segments = path.slice(1).split("/");
   return segments.every((segment, index) => {
-    if (/^[a-z0-9][a-z0-9-]*$/.test(segment)) return true;
-    return index === segments.length - 1
-      && /^[a-z0-9][a-z0-9-]*\.(?:html?|php|aspx?)$/.test(segment);
+    if (isStaticSlugSegment(segment)) return true;
+    if (index !== segments.length - 1) return false;
+    const legacyFile = /^([a-z0-9-]+)\.(?:html?|php|aspx?)$/.exec(segment);
+    return Boolean(legacyFile && isStaticSlugSegment(legacyFile[1]!));
   });
+}
+
+function isStaticSlugSegment(segment: string) {
+  return segment.length > 0
+    && /^[a-z0-9-]+$/.test(segment)
+    && /[a-z0-9]/.test(segment);
 }
 
 export function assertRenderedRouteBodies(routes: Array<{ path: string; bodyHtml: string }>) {

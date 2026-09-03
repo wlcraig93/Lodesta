@@ -191,8 +191,10 @@ try {
       path: "/"
     }, {
       path: "/blog/2025/february/what-is-the-best-way-to-get-rid-of-rodents-"
+    }, {
+      path: "/store/p/-plated-daily-serum"
     }]),
-    "The sandbox build rejected a retained legacy route with a trailing hyphen."
+    "The sandbox build rejected a retained legacy route with a leading or trailing hyphen."
   );
   assert(
     performance.now() - retainedLegacyRouteStartedAt < 1_000,
@@ -206,6 +208,11 @@ try {
     () => assertValidRoutePaths([{ path: "/" }, { path: "/payload.exe" }]),
     /not a static site path/,
     "The sandbox route contract admitted an unsupported file-like route."
+  );
+  assert.throws(
+    () => assertValidRoutePaths([{ path: "/" }, { path: "/store/---" }]),
+    /not a static site path/,
+    "The sandbox route contract admitted a slug segment without an alphanumeric character."
   );
   await writeFile(join(workspace, "src/site.tsx"), `export const siteDefinition = {
     routes: [

@@ -1025,16 +1025,23 @@ export function isStaticSiteRoutePath(path: string) {
   ) return false;
   const segments = path.slice(1).split("/");
   return segments.every((segment, index) => {
-    if (/^[a-z0-9][a-z0-9-]*$/.test(segment)) return true;
-    return index === segments.length - 1
-      && /^[a-z0-9][a-z0-9-]*\.(?:html?|php|aspx?)$/.test(segment);
+    if (isStaticSiteSlugSegment(segment)) return true;
+    if (index !== segments.length - 1) return false;
+    const legacyFile = /^([a-z0-9-]+)\.(?:html?|php|aspx?)$/.exec(segment);
+    return Boolean(legacyFile && isStaticSiteSlugSegment(legacyFile[1]!));
   });
+}
+
+function isStaticSiteSlugSegment(segment: string) {
+  return segment.length > 0
+    && /^[a-z0-9-]+$/.test(segment)
+    && /[a-z0-9]/.test(segment);
 }
 
 const staticSiteRoutePathSchema = z.string()
   .startsWith("/")
   .max(512)
-  .refine(isStaticSiteRoutePath, "Expected / or lowercase static slug segments; the final segment may retain a legacy .html, .htm, .php, .asp, or .aspx extension.");
+  .refine(isStaticSiteRoutePath, "Expected / or lowercase static slug segments composed of alphanumerics and hyphens; the final segment may retain a legacy .html, .htm, .php, .asp, or .aspx extension.");
 
 export const siteArchitectureRouteSchema = z.object({
   path: staticSiteRoutePathSchema,

@@ -20,10 +20,14 @@ import {
   type RawSiteArchitecturePlan
 } from "../packages/site-agent";
 import {
+  isStaticSiteRoutePath,
   siteAgentArchitectureSchema,
   siteArchitecturePlanSchema,
   type SourceSnapshotPage
 } from "../packages/site-contracts";
+
+assert.equal(isStaticSiteRoutePath("/store/p/-plated-daily-serum"), true);
+assert.equal(isStaticSiteRoutePath("/store/---"), false);
 
 const pages = [
   page("page_home", "/", "Home", [

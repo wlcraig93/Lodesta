@@ -179,7 +179,8 @@ export function retainedCanarySourceIsAvailable(
   snapshot: SourceSnapshot | undefined,
   pageCount: number
 ) {
-  return Boolean(snapshot && (snapshot.sourceType !== "website" || pageCount > 0));
+  if (!snapshot) return false;
+  return snapshot.sourceType === "website" ? pageCount > 0 : pageCount === 0;
 }
 
 class SiteAgentRunNoLongerActiveError extends Error {
@@ -644,17 +645,22 @@ export class SiteAuthoringWorkflow {
         sourceSnapshots: clonedSources.map((source) => source.snapshot),
         assetRevisions: clonedAssets.map((asset) => asset.revision),
         publicBuildInput: buildInput,
-        sourceMirrorReferences: clonedSources.map((source) => ({
-          sourceSnapshotId: source.snapshot.id,
-          retainedSourceSnapshotId: source.retainedSourceSnapshotId
-        }))
+        sourceMirrorReferences: clonedSources
+          .filter((source) => source.snapshot.sourceType === "website")
+          .map((source) => ({
+            sourceSnapshotId: source.snapshot.id,
+            retainedSourceSnapshotId: source.retainedSourceSnapshotId
+          }))
       });
       for (const source of clonedSources) {
         const [resolvedId, pages] = await Promise.all([
           this.repository.resolveRetainedSourceSnapshotId(source.snapshot.id),
           this.repository.listSourceSnapshotPages(source.snapshot.id)
         ]);
-        if (resolvedId !== source.retainedSourceSnapshotId || pages.length !== source.pages.length) {
+        const expectedResolvedId = source.snapshot.sourceType === "website"
+          ? source.retainedSourceSnapshotId
+          : source.snapshot.id;
+        if (resolvedId !== expectedResolvedId || pages.length !== source.pages.length) {
           throw new Error(`retained_canary_mirror_incomplete:${source.snapshot.id}`);
         }
       }

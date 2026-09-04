@@ -17,6 +17,7 @@ const snapshot = (sourceType: "website" | "web_research") => sourceSnapshotSchem
 assert.equal(retainedCanarySourceIsAvailable(snapshot("website"), 0), false);
 assert.equal(retainedCanarySourceIsAvailable(snapshot("website"), 1), true);
 assert.equal(retainedCanarySourceIsAvailable(snapshot("web_research"), 0), true);
+assert.equal(retainedCanarySourceIsAvailable(snapshot("web_research"), 1), false);
 assert.equal(retainedCanarySourceIsAvailable(undefined, 1), false);
 
 const workflow = await readFile("packages/site-platform/workflow.ts", "utf8");
@@ -24,6 +25,8 @@ const retainedCanary = workflow.match(/async bootstrapFromRetainedSite[\s\S]*?\n
 assert.match(retainedCanary, /sourceMirrorReferences:/, "The canonical canary does not bind scratch authorities to retained mirrors.");
 assert.match(retainedCanary, /retainedSourceSnapshotId:/, "The canonical canary does not identify the pinned retained mirror.");
 assert.match(retainedCanary, /retainedCanarySourceIsAvailable\(snapshot, pages\.length\)/, "The canonical canary does not preserve page-free structured authorities.");
+assert.match(retainedCanary, /\.filter\(\(source\) => source\.snapshot\.sourceType === "website"\)/, "The canonical canary tries to bind structured authorities through the website-mirror contract.");
+assert.match(retainedCanary, /source\.snapshot\.sourceType === "website"[\s\S]*?source\.retainedSourceSnapshotId[\s\S]*?source\.snapshot\.id/, "The canonical canary does not verify structured and website authorities against their distinct retained identities.");
 assert.doesNotMatch(retainedCanary, /saveSourceSnapshotResources\(/, "The canonical canary still clones retained resource rows.");
 assert.doesNotMatch(retainedCanary, /saveSourceSnapshotPages\(/, "The canonical canary still clones retained page rows.");
 assert.doesNotMatch(workflow, /function cloneSourceMirror\(/, "The obsolete full-mirror clone path still exists.");

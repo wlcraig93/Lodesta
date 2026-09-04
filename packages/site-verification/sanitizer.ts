@@ -180,6 +180,7 @@ function sanitizeAttributes(element: Element, tag: string, findings: ArtifactGat
 }
 
 function isAllowedNativeAttribute(tag: string, attribute: string, element: Element) {
+  if (attribute === "scope") return tag === "th";
   if (attribute === "popover") return !svgTags.has(tag);
   if (attribute === "popovertarget" || attribute === "popovertargetaction") {
     return tag === "button" || (tag === "input" && (element.attribs.type ?? "").toLowerCase() === "button");
@@ -190,6 +191,15 @@ function isAllowedNativeAttribute(tag: string, attribute: string, element: Eleme
 }
 
 function sanitizeNativeAttributeValues(element: Element, tag: string, findings: ArtifactGateFinding[], route: string) {
+  if (tag === "th" && element.attribs.scope !== undefined) {
+    const scope = element.attribs.scope.trim().toLowerCase();
+    if (!["row", "col", "rowgroup", "colgroup"].includes(scope)) {
+      findings.push(finding("html.table_scope", "html", `Table header scope ${JSON.stringify(element.attribs.scope)} is invalid.`, route));
+      delete element.attribs.scope;
+    } else {
+      element.attribs.scope = scope;
+    }
+  }
   if (element.attribs.popover !== undefined) {
     const value = element.attribs.popover.trim().toLowerCase();
     if (value && value !== "auto" && value !== "manual") {

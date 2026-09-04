@@ -2,7 +2,19 @@
 
 Date: 2026-09-04
 
-## Current release-candidate status
+## Current decision: generator still under evaluation
+
+The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
+
+The latest ordinary hosted Good Morning Tree Service run, `run_e4c5fa285de128c9424abdf2c88bf794` on release `0d72518e`, did not produce a candidate. Nine successful sandbox applies used the same sandbox on first submission with no transport replay or recycle. Repeated inspection failures, not sandbox continuity, prevented completion. Its $0.38185962 catalog-estimated model cost and 28m 07s duration remain failed-run evidence.
+
+A retained-source reconstruction isolated verifier defects without another model call: semantic table cells were concatenated into words, standard table-header `scope` attributes were disallowed, and reachable horizontal-scroll text was classified as hidden. With the same authored source, the corrected verifier removes the legal-preservation and text-clipping blockers. Regression fixtures still reject deleted legal provisions, invalid table scope, hidden table cells, and a genuinely clipped scrollport. The full browser verification suite passes. No legal threshold was lowered, and no retained artifact was rewritten.
+
+Replay evidence is in `.design/v4-production-readiness-2026-09-04/good-morning-r2-verifier-corrected`. It checked `/cookie-policy` in eight captures, not the entire website. It still reports 16 duplicate metadata descriptions and three target-size warnings; those and the weak route copy are not excused by this verifier correction. Prompt simplification, matched model evaluation, independent-business validation, and the hosted edit/publish/lead workflow remain outstanding.
+
+Verification identity descriptors for this change are `site-verification-policy:semantic-block-text-boundaries:table-header-scope:scroll-reachable-text:2026-09-04` and `site-authoring-platform:semantic-legal-text-and-scrollport-verification:2026-09-04`; the manifest stores their SHA-256 hashes. Retained runtime bytes and sandbox toolchain identity are unchanged.
+
+## Historical release-candidate assessment (superseded)
 
 The canonical generator implementation is locally release-ready and awaits the coordinated hosted release plus a post-release end-to-end run. This supersedes the September 1 correction and every earlier readiness claim below; historical entries remain experiment provenance rather than the current decision.
 

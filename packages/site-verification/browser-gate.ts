@@ -1857,6 +1857,45 @@ const browserInspectionSource = String.raw`(() => {
       }
       return visible;
     };
+    const permanentlyClippedArea = (element, raw) => {
+      let reachable = raw;
+      let retainedFraction = 1;
+      for (let current = element; current; current = current.parentElement) {
+        const style = getComputedStyle(current);
+        const clipsX = ["hidden", "clip", "scroll", "auto"].includes(style.overflowX);
+        const clipsY = ["hidden", "clip", "scroll", "auto"].includes(style.overflowY);
+        if (!clipsX && !clipsY) continue;
+        const bounds = rectValue(current.getBoundingClientRect());
+        const scrollsX = ["auto", "scroll"].includes(style.overflowX) && current.scrollWidth > current.clientWidth + 2;
+        const scrollsY = ["auto", "scroll"].includes(style.overflowY) && current.scrollHeight > current.clientHeight + 2;
+        // A scrollport exposes its entire content over time. First check that
+        // the fragment is inside that content, then carry its reachable on-screen
+        // footprint outward so a genuinely clipped enclosing box still fails.
+        const clip = {
+          left: clipsX ? bounds.left - (scrollsX ? current.scrollLeft : 0) : reachable.left,
+          right: clipsX ? bounds.left - (scrollsX ? current.scrollLeft : 0) + (scrollsX ? current.scrollWidth : bounds.width) : reachable.right,
+          top: clipsY ? bounds.top - (scrollsY ? current.scrollTop : 0) : reachable.top,
+          bottom: clipsY ? bounds.top - (scrollsY ? current.scrollTop : 0) + (scrollsY ? current.scrollHeight : bounds.height) : reachable.bottom
+        };
+        const beforeArea = rectArea(reachable);
+        reachable = intersect(reachable, clip);
+        retainedFraction *= beforeArea > 0 ? rectArea(reachable) / beforeArea : 0;
+        if (retainedFraction === 0) break;
+        if (scrollsX) {
+          reachable.width = Math.min(reachable.width, current.clientWidth);
+          reachable.left = Math.max(bounds.left, Math.min(reachable.left, bounds.right - reachable.width));
+          reachable.right = reachable.left + reachable.width;
+        }
+        if (scrollsY) {
+          reachable.height = Math.min(reachable.height, current.clientHeight);
+          reachable.top = Math.max(bounds.top, Math.min(reachable.top, bounds.bottom - reachable.height));
+          reachable.bottom = reachable.top + reachable.height;
+        }
+      }
+      const beforeArea = rectArea(reachable);
+      retainedFraction *= beforeArea > 0 ? rectArea(intersect(reachable, documentRect)) / beforeArea : 0;
+      return rectArea(raw) * (1 - retainedFraction);
+    };
     const elements = [...document.querySelectorAll("body *")];
     const visibleText = elements.filter((element) => {
       if (!colorTools.visible(element)) return false;
@@ -2358,6 +2397,12 @@ const browserInspectionSource = String.raw`(() => {
       for (const clientRect of range.getClientRects()) {
         const raw = rectValue(clientRect);
         if (raw.width <= 1 || raw.height <= 1) continue;
+        const inaccessibleArea = permanentlyClippedArea(parent, raw);
+        if (inaccessibleArea > rectArea(raw) * 0.25) {
+          textClipping.push(
+            colorTools.selectorFor(parent) + " \"" + text.slice(0, 80) + "\" (" + Math.round(inaccessibleArea) + "px² clipped)"
+          );
+        }
         const visibleRect = clippedRect(parent, raw);
         if (rectArea(visibleRect) <= 1) continue;
         textBoxes.push({
@@ -2366,11 +2411,6 @@ const browserInspectionSource = String.raw`(() => {
           text: text.slice(0, 120),
           visibleRect
         });
-        if (rectArea(visibleRect) < rectArea(raw) * 0.75) {
-          textClipping.push(
-            colorTools.selectorFor(parent) + " \"" + text.slice(0, 80) + "\" (" + Math.round(rectArea(raw) - rectArea(visibleRect)) + "px² clipped)"
-          );
-        }
       }
     }
     const textOcclusion = [];

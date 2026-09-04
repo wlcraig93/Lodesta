@@ -223,6 +223,55 @@ assert(
   "An exact context-matched legal provision was rejected by the generic fact gate."
 );
 
+const cookieRows = [
+  ["session_preferences", "Stores the preferences selected for this visit.", "30 days"],
+  ["analytics_session", "Distinguishes visits when website analytics is enabled.", "1 day"],
+  ["consent_record", "Remembers the visitor's cookie consent choices.", "6 months"],
+  ["language_choice", "Retains the language selected by the visitor.", "1 year"],
+  ["video_preferences", "Remembers the playback preferences for embedded videos.", "2 days"],
+  ["campaign_reference", "Records the campaign associated with a visit.", "90 days"]
+];
+const cookieSourceText = ["Cookie Policy", "Name", "Description", "Duration", ...cookieRows.flat()].join("\n");
+const prepareCookiePolicy = (bodyHtml: string, sourceText = cookieSourceText) => prepareSiteArtifact({
+  authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: input.business.name,
+    sharedCss: "body{font:16px Arial,sans-serif}",
+    routes: [
+      { path: "/", title: input.business.name, description: "Collision repair in Austin.", bodyHtml: validBody },
+      { path: "/cookie-policy", title: "Cookie Policy", description: "Cookie names, purposes, and retention periods.", bodyHtml }
+    ]
+  })),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourcePages: [sourcePage("source_page_cookie", "/cookie-policy", "Cookie Policy", 100, sourceText)]
+});
+const cookieTableBody = (rows: string[][]) => `<main><h1>Cookie Policy</h1><table><thead><tr><th scope="col">Name</th><th scope="col">Description</th><th scope="col">Duration</th></tr></thead><tbody>${rows.map(([name, description, duration]) => `<tr><th scope="row">${name}</th><td>${description}</td><td>${duration}</td></tr>`).join("")}</tbody></table></main>`;
+const preservedCookieTable = prepareCookiePolicy(cookieTableBody(cookieRows));
+assert(
+  !errors(preservedCookieTable).some((finding) => finding.id === "fact.legal_source_preservation"),
+  "Adjacent legal table cells were concatenated into words and falsely treated as missing provisions."
+);
+assert(
+  !errors(preservedCookieTable).some((finding) => finding.id === "html.forbidden_attribute"),
+  "Accessible table header scopes were rejected."
+);
+assert.match(preservedCookieTable.routes.find((route) => route.path === "/cookie-policy")!.html, /scope="row"/);
+assert(
+  errors(prepareCookiePolicy(cookieTableBody(cookieRows.slice(0, 2)))).some((finding) => finding.id === "fact.legal_source_preservation"),
+  "Removing most of a legal table's provisions passed the preservation gate."
+);
+assert(
+  errors(prepareCookiePolicy(cookieTableBody(cookieRows).replace('scope="row"', 'scope="invalid"'))).some((finding) => finding.id === "html.table_scope"),
+  "Invalid table header scope was accepted."
+);
+const inlineLegalWords = privacySourceText.split(" ").map((word) => `<span>${word.slice(0, 2)}</span>${word.slice(2)}`).join(" ");
+assert(
+  !errors(prepareCookiePolicy(`<main><p>${inlineLegalWords}</p></main>`, privacySourceText)).some((finding) => finding.id === "fact.legal_source_preservation"),
+  "Inline styling introduced artificial boundaries within legal words."
+);
+
 const sharedSourceShell = [
   "Skip to content",
   "Northstar Collision Repair",

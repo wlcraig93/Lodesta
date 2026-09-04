@@ -173,6 +173,9 @@ try {
   emitPhase("initial_apply_completed", { durationMs: applyDurationMs, revision: appliedRevision });
   operationPhase = "artifact_fetch";
   const authoredArtifact = await sandbox.getArtifact(sessionId);
+  if (process.env.LODESTA_RECONSTRUCT_DUMP_AUTHORED_ARTIFACT === "1") {
+    await writeFile(resolve(reconstructionDirectory, "authored-artifact.json"), `${JSON.stringify(authoredArtifact, null, 2)}\n`, "utf8");
+  }
   const availableRoutes = authoredArtifact.routes.map((route) => route.path);
   const missingRoutes = requestedRoutes.filter((route) => !availableRoutes.includes(route));
   if (missingRoutes.length) throw new Error(`Reconstructed artifact is missing routes: ${missingRoutes.join(", ")}.`);

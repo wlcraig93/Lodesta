@@ -3222,6 +3222,41 @@ assert(
   !intentionalScrollBrowser.findings.some((finding) => finding.id === "render.managed_content_clipped"),
   "An intentionally scrollable managed block was incorrectly treated as unreachable content."
 );
+const scrollTable = '<table><thead><tr><th scope="col">Name</th><th scope="col">Purpose</th><th scope="col">Duration</th></tr></thead><tbody><tr><th scope="row">Preferences</th><td><span class="cookie-purpose">This cookie remembers the preferences selected by visitors when they use the website.</span></td><td>Thirty days</td></tr></tbody></table>';
+const scrollTablePrepared = prepareSiteArtifact({
+  buildInput,
+  runtimeSeriesId: "site-runtime-v4",
+  authoredArtifact: {
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: String(name.value),
+    sharedCss: 'body{margin:0;padding:20px;font:18px/1.6 Arial;color:#111;background:#fff}*{box-sizing:border-box}h1{font-size:28px}table{width:850px;border-collapse:collapse}td,th{padding:12px;text-align:left}th:first-child{width:150px}td:last-child{width:150px}.table-scroll{width:320px;overflow:auto}.clipped-cell .cookie-purpose{display:block;width:100px;overflow:hidden;white-space:nowrap}.clipped-scrollport{width:140px;overflow:hidden}',
+    routes: [
+      { path: "/", title: "Scrollable table", description: "A complete table reached by horizontal scrolling.", bodyHtml: `<main><h1>Cookie information</h1><div class="table-scroll" tabindex="0" role="region" aria-label="Cookie information">${scrollTable}</div></main>` },
+      { path: "/clipped-cell", title: "Clipped table cell", description: "A cell that hides text inside an otherwise scrollable table.", bodyHtml: `<main class="clipped-cell"><h1>Cookie information</h1><div class="table-scroll" tabindex="0" role="region" aria-label="Cookie information">${scrollTable}</div></main>` },
+      { path: "/clipped-scrollport", title: "Clipped scrollport", description: "An enclosing box makes part of the scrollport unavailable.", bodyHtml: `<main><h1>Cookie information</h1><div class="clipped-scrollport"><div class="table-scroll" tabindex="0" role="region" aria-label="Cookie information">${scrollTable}</div></div></main>` }
+    ],
+    capabilityBindings: []
+  }
+});
+const scrollTableBrowser = await runArtifactBrowserGate({
+  prepared: scrollTablePrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-scrollable-table",
+  routePaths: ["/", "/clipped-cell", "/clipped-scrollport"],
+  viewports: [{ name: "mobile", width: 375, height: 812 }]
+});
+assert(
+  !scrollTableBrowser.findings.some((finding) => finding.route === "/" && finding.id === "render.text_clipping"),
+  "Text reachable by scrolling an intact table was incorrectly classified as permanently clipped."
+);
+for (const path of ["/clipped-cell", "/clipped-scrollport"]) {
+  assert(
+    scrollTableBrowser.findings.some((finding) => finding.route === path && finding.id === "render.text_clipping"),
+    `Genuinely hidden table text escaped clipping verification at ${path}.`
+  );
+}
 console.log(JSON.stringify({ ok: true, routes: browser.routesChecked, captures: browser.captures.length, links: browser.linksChecked }));
 
 async function canonicalLogoFixture(

@@ -1,4 +1,5 @@
 import { DomUtils, parseDocument } from "htmlparser2";
+import type { AnyNode } from "domhandler";
 import {
   siteBuildArtifactSchema,
   type FactBinding,
@@ -343,12 +344,26 @@ function routeSimilarityMetrics(routes: Array<{ path: string; bodyHtml: string }
   return result.sort((left, right) => left.left.localeCompare(right.left) || left.right.localeCompare(right.right));
 }
 
+const textBoundaryTags = new Set([
+  "address", "article", "aside", "blockquote", "br", "dd", "details", "dialog", "div", "dl", "dt",
+  "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
+  "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section", "summary", "table", "tbody",
+  "td", "tfoot", "th", "thead", "tr", "ul"
+]);
+const nonBodyTextTags = new Set(["script", "style", "svg", "noscript"]);
+
 function visibleBodyText(html: string) {
-  const document = parseDocument(html, { decodeEntities: true });
-  for (const node of DomUtils.findAll((candidate) => candidate.type === "tag" && ["script", "style", "svg", "noscript"].includes(candidate.name), document.children)) {
-    if (node.type === "tag") DomUtils.removeElement(node);
-  }
-  return DomUtils.textContent(document).replace(/\s+/g, " ").trim();
+  // textContent concatenates adjacent cells and paragraphs ("NameDescription"),
+  // falsely reporting lost provisions in faithfully rendered legal tables.
+  // Preserve semantic block boundaries without splitting words styled inline.
+  const text = (node: AnyNode): string => {
+    if (node.type === "text") return node.data;
+    if (!("children" in node)) return "";
+    if ("name" in node && nonBodyTextTags.has(node.name)) return "";
+    const content = node.children.map(text).join("");
+    return "name" in node && textBoundaryTags.has(node.name) ? ` ${content} ` : content;
+  };
+  return text(parseDocument(html, { decodeEntities: true })).replace(/\s+/g, " ").trim();
 }
 
 function validateSourceSensitiveLegalRoutes(

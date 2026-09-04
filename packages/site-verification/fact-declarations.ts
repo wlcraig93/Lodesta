@@ -3,13 +3,15 @@ import type { AnyNode, Element } from "domhandler";
 import { canonicalSourceTokens } from "@/lib/source-text-blocks";
 import { scanSensitiveClaimText } from "@/lib/content-safety-scanners";
 import { isContinuousAvailabilityValue } from "@/packages/business-data/availability";
+import { isLegalSourcePagePath, normalizedSourcePagePath } from "@/packages/business-data/source-page-classification";
 import { googleAggregateRatingObservationFromSnapshot } from "@/packages/business-data/web-research";
 import {
   factBindingSchema,
   type FactBinding,
   type PublicFact,
   type SitePublicBuildInput,
-  type SourceSnapshot
+  type SourceSnapshot,
+  type SourceSnapshotPage
 } from "@/packages/site-contracts";
 import { factBindingPolicyIdentity } from "@/packages/site-contracts/platform-manifest";
 import type { ArtifactGateFinding } from "./contracts";
@@ -45,6 +47,7 @@ export class FactBindingValidator {
     routes: FactBindingValidationRoute[];
     buildInput: SitePublicBuildInput;
     sourceSnapshots?: SourceSnapshot[];
+    sourcePages?: SourceSnapshotPage[];
   }): FactBindingValidationResult {
     const findings: ArtifactGateFinding[] = [];
     const provisionalGoogleRatings = (input.sourceSnapshots ?? []).flatMap((snapshot) => {
@@ -54,10 +57,12 @@ export class FactBindingValidator {
     const facts = new Map(input.buildInput.publicFacts.map((fact) => [fact.id, fact]));
     const routes = input.routes.map((route) => visibleRoute(route, input.buildInput, facts, findings));
     const bindings = routes.flatMap((route) => route.bindings);
+    const legalSourceTextByPath = richestLegalSourceTextByPath(input.sourcePages ?? []);
 
     for (const route of routes) {
-      findings.push(...bodyMarkerFindings(route, input.buildInput, provisionalGoogleRatings));
-      findings.push(...bodySensitiveFindings(route, input.buildInput));
+      const legalSourceText = legalSourceTextByPath.get(normalizedSourcePagePath(route.path));
+      findings.push(...bodyMarkerFindings(route, input.buildInput, provisionalGoogleRatings, legalSourceText));
+      findings.push(...bodySensitiveFindings(route, input.buildInput, legalSourceText));
       findings.push(...metadataFindings(route, "title", route.title, input.buildInput, provisionalGoogleRatings));
       findings.push(...metadataFindings(route, "description", route.description, input.buildInput, provisionalGoogleRatings));
       for (const renderedName of route.businessNameMarkerTexts) {
@@ -198,9 +203,15 @@ function visibleRoute(
   };
 }
 
-function bodyMarkerFindings(route: VisibleRoute, buildInput: SitePublicBuildInput, provisionalGoogleRatings: number[]) {
+function bodyMarkerFindings(
+  route: VisibleRoute,
+  buildInput: SitePublicBuildInput,
+  provisionalGoogleRatings: number[],
+  legalSourceText?: string
+) {
   return factualMarkers(route.bodyText).flatMap((marker) => {
     const supported = naturallySupportedFactualMarker(marker.text, buildInput, provisionalGoogleRatings)
+      || legalSourceContextSupports(route.bodyText, marker, legalSourceText)
       || route.bindings.some((binding) => binding.span
       && marker.start >= binding.span.start
       && marker.end <= binding.span.end
@@ -213,9 +224,10 @@ function bodyMarkerFindings(route: VisibleRoute, buildInput: SitePublicBuildInpu
   });
 }
 
-function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildInput) {
+function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildInput, legalSourceText?: string) {
   return scanSensitiveClaimText(route.bodyText).flatMap((match) => {
     const supported = naturallySupportedSensitiveClaim(match, buildInput)
+      || legalSourceContextSupports(route.bodyText, match, legalSourceText)
       || route.bindings.some((binding) => binding.span
       && match.start >= binding.span.start
       && match.end <= binding.span.end
@@ -226,6 +238,68 @@ function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildI
       route.path
     )];
   });
+}
+
+function richestLegalSourceTextByPath(sourcePages: SourceSnapshotPage[]) {
+  const result = new Map<string, string>();
+  for (const page of sourcePages) {
+    if (page.outcome !== "fetched" || !isLegalSourcePagePath(page.path)) continue;
+    const path = normalizedSourcePagePath(page.path);
+    const prior = result.get(path);
+    if (!prior || canonicalSourceTokens(page.extractedText).length > canonicalSourceTokens(prior).length) {
+      result.set(path, page.extractedText);
+    }
+  }
+  return result;
+}
+
+/**
+ * A source-sensitive legal document is owner-published authority for the exact
+ * provisions it already contains. Require matching local token context so a
+ * short value elsewhere on the page cannot authorize newly invented copy.
+ */
+function legalSourceContextSupports(
+  renderedText: string,
+  match: { start: number; end: number },
+  sourceText?: string
+) {
+  if (!sourceText) return false;
+  const renderedTokens = positionedCanonicalTokens(renderedText);
+  const first = renderedTokens.findIndex((token) => token.end > match.start && token.start < match.end);
+  if (first < 0) return false;
+  let last = first;
+  while (last + 1 < renderedTokens.length && renderedTokens[last + 1]!.start < match.end) last += 1;
+
+  const sourceTokens = canonicalSourceTokens(sourceText).map((token) => token.value);
+  const claimLength = last - first + 1;
+  const contextSize = Math.max(5, claimLength);
+  const earliest = Math.max(0, last - contextSize + 1);
+  const latest = Math.min(first, renderedTokens.length - contextSize);
+  for (let start = earliest; start <= latest; start += 1) {
+    const candidate = renderedTokens.slice(start, start + contextSize).map((token) => token.value);
+    if (containsTokenSequence(sourceTokens, candidate)) return true;
+  }
+  return false;
+}
+
+function positionedCanonicalTokens(value: string) {
+  const normalized = value.normalize("NFKC").toLocaleLowerCase("en-US");
+  return [...normalized.matchAll(/[\p{L}\p{N}]+/gu)].map((match) => ({
+    value: match[0],
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length
+  }));
+}
+
+function containsTokenSequence(haystack: string[], needle: string[]) {
+  if (!needle.length || needle.length > haystack.length) return false;
+  outer: for (let start = 0; start <= haystack.length - needle.length; start += 1) {
+    for (let index = 0; index < needle.length; index += 1) {
+      if (haystack[start + index] !== needle[index]) continue outer;
+    }
+    return true;
+  }
+  return false;
 }
 
 function metadataFindings(

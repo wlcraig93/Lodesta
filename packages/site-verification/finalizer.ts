@@ -94,7 +94,8 @@ export function prepareSiteArtifact(input: {
   const factBindings = new FactBindingValidator().validate({
     routes: sanitized.map((route) => ({ path: route.path, html: route.bodyHtml, title: route.title, description: route.description })),
     buildInput: input.buildInput,
-    sourceSnapshots: input.sourceSnapshots
+    sourceSnapshots: input.sourceSnapshots,
+    sourcePages: input.sourcePages
   });
   findings.push(...factBindings.findings);
   const sourcePaths = (input.sourcePages ?? []).map((page) => page.path);

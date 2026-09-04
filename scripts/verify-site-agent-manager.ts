@@ -177,6 +177,9 @@ assert.match(taskSkills.initial_build.knowledge.join(" "), /blocker-free inspect
 assert.match(taskSkills.initial_build.knowledge.join(" "), /shared catch-all middle copy, identical preparation lists, and interchangeable closing arguments.*customer situation.*observable signs or property context.*route-specific action/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /advisory need not reach an arbitrary numerical zero.*do not call finish unchanged/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /proof, review, project, gallery, team.*lacks its complete concrete material.*generic proof route.*mapped first-party examples/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /source-sensitive privacy, terms, cookie, legal, or accessibility route.*complete substantive source body.*readable authored source.*Do not replace numerals with words/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Exact legal provisions.*required authored customer content.*not prohibited raw runtime mapping.*omit shared source header, navigation, and footer boilerplate/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /authored TSX and CSS readable, structurally formatted.*do not collapse components, route data, or long content bodies.*enormous single lines/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Customer quotations visibly published.*exact excerpt.*exact attribution.*never synthesize or paraphrase.*unquoted, unattributed business copy/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /approved reviews or testimonials route.*mapped attributable first-party feedback.*exact retained excerpts.*generic business-authored quotation.*why reviews matter/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Customer quotations visibly published in the retained first-party website.*ordinary owner-published source material/i);

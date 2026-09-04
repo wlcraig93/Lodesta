@@ -165,6 +165,9 @@ const privacySourceText = [
   "We use that information to respond to your request, schedule service, maintain business records, and improve customer support.",
   "We do not sell personal information. We may share information with service providers that help operate this website or deliver requested services.",
   "You may contact Northstar Collision Repair to ask about your information, request a correction, or raise a privacy concern.",
+  "For more information, contact privacy@northstarcollision.com.",
+  "We use your contact information to prepare a free estimate.",
+  "Some preference cookies remain for 2 years.",
   "We retain information only as long as reasonably necessary for the purposes described here and applicable legal obligations."
 ].join(" ");
 const privacySourcePage = sourcePage("source_page_privacy", "/privacy", "Privacy Policy", 92, privacySourceText);
@@ -207,6 +210,58 @@ const preservedPrivacy = prepareSiteArtifact({
 assert(
   !errors(preservedPrivacy).some((finding) => finding.id === "fact.legal_source_preservation"),
   "A substantively preserved legal source page was rejected."
+);
+assert(
+  !errors(preservedPrivacy).some((finding) => finding.id === "fact.undeclared_marker" || finding.id === "fact.sensitive_unsupported"),
+  "An exact context-matched legal provision was rejected by the generic fact gate."
+);
+
+const inventedLegalClaim = prepareSiteArtifact({
+  authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: input.business.name,
+    sharedCss: "body{font:16px Arial,sans-serif}",
+    routes: [
+      { path: "/", title: input.business.name, description: "Collision repair in Austin.", bodyHtml: validBody },
+      {
+        path: "/privacy",
+        title: "Privacy Policy",
+        description: "How the shop handles contact information.",
+        bodyHtml: `<main><h1>Privacy Policy</h1><p>${privacySourceText}</p><p>Contact invented@northstarcollision.com. We are fully insured.</p></main>`
+      }
+    ]
+  })),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourcePages: [privacySourcePage]
+});
+assert(
+  errors(inventedLegalClaim).some((finding) => finding.id === "fact.undeclared_marker" && finding.route === "/privacy"),
+  "An invented legal-route email escaped the context-matched source exception."
+);
+assert(
+  errors(inventedLegalClaim).some((finding) => finding.id === "fact.sensitive_unsupported" && finding.route === "/privacy"),
+  "An invented legal-route insurance claim escaped the context-matched source exception."
+);
+
+const ordinaryCookieDuration = prepareSiteArtifact({
+  authoredArtifact: artifact("<main><h1>Cookie settings</h1><p>A preference cookie may remain for 2 years.</p></main>"),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4"
+});
+assert(
+  !errors(ordinaryCookieDuration).some((finding) => finding.id === "fact.sensitive_unsupported"),
+  "An ordinary cookie duration was misclassified as business longevity."
+);
+const unsupportedLongevity = prepareSiteArtifact({
+  authoredArtifact: artifact("<main><h1>Collision repair</h1><p>Serving Austin for 20 years.</p></main>"),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4"
+});
+assert(
+  errors(unsupportedLongevity).some((finding) => finding.id === "fact.sensitive_unsupported"),
+  "A genuine unsupported business-longevity claim escaped the fact gate."
 );
 
 const serviceAreaFact = {

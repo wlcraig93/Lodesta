@@ -53,7 +53,13 @@ const sensitiveClaimPatterns: Array<Omit<SensitiveClaimMatch, "matchedText" | "s
   { category: "marketing", label: "best or #1 claim", severity: "warning", pattern: /(?:\bthe\s+best\b(?!\s+(?:way|time|place|fit)\b)|\bbest\s+(?:prices?|pest\s+control|termite\s+control|service|services|company|contractor|provider|team|choice|option|solution|results?)\b|#\s?1\b|\bnumber\s?one\b)/i, requiredEvidence: "proof" },
   { category: "marketing", label: "award claim", severity: "warning", pattern: /\b(award[-\s]?winning|voted)\b/i, requiredEvidence: "proof" },
   { category: "marketing", label: "market leadership claim", severity: "warning", pattern: /\b(leading|most trusted|premier)\b/i, requiredEvidence: "proof" },
-  { category: "longevity", label: "business longevity claim", severity: "block", pattern: /\b(?:serving\s+(?:the\s+)?(?:[a-z][a-z .'-]+\s+)?for\s+)?\d{1,3}\+?\s+years?(?:\s+in\s+business)?\b/i, requiredEvidence: "proof" },
+  {
+    category: "longevity",
+    label: "business longevity claim",
+    severity: "block",
+    pattern: /\b(?:(?:serving\s+(?:the\s+)?(?:[a-z][a-z .'-]+\s+)?for|in\s+business\s+for|with\s+over|with\s+more\s+than|over|more\s+than)\s+\d{1,3}\+?\s+years?|\d{1,3}\+\s+years?|\d{1,3}\s+years?\s+(?:in\s+business|of\s+(?:local\s+)?experience|serving\s+(?:the\s+)?[a-z][a-z .'-]+))\b/i,
+    requiredEvidence: "proof"
+  },
   { category: "emergency", label: "emergency availability claim", severity: "warning", pattern: /\b(24\/7|same day|emergency|after hours)\b/i, requiredEvidence: "emergency" },
   { category: "safety", label: "safety or environmental claim", severity: "warning", pattern: /\b(?:eco[- ]?friendly|environmentally friendly|non[- ]?toxic|pet[- ]?safe|child[- ]?safe|safe for (?:people|pets|children|famil(?:y|ies)|the environment)|gentle on (?:your )?home|kind to the earth)\b/i, requiredEvidence: "proof" },
   { category: "safety", label: "safe service-performance claim", severity: "warning", pattern: /(?:\b(?:safe|safer)\s+(?:(?:bee|wasp|hornet|nest|hive|pest)\s+)?(?:removal|relocation|treatment|application)\b|\b(?:remove|relocate|treat|apply|address|handle|control|resolve|manage)\b.{0,40}\bsafely\b|\bsafely\b.{0,40}\b(?:remove|relocate|treat|apply|address|handle|control|resolve|manage)\b)/i, requiredEvidence: "proof" },

@@ -720,7 +720,7 @@ const treeAuthorityHome = {
       "Tree service home",
       [],
       "",
-      "We are a Tree Service Company in Austin, TX, Serving Central Texas with Tree Removal, Trimming, Planting, and Emergency Tree Care."
+      "Professional Tree Removal, Tree Trimming, and Emergency Tree Service in central Texas. We are a Tree Service Company in Austin, TX, Serving Central Texas with Tree Removal, Trimming, Planting, and Emergency Tree Care."
     ),
     `${treeAuthorityOrigin}/`
   ),
@@ -728,7 +728,8 @@ const treeAuthorityHome = {
   purposeTags: ["home" as const],
   extractedFacts: {
     ...summarizeCrawlHtml(pageHtml("Tree service home"), `${treeAuthorityOrigin}/`).extractedFacts,
-    services: ["Tree Removal", "Tree Trimming and Pruning", "Tree Planting Service", "Emergency Tree Service"],
+    address: { city: "Austin", region: "TX", country: "US" },
+    services: ["Austin Tree Services", "Tree Removal", "Tree Trimming and Pruning", "Tree Planting Service", "Emergency Tree Service"],
     serviceAreas: ["Austin", "Central Texas", "Emergency Tree Care", "Planting", "Trimming"]
   }
 };
@@ -739,6 +740,7 @@ const treeAuthorityCrawl = {
   pageSummaries: [treeAuthorityHome],
   extractedFacts: {
     ...authorityCrawl.extractedFacts,
+    address: treeAuthorityHome.extractedFacts.address,
     services: treeAuthorityHome.extractedFacts.services,
     serviceAreas: treeAuthorityHome.extractedFacts.serviceAreas
   }

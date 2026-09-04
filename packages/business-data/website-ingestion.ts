@@ -786,6 +786,11 @@ export function sourcePreparationDiagnosticsFor(
           : evidenceClass !== "first_party"
             ? "changed_public_eligibility" as const
             : !isExplicitNamedServiceArea(value)
+              || ((!serviceAreaCandidateMatchesAddressCity(value, crawl.extractedFacts.address?.city))
+                && serviceAreaCandidateMatchesOffering(value, [
+                  ...page.extractedFacts.services,
+                  ...crawl.extractedFacts.services
+                ]))
               || serviceAreaCandidateIsTrailingOffering(value, supporting?.displayText ?? "")
               || !serviceAreaHasGeographicEvidence(value, page, supporting?.displayText)
               ? "invalid_value_filtering" as const
@@ -878,6 +883,11 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
     for (const rawLabel of page.extractedFacts.serviceAreas) {
       const label = normalizeServiceAreaCandidate(clean(rawLabel));
       if (!label || !isExplicitNamedServiceArea(label)) continue;
+      if ((!serviceAreaCandidateMatchesAddressCity(label, crawl.extractedFacts.address?.city))
+        && serviceAreaCandidateMatchesOffering(label, [
+          ...page.extractedFacts.services,
+          ...crawl.extractedFacts.services
+        ])) continue;
       const identity = serviceAreaIdentity(label);
       const matchingBlocks = page.sourceTextBlocks.filter((block) => normalizedText(block.displayText).includes(identity));
       const supporting = matchingBlocks.find((block) =>
@@ -941,6 +951,26 @@ function serviceAreaCandidateIsTrailingOffering(label: string, supportingText: s
     occurrence = text.indexOf(identity, occurrence + identity.length);
   }
   return !foundOutsideOfferingTail;
+}
+
+function serviceAreaCandidateMatchesOffering(label: string, services: string[]) {
+  const identity = normalizedText(label);
+  const words = identity.split(" ").filter(Boolean);
+  return services.some((service) => {
+    const serviceWords = normalizedText(service)
+      .replace(/\b(?:services?|solutions?|treatments?)\b/g, " ")
+      .split(" ")
+      .filter(Boolean);
+    if (!serviceWords.length) return false;
+    const serviceIdentity = serviceWords.join(" ");
+    return serviceIdentity === identity
+      || (words.length === 1 && serviceWords.includes(identity));
+  });
+}
+
+function serviceAreaCandidateMatchesAddressCity(label: string, city: string | undefined) {
+  const normalizedCity = clean(city);
+  return Boolean(normalizedCity && serviceAreaIdentity(label) === serviceAreaIdentity(normalizedCity));
 }
 
 export function isExplicitNamedServiceArea(value: string) {

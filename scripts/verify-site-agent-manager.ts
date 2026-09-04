@@ -160,6 +160,7 @@ assert.match(
 );
 assert.match(taskSkills.initial_build.knowledge.join(" "), /essential controls and destinations at least 48px/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Do not put emoji.*inline SVG/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /initial viewport.*loading=\"eager\".*fetchPriority=\"high\".*deeper images lazy/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /next step, starting point, clear path, service conversation/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /focus-visible treatment.*site's palette/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /never enlarge it into a hero.*higher-resolution retained resource.*type-led composition/i);
@@ -175,9 +176,9 @@ assert.match(taskSkills.initial_build.knowledge.join(" "), /authentic business i
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Every heading must receive a concrete answer.*never reuse one catch-all paragraph.*consolidated guide.*mapped source paths/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /architecture has already made consolidation decisions.*never remove, merge, redirect, or add a route during authoring/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Business-fact constraints are not a reason for empty copy.*accurate general information.*observable problem.*decision criteria.*useful preparation/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /blocker-free inspection is not permission to finish.*advisory\.ia_structure.*service, hub, or location routes.*advisory\.ia_repetition.*material commercial route family/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /advisory\.ia_structure and advisory\.ia_repetition.*evidence.*holistic source-and-pixel judgment.*not as numerical targets/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /shared catch-all middle copy, identical preparation lists, and interchangeable closing arguments.*customer situation.*observable signs or property context.*route-specific action/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /advisory need not reach an arbitrary numerical zero.*do not call finish unchanged/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /finish even if the heuristic remains.*do not edit or reinspect merely to make an advisory disappear/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /proof, review, project, gallery, team.*lacks its complete concrete material.*generic proof route.*mapped first-party examples/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /source-sensitive privacy, terms, cookie, legal, or accessibility route.*complete substantive source body.*readable authored source.*Do not replace numerals with words/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Exact legal provisions.*required authored customer content.*not prohibited raw runtime mapping.*omit shared source header, navigation, and footer boilerplate/i);
@@ -247,6 +248,12 @@ const finishTool = websiteManagerTools.find(
 );
 assert(finishTool?.type === "function");
 assert.match(finishTool.description!, /exhaustive deterministic release verification across the approved route set/i);
+assert.match(finishTool.description!, /Lodesta already owns the route, redirect, and retirement ledger/i);
+assert.deepEqual(
+  (finishTool.parameters as { required?: string[] }).required,
+  ["ownerMessage"],
+  "The authoring model should not restate route authority at finish."
+);
 
 const validMutationSite = [
   "export const siteDefinition = {",
@@ -334,6 +341,18 @@ assert.match(String(qualityLedFeedback.feedbackGuidance), /render\.form_text.*re
 assert.match(String(qualityLedFeedback.feedbackGuidance), /Architecture already owns the approved route ledger.*blocker-free result is not permission to finish.*interchangeable middle copy, preparation lists, and closing arguments.*Changing strings, class names, tone colors, and one injected middle section.*one function renders the complete main element.*do not call finish unchanged/i);
 assert.match(String(qualityLedFeedback.feedbackGuidance), /contact or estimate page's H1 and concise context before its managed form on phone and tablet/i);
 assert.match(String(qualityLedFeedback.feedbackGuidance), /primary heading that consumes nearly the entire first viewport/i);
+const iaHeuristicOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
+  findings: [
+    { id: "advisory.ia_repetition", severity: "warning", area: "content", message: "Service routes share structural signals.", route: "/services" }
+  ],
+  routes: ["/", "/services", "/contact"],
+  inspectedRoutes: ["/", "/services", "/contact"]
+});
+assert.match(
+  String(iaHeuristicOnlyFeedback.feedbackGuidance),
+  /launch floor is clean.*evidence, not a score to clear.*finish now even if the heuristic remains.*Do not inspect routes one by one/i,
+  "A lone IA heuristic still instructed the author to chase a numerical zero."
+);
 const bootstrapRuntime = new WorkspaceManagerRuntime<string>({
   kind: "initial_build",
   publicBuildInputId: "input_materialized_authority",
@@ -640,7 +659,7 @@ const responses = [
       type: "function_call",
       call_id: "call_finish",
       name: "finish",
-      arguments: JSON.stringify({ ownerMessage: "Candidate ready for owner review.", focusRoute: "/", changedRoutes: ["/"] }),
+      arguments: JSON.stringify({ ownerMessage: "Candidate ready for owner review." }),
       status: "completed"
     }],
     usage: {
@@ -743,7 +762,7 @@ const glyphGuardResponses = [
   { name: "inspect_site", arguments: { route: null } },
   ...Array.from({ length: 3 }, () => ({
     name: "finish",
-    arguments: { ownerMessage: "Ready", focusRoute: "/", changedRoutes: ["/"] }
+    arguments: { ownerMessage: "Ready" }
   }))
 ].map((call, index) => ({
   id: `response_glyph_guard_${index + 1}`,

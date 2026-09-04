@@ -251,11 +251,7 @@ export const managerToolArguments = {
   }).strict(),
   request_input: z.object({ question: z.string().min(1).max(600) }).strict(),
   finish: z.object({
-    ownerMessage: z.string().trim().min(1).max(8_000).transform((value) => value.slice(0, 1_200)),
-    focusRoute: z.string().startsWith("/").max(300),
-    changedRoutes: z.array(z.string().startsWith("/").max(300)).min(1),
-    redirects: z.array(candidateRedirectSchema.extend({ reason: candidateRedirectSchema.shape.reason.nullish().transform((value) => value ?? undefined) }).strict()).default([]),
-    retiredSourcePaths: z.array(retiredSourcePathSchema.extend({ reason: retiredSourcePathSchema.shape.reason.nullish().transform((value) => value ?? undefined) }).strict()).default([])
+    ownerMessage: z.string().trim().min(1).max(8_000).transform((value) => value.slice(0, 1_200))
   }).strict()
 } satisfies Record<ManagerToolName, z.ZodTypeAny>;
 

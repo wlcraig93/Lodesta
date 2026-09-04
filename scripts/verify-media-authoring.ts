@@ -141,27 +141,17 @@ await assert.rejects(() => runtime.execute({
 }));
 await runtime.execute({ callId: "build", name: "build_preview", arguments: {} });
 await runtime.execute({ callId: "image", name: "create_image", arguments: {} });
-const invalidRedirectFinish = await runtime.execute({
-  callId: "finish-invalid-redirect",
-  name: "finish",
-  arguments: {
-    ownerMessage: "Done",
-    focusRoute: "/",
-    changedRoutes: ["/"],
-    redirects: [{ sourcePath: "/?p=8024", destinationPath: "/", reason: "Invalid query route." }],
-    retiredSourcePaths: []
-  }
-});
-assert.equal(invalidRedirectFinish.diagnosticOutput.ok, false);
-assert.equal(invalidRedirectFinish.diagnosticOutput.error, "finish_source_disposition_invalid");
-assert.match(String(invalidRedirectFinish.diagnosticOutput.guidance), /Omit query-string/i);
-const rebuiltFinish = await runtime.execute({ callId: "finish", name: "finish", arguments: { ownerMessage: "Done", focusRoute: "/", changedRoutes: ["/"] } });
+assert.throws(() => managerToolArguments.finish.parse({
+  ownerMessage: "Done",
+  redirects: [{ sourcePath: "/?p=8024", destinationPath: "/", reason: "Invalid query route." }]
+}), /unrecognized key/i, "The model-facing finish contract still accepted release-ledger authority.");
+const rebuiltFinish = await runtime.execute({ callId: "finish", name: "finish", arguments: { ownerMessage: "Done" } });
 assert.equal(rebuiltFinish.diagnosticOutput.ok, true, JSON.stringify(rebuiltFinish.diagnosticOutput));
 assert.equal(rebuiltFinish.diagnosticOutput.buildPerformed, true);
 assert.equal(builds, 2, "Finish did not rebuild after generated media changed the workspace.");
 const cachedBuild = await runtime.execute({ callId: "build-cached", name: "build_preview", arguments: {} });
 assert.equal(cachedBuild.diagnosticOutput.cached, true);
-const freshPlacementFinish = await runtime.execute({ callId: "finish-fresh-placement", name: "finish", arguments: { ownerMessage: "Done", focusRoute: "/", changedRoutes: ["/"] } });
+const freshPlacementFinish = await runtime.execute({ callId: "finish-fresh-placement", name: "finish", arguments: { ownerMessage: "Done" } });
 assert.equal(freshPlacementFinish.diagnosticOutput.ok, true);
 assert.equal(freshPlacementFinish.diagnosticOutput.buildPerformed, false);
 assert.equal(builds, 2, "Finish rebuilt a workspace that already had a successful build for the same source hash.");
@@ -286,7 +276,7 @@ assert.equal(visualMechanicalInspections, 2, "A mutated workspace did not invali
 const cachedInspectionFinish = await visualRuntime.execute({
   callId: "finish-after-cached-inspection",
   name: "finish",
-  arguments: { ownerMessage: "Done", focusRoute: "/", changedRoutes: ["/"] }
+  arguments: { ownerMessage: "Done" }
 });
 assert.equal(cachedInspectionFinish.diagnosticOutput.ok, true);
 assert.equal(cachedInspectionFinish.diagnosticOutput.buildPerformed, false);
@@ -337,13 +327,6 @@ assert.deepEqual(initialBuildTarget, {
   selector: undefined,
   label: undefined
 }, "An initial-build inspection was incorrectly narrowed to the editor's homepage selection.");
-const invalidVisualFinish = await visualRuntime.execute({
-  callId: "finish-invalid-visual-route",
-  name: "finish",
-  arguments: { ownerMessage: "Done", focusRoute: "/missing", changedRoutes: ["/missing"] }
-});
-assert.equal(invalidVisualFinish.diagnosticOutput.error, "finish_route_not_found");
-assert.equal(visualBuilds, 2, "Finish performed an expensive rebuild before rejecting an invalid route.");
 const routeNormalizationRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
   publicBuildInputId: "input_route_normalization",
@@ -354,6 +337,11 @@ const routeNormalizationRuntime = new WorkspaceManagerRuntime<string>({
     { path: "src/site.tsx", content: validSiteSource },
     { path: "src/styles.css", content: "body{}" }
   ],
+  selection: {
+    route: "/services/",
+    selector: "main",
+    label: "Services"
+  },
   applyBuild: async () => ({ revision: "sandbox_route_normalization_2", buildDurationMs: 1, previewPath: "/preview" }),
   inspect: async () => ({
     passed: true,
@@ -366,7 +354,7 @@ const routeNormalizationRuntime = new WorkspaceManagerRuntime<string>({
 const trailingSlashVisualFinish = await routeNormalizationRuntime.execute({
   callId: "finish-normalized-visual-route",
   name: "finish",
-  arguments: { ownerMessage: "Done", focusRoute: "/services/", changedRoutes: ["/", "/services/"] }
+  arguments: { ownerMessage: "Done" }
 });
 assert.equal(trailingSlashVisualFinish.diagnosticOutput.ok, true);
 assert.equal(trailingSlashVisualFinish.completion?.focusRoute, "/services");
@@ -412,7 +400,7 @@ const releasePlanRuntime = new WorkspaceManagerRuntime<string>({
 const mismatchedRelease = await releasePlanRuntime.execute({
   callId: "finish-release-plan-mismatch",
   name: "finish",
-  arguments: { ownerMessage: "Done", focusRoute: "/", changedRoutes: ["/"] }
+  arguments: { ownerMessage: "Done" }
 });
 assert.equal(mismatchedRelease.diagnosticOutput.error, "release_plan_route_mismatch");
 assert.deepEqual(mismatchedRelease.diagnosticOutput.missingRoutes, ["/services"]);
@@ -428,7 +416,7 @@ emittedRoutes = ["/", "/services"];
 const plannedRelease = await releasePlanRuntime.execute({
   callId: "finish-release-plan-match",
   name: "finish",
-  arguments: { ownerMessage: "Done", focusRoute: "/", changedRoutes: ["/"] }
+  arguments: { ownerMessage: "Done" }
 });
 assert.equal(plannedRelease.diagnosticOutput.ok, true);
 assert.equal(plannedRelease.diagnosticOutput.releasePlanApplied, true);

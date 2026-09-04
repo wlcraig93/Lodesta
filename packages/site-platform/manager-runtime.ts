@@ -659,8 +659,8 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
 
   private async finish(args: Record<string, unknown>): Promise<ManagerToolExecution> {
     const finish = managerToolArguments.finish.parse(args);
-    const redirects = this.options.releasePlan?.redirects ?? finish.redirects;
-    const retiredSourcePaths = this.options.releasePlan?.retiredSourcePaths ?? finish.retiredSourcePaths;
+    const redirects = this.options.releasePlan?.redirects ?? [];
+    const retiredSourcePaths = this.options.releasePlan?.retiredSourcePaths ?? [];
     try {
       validateCandidateSourceDispositions({
         redirects,
@@ -669,13 +669,6 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     } catch (error) {
       return invalidSourceDisposition(error);
     }
-    const preflightRoutes = inspectionRoutes(
-      this.visualInspection?.modelSummary
-      ?? this.inspection?.modelSummary
-      ?? {}
-    );
-    const preflightRouteError = invalidFinishRoutes(finish, preflightRoutes);
-    if (preflightRouteError) return preflightRouteError;
     const built = await this.build();
     if (built.diagnosticOutput.ok === false) return withFailureStage(built, "compilation", { buildPerformed: true });
     const buildPerformed = built.diagnosticOutput.cached !== true;
@@ -719,12 +712,14 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       );
     }
     const availableRoutes = inspectionRoutes(this.inspection.modelSummary);
-    const normalizedFinish = {
-      focusRoute: normalizeRoutePath(finish.focusRoute),
-      changedRoutes: [...new Set(finish.changedRoutes.map(normalizeRoutePath))]
-    };
-    const verifiedRouteError = invalidFinishRoutes(normalizedFinish, availableRoutes);
-    if (verifiedRouteError) return verifiedRouteError;
+    const routeMetadata = completionRouteMetadata(this.options.kind, this.options.selection?.route, availableRoutes);
+    if (!routeMetadata) {
+      return result({
+        ok: false,
+        error: "finish_route_inventory_empty",
+        guidance: "The verified artifact exposed no live routes. Restore the approved route set before finishing."
+      });
+    }
     try {
       validateCandidateSourceDispositions({
         redirects,
@@ -743,8 +738,8 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       toolchainVersion: this.options.toolchainVersion,
       sandboxImageDigest: this.options.sandboxImageDigest,
       inspectionHash: this.inspection.inspectionHash,
-      focusRoute: normalizedFinish.focusRoute,
-      changedRoutes: normalizedFinish.changedRoutes,
+      focusRoute: routeMetadata.focusRoute,
+      changedRoutes: routeMetadata.changedRoutes,
       redirects,
       retiredSourcePaths
     });
@@ -1099,6 +1094,7 @@ function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "
     ["render.horizontal_overflow", 4],
     ["render.clipping_overlap", 5],
     ["render.primary_geometry", 6],
+    ["render.lazy_above_fold_image", 6],
     ["render.adjacent_duplicate_text", 7],
     ["render.internal_provenance_copy", 7],
     ["render.vague_process_copy", 7],
@@ -1138,7 +1134,15 @@ function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "
   );
   const diverse = prioritized;
   const { findings: _findings, ...rest } = summary;
-  const baseFeedbackGuidance = actionable.length === 0
+  const iaHeuristicOnly = qualityLed
+    && actionable.length > 0
+    && actionable.every((finding) => (
+      finding.severity === "warning"
+      && (finding.id === "advisory.ia_structure" || finding.id === "advisory.ia_repetition")
+    ));
+  const baseFeedbackGuidance = iaHeuristicOnly
+    ? "The deterministic launch floor is clean; only a whole-site IA heuristic remains. Treat its named examples as evidence, not a score to clear. If those routes are genuinely interchangeable or thin, repair the shared source once. If they already serve distinct customer jobs with concrete route-specific guidance and an appropriate composition, finish now even if the heuristic remains. Do not inspect routes one by one or churn working design merely to make this advisory disappear."
+    : actionable.length === 0
     ? qualityLed
       ? "The deterministic launch floor is clean. Use the supplied pixels and business evidence to make your own final visual-quality judgment. Compare the representative routes side by side, not only one at a time, and inspect the opened phone navigation: its close artwork must read immediately as close rather than a slash, angle, 7-like symbol, or lone stroke. A focused refinement is worthwhile when it materially improves brand fidelity, hierarchy, responsive composition, or route distinctiveness—for example by replacing any invented initials, text-logo, or decorative identity panel; correcting repeated fake ordinals; removing an arbitrary pseudo-chart stamped onto every route; ensuring every baked-in word or line in a photograph is either completely visible or completely outside the crop rather than ending mid-word or mid-line; replacing an oblique primary heading with a concrete service-and-situation promise; using strong authentic first-party photography that was unnecessarily omitted; removing exact duplicate CSS selector blocks left by repairs; or splitting one obviously repeated full-page route renderer into content-led compositions for genuinely different customer jobs. Different strings, class names, tone colors, and one injected middle section do not make otherwise identical hero/body/callout/footer sequences distinct. If one function still renders the complete main element for sibling routes, it remains one full-page data renderer. Preserve working behavior and avoid minor preference churn. Finish when you honestly see no clear material opportunity; reinspect only routes affected by a material change."
       : "The deterministic homepage launch floor is clean. Inspect the supplied pixels only for a concrete material integrity problem the checks cannot see, such as an invented identity mark, misleading visual, broken hierarchy, or visibly unfinished composition. If no such problem is plainly visible, call finish now. Do not edit or reinspect for taste alone."
@@ -1187,21 +1191,22 @@ function inspectionRoutes(summary: Record<string, unknown>) {
   }));
 }
 
-function invalidFinishRoutes(
-  finish: { focusRoute: string; changedRoutes: string[] },
+function completionRouteMetadata(
+  kind: ManagerRunRequest["kind"],
+  selectedRoute: string | undefined,
   availableRoutes: Set<string>
 ) {
-  const invalidRoutes = [finish.focusRoute, ...finish.changedRoutes]
-    .filter((route, index, routes) => routes.indexOf(route) === index)
-    .filter((route) => availableRoutes.size > 0 && !availableRoutes.has(route));
-  return invalidRoutes.length
-    ? result({
-        ok: false,
-        error: "finish_route_not_found",
-        invalidRoutes,
-        availableRoutes: [...availableRoutes]
-      })
-    : undefined;
+  const changedRoutes = [...availableRoutes].sort((left, right) => left.localeCompare(right));
+  if (!changedRoutes.length) return undefined;
+  const preferredRoute = kind === "initial_build"
+    ? "/"
+    : normalizeRoutePath(selectedRoute ?? "/");
+  const focusRoute = availableRoutes.has(preferredRoute)
+    ? preferredRoute
+    : availableRoutes.has("/")
+      ? "/"
+      : changedRoutes[0]!;
+  return { focusRoute, changedRoutes };
 }
 
 function invalidPlannedRoutes(

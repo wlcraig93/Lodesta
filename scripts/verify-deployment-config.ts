@@ -210,7 +210,7 @@ assert(
 );
 assert(productionRollback.indexOf("Require both services to report the target SHA") < productionRollback.indexOf("Reactivate the retained sandbox deployment"), "Rollback must verify both controller identities before moving the sandbox pointer.");
 assert(!/^\s{6}NODE_ENV:/m.test(productionRelease) && !/^\s{6}NODE_ENV:/m.test(productionRollback), "Release workflows must set NODE_ENV only on authority-bearing steps, never at job level.");
-assert(web.includes('healthcheckPath = "/api/health"'), "Railway web health check must use /api/health.");
+assert(web.includes('healthcheckPath = "/api/health/"'), "Railway web health check must use the canonical non-redirecting /api/health/ path.");
 assert(web.includes('startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run start:production"'), "Railway web service must use the production Next.js entrypoint.");
 assert(hostedWorker.includes('startCommand = "PLAYWRIGHT_BROWSERS_PATH=0 npm run worker -- work"'), "Railway worker service must use the canonical runner work loop.");
 assert(workerSource.includes("localRecoveryStaleAfterMs") && workerSource.includes("processNextWebsiteAssessmentJob") && workerSource.includes('event: "worker_started"') && workerSource.includes("releaseSha"), "The canonical runner must preserve local recovery commands, assessment processing, and hosted release identity reporting.");

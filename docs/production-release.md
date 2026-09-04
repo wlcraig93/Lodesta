@@ -38,6 +38,8 @@ Blue, green, and development must use distinct Worker URLs and credentials. The 
 
 Railway service variables use `LODESTA_EXECUTION_ROLE=web` for web and `LODESTA_EXECUTION_ROLE=site-authoring-worker` for the runner. Release and rollback steps use `LODESTA_EXECUTION_ROLE=release`. Each hosted identity also requires `NODE_ENV=production`, the exact full `LODESTA_RELEASE_GIT_SHA`, and a non-loopback HTTPS `LODESTA_APP_ORIGIN`; no role grants authority by itself.
 
+The Railway web health check uses the canonical `/api/health/` path. The slash is significant because the application enforces trailing-slash URLs and Railway treats the resulting `308` from `/api/health` as an unhealthy response rather than following it.
+
 ## One-time blue-green cutover
 
 This cutover is coordinated maintenance because the legacy controller knows only one sandbox address.

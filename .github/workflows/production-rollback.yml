@@ -115,25 +115,45 @@ jobs:
           railway up ../target --path-as-root --detach --json --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
             --service "$RAILWAY_WORKER_SERVICE_ID" --message "Approved worker rollback to ${{ inputs.release_sha }}" \
             > "$EVIDENCE_DIR/railway-worker-submit.json"
-          for spec in "web:$RAILWAY_WEB_SERVICE_ID" "worker:$RAILWAY_WORKER_SERVICE_ID"; do
-            name="${spec%%:*}"
-            service="${spec#*:}"
-            for attempt in $(seq 1 90); do
-              railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$service" \
-                --limit 20 --json > "$EVIDENCE_DIR/railway-$name-candidates.json"
+          # Keep rollback symmetrical with release: poll both retained
+          # controllers within one bound and retry transient Railway API errors.
+          for attempt in $(seq 1 90); do
+            all_succeeded=true
+            for spec in "web:$RAILWAY_WEB_SERVICE_ID" "worker:$RAILWAY_WORKER_SERVICE_ID"; do
+              name="${spec%%:*}"
+              service="${spec#*:}"
+              [ -f "$EVIDENCE_DIR/railway-$name-succeeded" ] && continue
+              candidates="$EVIDENCE_DIR/railway-$name-candidates.json"
+              candidate_tmp="$candidates.tmp"
+              if timeout --kill-after=5s 10s railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$service" \
+                --limit 20 --json > "$candidate_tmp" 2>> "$EVIDENCE_DIR/railway-$name-poll-errors.log"; then
+                mv "$candidate_tmp" "$candidates"
+              else
+                poll_status=$?
+                rm -f "$candidate_tmp"
+                printf '{"attempt":%s,"outcome":"railway_control_plane_unavailable","status":%s}\n' \
+                  "$attempt" "$poll_status" >> "$EVIDENCE_DIR/railway-$name-poll-events.jsonl"
+                all_succeeded=false
+                continue
+              fi
               status="$(node --input-type=module -e '
                 import { readFileSync, writeFileSync } from "node:fs";
                 const priorIds = new Set(JSON.parse(readFileSync(process.argv[1], "utf8")).map((deployment) => deployment.id));
                 const candidate = JSON.parse(readFileSync(process.argv[2], "utf8")).find((deployment) => !priorIds.has(deployment.id));
                 if (candidate) writeFileSync(process.argv[3], JSON.stringify([candidate], null, 2));
                 process.stdout.write(candidate?.status ?? "PENDING");
-              ' "$EVIDENCE_DIR/railway-$name-before.json" "$EVIDENCE_DIR/railway-$name-candidates.json" "$EVIDENCE_DIR/railway-$name.json")"
-              [ "$status" = "SUCCESS" ] && break
-              case "$status" in FAILED|CRASHED|CANCELLED|CANCELED) exit 1;; esac
-              [ "$attempt" -eq 90 ] && exit 1
-              sleep 20
+              ' "$EVIDENCE_DIR/railway-$name-before.json" "$candidates" "$EVIDENCE_DIR/railway-$name.json")"
+              case "$status" in
+                SUCCESS) touch "$EVIDENCE_DIR/railway-$name-succeeded";;
+                FAILED|CRASHED|CANCELLED|CANCELED) exit 1;;
+                *) all_succeeded=false;;
+              esac
             done
+            [ "$all_succeeded" = true ] && break
+            [ "$attempt" -eq 90 ] && exit 1
+            sleep 20
           done
+          rm -f "$EVIDENCE_DIR/railway-web-succeeded" "$EVIDENCE_DIR/railway-worker-succeeded"
           worker_deployment="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/railway-worker.json'))[0].id")"
           echo "worker_deployment=$worker_deployment" >> "$GITHUB_OUTPUT"
 
@@ -155,10 +175,19 @@ jobs:
             sleep 10
           done
           for attempt in $(seq 1 30); do
-            railway logs "${{ steps.controllers.outputs.worker_deployment }}" --service "$RAILWAY_WORKER_SERVICE_ID" \
+            if timeout --kill-after=5s 15s railway logs "${{ steps.controllers.outputs.worker_deployment }}" --service "$RAILWAY_WORKER_SERVICE_ID" \
               --environment "$RAILWAY_ENVIRONMENT_ID" --project "$RAILWAY_PROJECT_ID" --lines 200 --json \
-              > "$EVIDENCE_DIR/railway-worker-startup.jsonl"
-            if grep -q 'worker_started' "$EVIDENCE_DIR/railway-worker-startup.jsonl" \
+              > "$EVIDENCE_DIR/railway-worker-startup.jsonl.tmp" \
+              2>> "$EVIDENCE_DIR/railway-worker-log-errors.log"; then
+              mv "$EVIDENCE_DIR/railway-worker-startup.jsonl.tmp" "$EVIDENCE_DIR/railway-worker-startup.jsonl"
+            else
+              log_status=$?
+              rm -f "$EVIDENCE_DIR/railway-worker-startup.jsonl.tmp"
+              printf '{"attempt":%s,"outcome":"railway_control_plane_unavailable","status":%s}\n' \
+                "$attempt" "$log_status" >> "$EVIDENCE_DIR/railway-worker-log-events.jsonl"
+            fi
+            if [ -f "$EVIDENCE_DIR/railway-worker-startup.jsonl" ] \
+              && grep -q 'worker_started' "$EVIDENCE_DIR/railway-worker-startup.jsonl" \
               && grep -q "${{ inputs.release_sha }}" "$EVIDENCE_DIR/railway-worker-startup.jsonl"; then
               break
             fi

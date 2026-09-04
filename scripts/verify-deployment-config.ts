@@ -164,6 +164,13 @@ assert(productionRelease.includes("timeout-minutes: 180")
   && productionRelease.includes("maintenance:site-authoring -- wait-active --timeout-minutes=30")
   && productionRelease.includes("authoring_drain_timeout")
   && productionRelease.includes("Restore only the sandbox pointer after post-promotion failure"), "Coordinated releases must use a bounded maintenance drain and retain pointer-only automatic rollback.");
+for (const [name, workflow] of [["release", productionRelease], ["rollback", productionRollback]] as const) {
+  assert(workflow.includes("timeout --kill-after=5s 10s railway deployment list")
+    && workflow.includes("railway_control_plane_unavailable")
+    && workflow.includes("all_succeeded=true")
+    && workflow.includes("timeout --kill-after=5s 15s railway logs"),
+  `Production ${name} must retry bounded Railway control-plane failures without confusing them with failed deployments.`);
+}
 assert(productionRelease.includes("sandbox-canary-attempt-1.error.log")
   && productionRelease.includes("sandbox-canary-attempt-2.error.log")
   && productionRelease.includes("LODESTA_SANDBOX_CANARY_SESSION_ID")

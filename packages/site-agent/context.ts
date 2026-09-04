@@ -38,10 +38,11 @@ export type SiteAuthoringContext = {
       rating: number;
       displayText: string;
       provider: "google";
+      profileUrl?: string;
       observedAt: string;
       sourceSnapshotId: string;
       untrusted: true;
-      destination: "not_authorized_unless_present_in_managed_links";
+      destination: "exact_google_profile_when_present" | "unavailable";
     };
   };
   provisionalSources: Array<{
@@ -162,10 +163,15 @@ export function createSiteAuthoringContext(input: {
           rating: googleAggregateRating.observation.rating,
           displayText: `${googleAggregateRating.observation.rating} stars on Google`,
           provider: "google" as const,
+          ...(googleAggregateRating.observation.profileUrl
+            ? { profileUrl: googleAggregateRating.observation.profileUrl }
+            : {}),
           observedAt: googleAggregateRating.observation.observedAt,
           sourceSnapshotId: googleAggregateRating.snapshot.id,
           untrusted: true as const,
-          destination: "not_authorized_unless_present_in_managed_links" as const
+          destination: googleAggregateRating.observation.profileUrl
+            ? "exact_google_profile_when_present" as const
+            : "unavailable" as const
         }
       } : {})
     },

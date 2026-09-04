@@ -873,6 +873,7 @@ const aggregateRatingSnapshot = sourceSnapshotSchema.parse({
       locality: "Austin, TX",
       rating: 4.8,
       reviewCount: 127,
+      profileUrl: "https://www.google.com/maps?cid=123456789",
       observedAt: "2026-08-31T12:00:00.000Z",
       identityEvidence: "Name, locality, and first-party website matched."
     }
@@ -884,6 +885,7 @@ const retainedProspectRatingSnapshot = retainedProspectGoogleAggregateRatingSnap
   sourceUrl: "https://northstar.example/",
   rating: 4.8,
   reviewCount: 127,
+  profileUrl: "https://www.google.com/maps?cid=123456789",
   locality: "Austin, TX",
   googleBusinessName: "Northstar Collision Repair",
   observedAt: "2026-08-31T12:00:00.000Z"
@@ -899,6 +901,7 @@ assert.deepEqual(
     locality: "Austin, TX",
     rating: 4.8,
     reviewCount: 127,
+    profileUrl: "https://www.google.com/maps?cid=123456789",
     observedAt: "2026-08-31T12:00:00.000Z",
     identityEvidence: "Retained browser prospect observation matched to the exact first-party website."
   },
@@ -911,6 +914,20 @@ assert.equal(retainedProspectGoogleAggregateRatingSnapshot({
   rating: 5.2,
   observedAt: "2026-08-31T12:00:00.000Z"
 }), undefined, "An invalid retained prospect rating was accepted.");
+const retainedRatingWithInvalidProfile = retainedProspectGoogleAggregateRatingSnapshot({
+  businessId: input.businessId,
+  businessName: "Northstar Collision Repair",
+  sourceUrl: "https://northstar.example/",
+  rating: 4.8,
+  profileUrl: "https://reviews.example/northstar",
+  observedAt: "2026-08-31T12:00:00.000Z"
+});
+assert(retainedRatingWithInvalidProfile);
+assert.equal(
+  googleAggregateRatingObservationFromSnapshot(retainedRatingWithInvalidProfile)?.profileUrl,
+  undefined,
+  "A non-Google review destination entered retained rating authority."
+);
 const supportedAggregateRating = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>Collision repair with local trust</h1><p>4.8 stars on Google</p></main>`),
   buildInput: input,
@@ -920,6 +937,26 @@ const supportedAggregateRating = prepareSiteArtifact({
 assert(
   !errors(supportedAggregateRating).some((finding) => finding.id === "fact.undeclared_marker"),
   "The exact retained aggregate rating was rejected by factual verification."
+);
+const supportedAggregateRatingLink = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main><h1>Collision repair with local trust</h1><p>4.8 stars on Google</p><a href="https://www.google.com/maps?cid=123456789">Read reviews on Google</a></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourceSnapshots: [aggregateRatingSnapshot]
+});
+assert(
+  !errors(supportedAggregateRatingLink).some((finding) => finding.id === "fact.link_mismatch"),
+  "The exact retained Google profile destination was rejected by link verification."
+);
+const unsupportedAggregateRatingLink = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main><h1>Collision repair with local trust</h1><p>4.8 stars on Google</p><a href="https://www.google.com/maps?cid=987654321">Read reviews on Google</a></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourceSnapshots: [aggregateRatingSnapshot]
+});
+assert(
+  errors(unsupportedAggregateRatingLink).some((finding) => finding.id === "fact.link_mismatch"),
+  "An unretained Google profile destination escaped exact-link verification."
 );
 const mismatchedAggregateRating = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>Collision repair with local trust</h1><p>4.9 stars on Google</p></main>`),
@@ -1318,10 +1355,11 @@ assert.deepEqual(researchedContext.provisionalObservations.googleAggregateRating
   rating: 4.8,
   displayText: "4.8 stars on Google",
   provider: "google",
+  profileUrl: "https://www.google.com/maps?cid=123456789",
   observedAt: "2026-08-31T12:00:00.000Z",
   sourceSnapshotId: ratingContextSnapshot.id,
   untrusted: true,
-  destination: "not_authorized_unless_present_in_managed_links"
+  destination: "exact_google_profile_when_present"
 });
 assert.equal(researchedContext.provisionalSources[0]?.websiteInventory?.pages.length, 3, "The complete compact page inventory was not included in authoring context.");
 assert(researchedContext.provisionalSources[0]?.websiteInventory?.groupings.linkCommunities.length, "Neutral link-community groupings were not included in authoring context.");

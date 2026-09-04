@@ -1537,6 +1537,7 @@ export class SiteAuthoringWorkflow {
         sourceUrl: input.sourceUrl,
         rating: match.googleRating!,
         reviewCount: match.googleReviewCount,
+        profileUrl: observedLocation.googleMapsUrl ?? match.googleMapsUrl,
         locality,
         googleBusinessName: observedLocation.googleBusinessName ?? match.googleBusinessName,
         observedAt: observedLocation.updatedAt

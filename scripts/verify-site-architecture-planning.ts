@@ -348,7 +348,10 @@ assert.doesNotMatch(authorDigestEvidence[1].content, /"wordCount":/);
 assert.match(authorDigestEvidence[1].content, /mission to provide relationship-based pest control/i);
 assert.doesNotMatch(authorDigestEvidence[1].content, /charms? of pleasure|my husband/i);
 assert(authorDigestEvidence[1].content.length < readableIndexedPullPreviewEvidence[1].content.length);
-const customerProofText = "“Kevin arrived when expected, listened carefully, and treated our home with patience,” my husband said after the service visit.";
+const customerProofText = [
+  "“Kevin arrived when expected, listened carefully, and treated our home with patience. He explained what he saw before beginning, protected the rooms where our children spend time, and left every area orderly. The follow-up was equally thoughtful, and the team answered each question without rushing us. We would gladly recommend the company to a neighbor who wanted careful service and straightforward communication.”",
+  "Ted L."
+].join("\n");
 const proofPages = [
   ...pages,
   page("page_reviews", "/reviews", "Customer Reviews", customerProofText),
@@ -368,9 +371,12 @@ const proofPlan = siteArchitecturePlanSchema.parse({
   ]
 });
 const proofDigestEvidence = createArchitectureEvidenceFiles(proofPages, proofPlan, { retainedContentMode: "indexed-pull-preview-author-digest" });
-assert.match(proofDigestEvidence[1].content, /Kevin arrived when expected.*my husband said after the service visit/i);
+assert.match(proofDigestEvidence[1].content, /Kevin arrived when expected.*treated our home with patience/i);
 assert.doesNotMatch(proofDigestEvidence[1].content, /oversized utility index/i);
 assert.doesNotMatch(proofDigestEvidence[1].content, /service-specific guidance/i);
+const proofReadableEvidence = createArchitectureEvidenceFiles(proofPages, proofPlan, { retainedContentMode: "indexed-pull-preview-readable" });
+assert.match(proofReadableEvidence[1].content, /Kevin arrived when expected.*straightforward communication/i);
+assert.match(proofReadableEvidence[1].content, /Ted L\./, "Readable proof previews dropped a short customer attribution.");
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-pull"), /retained mirror remains searchable through source-site\/ and the source tools/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-pull"), /never map raw extracted paragraphs into pages, cards, or metadata/i);
 assert.doesNotMatch(initialArchitectureAuthoringInstruction("commercial-core-pull"), /purpose as its compact message and conversion target/i);
@@ -382,6 +388,7 @@ assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-ta
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /Do not load src\/approved-architecture\.ts merely to repeat migration data/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /evidencePreview is a routing sample, not a content budget/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /use its mapped contentFiles whenever the preview does not carry the complete page argument/i);
+assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /hundreds of source words.*substantive explanatory arc.*three brief snippets.*teaser/i);
 assert.equal(siteArchitectureSystemPromptFor(), siteArchitectureSystemPrompt);
 assert.equal(siteArchitecturePromptIdentityFor(), siteArchitecturePromptIdentity);
 assert.notEqual(siteArchitectureSystemPromptFor("commercial-core-pull"), siteArchitectureSystemPrompt);

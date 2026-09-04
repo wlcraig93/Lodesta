@@ -171,6 +171,7 @@ export function retainedProspectGoogleAggregateRatingSnapshot(input: {
   sourceUrl: string;
   rating: number;
   reviewCount?: number;
+  profileUrl?: string;
   locality?: string;
   googleBusinessName?: string;
   observedAt: string;
@@ -183,6 +184,7 @@ export function retainedProspectGoogleAggregateRatingSnapshot(input: {
     : undefined;
   const businessName = input.googleBusinessName?.trim() || input.businessName.trim();
   if (!businessName || Number.isNaN(Date.parse(input.observedAt))) return undefined;
+  const profileUrl = googleProfileUrl(input.profileUrl ?? null);
   return webResearchSnapshot(input.businessId, input.sourceUrl, input.observedAt, {
     kind: "google_aggregate_rating_research",
     observation: {
@@ -193,10 +195,11 @@ export function retainedProspectGoogleAggregateRatingSnapshot(input: {
       ...(input.locality?.trim() ? { locality: input.locality.trim() } : {}),
       rating: input.rating,
       ...(reviewCount !== undefined ? { reviewCount } : {}),
+      ...(profileUrl ? { profileUrl } : {}),
       observedAt: input.observedAt,
       identityEvidence: "Retained browser prospect observation matched to the exact first-party website."
     },
-    sources: [input.sourceUrl],
+    sources: [input.sourceUrl, ...(profileUrl ? [profileUrl] : [])],
     provenance: {
       provider: "browser_prospect_research",
       tool: "visible_browser_observation",

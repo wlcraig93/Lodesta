@@ -749,15 +749,17 @@ function retainedEvidencePreview(
     maxLines?: number;
   } = {}
 ) {
-  const candidates: Array<{ index: number; line: string; score: number }> = [];
+  const candidates: Array<{ index: number; line: string; score: number; shortAttribution: boolean }> = [];
   for (const [lineIndex, rawLine] of lines(page.extractedText).entries()) {
-    const previewLines = input.authorDigest
-      ? previewSegments(rawLine)
-      : [rawLine.replace(/\s+/g, " ").trim()];
+    // Extractors commonly collapse an entire article or testimonial into one
+    // paragraph. Sentence segmentation keeps those source-rich pages visible
+    // in the bounded preview instead of dropping the line at the length cap.
+    const previewLines = previewSegments(rawLine);
     for (const [segmentIndex, line] of previewLines.entries()) {
       const index = lineIndex * 100 + segmentIndex;
       const normalized = normalizeLine(line);
-      if (!normalized || line.length < 45 || line.length > 420) continue;
+      const shortAttribution = Boolean(input.includeTestimonials && isLikelyTestimonialAttribution(line));
+      if (!normalized || (!shortAttribution && line.length < 45) || line.length > 420) continue;
       if ((lineFrequency.get(normalized) ?? 0) >= 3) continue;
       if (/^(?:https?:\/\/|follow\b|read more\b|navigate\b|home\b|customer login\b|call now\b|contact us\b)/i.test(line)) continue;
       if (/^(?:[A-Z0-9&'’ -]{20,})$/.test(line)) continue;
@@ -766,7 +768,7 @@ function retainedEvidencePreview(
         includeTestimonials: input.includeTestimonials
       })) continue;
       if (candidates.some((current) => normalizeLine(current.line) === normalized)) continue;
-      candidates.push({ index, line, score: input.authorDigest ? authorDigestLineScore(line) : -index });
+      candidates.push({ index, line, score: input.authorDigest ? authorDigestLineScore(line) : -index, shortAttribution });
     }
   }
   const ranked = input.authorDigest
@@ -778,14 +780,24 @@ function retainedEvidencePreview(
   let totalCharacters = 0;
   for (const candidate of ranked) {
     const remaining = maxCharacters - totalCharacters;
-    if (remaining < 45) break;
+    if (remaining < 4) break;
     const line = truncatePreviewLine(candidate.line, remaining);
-    if (line.length < 45) continue;
+    if (!candidate.shortAttribution && line.length < 45) continue;
     selected.push({ index: candidate.index, line });
     totalCharacters += line.length + 1;
     if (selected.length >= maxLines || totalCharacters >= maxCharacters) break;
   }
   return selected.sort((left, right) => left.index - right.index).map((candidate) => candidate.line).join(" ").trim();
+}
+
+function isLikelyTestimonialAttribution(value: string) {
+  const line = value.trim();
+  if (line.length < 2 || line.length > 60) return false;
+  const dashPrefixed = /^[-–—]\s*/.test(line);
+  const name = line.replace(/^[-–—]\s*/, "");
+  return /^[A-Z]{2,4}$/.test(name)
+    || /^[A-Z][A-Za-z'’-]+(?:\s+(?:[A-Z][A-Za-z'’-]+|[A-Z]\.)){1,3}$/.test(name)
+    || (dashPrefixed && /^[A-Z][A-Za-z'’-]+$/.test(name));
 }
 
 function truncatePreviewLine(value: string, maxCharacters: number) {
@@ -845,7 +857,7 @@ export function initialArchitectureAuthoringInstruction(mode: SiteArchitectureMo
   if (mode === "commercial-core-message-target") {
     return `This initial build has completed a model-authored, mechanically validated information architecture. The release service already owns and applies its exhaustive redirect and retirement ledger. Use src/approved-source-index.ts as the complete author-facing route manifest: every routePath is an approved live route. Treat each route's purpose as its compact message and conversion target, not as customer-facing copy. Do not load src/approved-architecture.ts merely to repeat migration data; inspect it only if the source index or release feedback exposes a concrete route ambiguity.
 
-The retained mirror remains searchable through source-site/ and the source tools. It is research, not render-time data: pull only the evidence needed to author final customer-ready shared route data, and never map raw extracted paragraphs into pages, cards, or metadata. Each evidencePreview is a routing sample, not a content budget or a substitute for mapped raw source. If an approved editorial, service, project, proof, or other source-rich route remains distinct, its customer value must not be reduced to the preview; use its mapped contentFiles whenever the preview does not carry the complete page argument. Owner facts outrank retained observations. You may use exact first-party qualitative positioning that the retained source clearly and consistently attributes to the business; specific safety, toxicity, chemical-use, certification, guarantee, price, availability, or outcome claims still require exact publicFacts support.
+The retained mirror remains searchable through source-site/ and the source tools. It is research, not render-time data: pull only the evidence needed to author final customer-ready shared route data, and never map raw extracted paragraphs into pages, cards, or metadata. Each evidencePreview is a routing sample, not a content budget or a substitute for mapped raw source. If an approved editorial, service, project, proof, or other source-rich route remains distinct, its customer value must not be reduced to the preview; use its mapped contentFiles whenever the preview does not carry the complete page argument. A retained article or guide with several supported headings and hundreds of source words needs an edited but substantive explanatory arc; a title, introduction, and three brief snippets is only a teaser, not a finished route. Shared editorial shells are appropriate, but each body must preserve the route-specific distinctions that justified retaining it. Owner facts outrank retained observations. You may use exact first-party qualitative positioning that the retained source clearly and consistently attributes to the business; specific safety, toxicity, chemical-use, certification, guarantee, price, availability, or outcome claims still require exact publicFacts support.
 
 Build a coherent commercial site rather than a legacy archive skin. Give the home, service hub, service details, service-area hub or locations, about, contact, FAQ, and editorial routes compositions suited to their distinct customer jobs. Every live route must be reachable from the concise navigation or an explicit hub. Call finish without copying the migration ledger into finish arguments.`;
   }

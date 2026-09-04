@@ -167,7 +167,7 @@ assert.match(scalePromptContext.task.sourceInventorySummary, /neutral corpus ind
 assert.match(scalePromptContext.task.sourceInventorySummary, /every retained source path still requires a deliberate preserved, redirected, canonical-duplicate, or intentionally retired disposition/);
 assert.match(websiteManagerAuthoringSystemPrompt, /no missing routes and no additional routes/);
 assert.match(websiteManagerAuthoringSystemPrompt, /evidence for that route, not permission to recreate the source URL/);
-assert.match(websiteManagerAuthoringSystemPrompt, /CSS readable and organized rather than minified/);
+assert.match(websiteManagerAuthoringSystemPrompt, /TSX and CSS readable, structurally formatted, and organized rather than minified/);
 const initialBuildSkill = taskSkillFor("initial_build").knowledge.join("\n");
 assert.match(initialBuildSkill, /implement no additional route/);
 assert.match(initialBuildSkill, /never make a project title deceptively link to an unrelated generic service page/);

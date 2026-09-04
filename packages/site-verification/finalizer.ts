@@ -8,6 +8,7 @@ import {
   type SourceSnapshotPage
 } from "@/packages/site-contracts";
 import { sha256, stableJson } from "@/packages/business-data";
+import { googleAggregateRatingObservationFromSnapshot } from "@/packages/business-data/web-research";
 import { isLegalSourcePagePath, normalizedSourcePagePath } from "@/packages/business-data/source-page-classification";
 import { canonicalSourceTokens } from "@/lib/source-text-blocks";
 import { FactBindingValidator } from "./fact-declarations";
@@ -61,7 +62,7 @@ export function prepareSiteArtifact(input: {
   const authored = agentAuthoredArtifactSchema.parse(input.authoredArtifact);
   const routes = new Set(authored.routes.map((route) => normalizeRoutePath(route.path)));
   const allowedFormIds = new Set(input.buildInput.forms.map((form) => form.id));
-  const allowedExternalHrefs = allowedExternalHrefsFor(input.buildInput);
+  const allowedExternalHrefs = allowedExternalHrefsFor(input.buildInput, input.sourceSnapshots ?? []);
   const allowedPhoneNumbers = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => comparablePhone(String(fact.value))));
   const allowedEmailAddresses = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value).trim().toLowerCase()));
   const cssResult = sanitizeAgentCss(authored.sharedCss, input.buildInput.business.assets);
@@ -733,9 +734,13 @@ function documentHtml(input: {
   return `<!doctype html><html lang="en" data-lodesta-site-id="${escapeAttribute(input.siteId)}" data-lodesta-analytics="${input.analyticsEnabled ? "true" : "false"}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(input.title)}</title><meta name="description" content="${escapeAttribute(input.description)}"><link rel="stylesheet" href="${input.cssPath}">${structured}<script src="/_lodesta/runtime/${encodeURIComponent(input.runtimeSeriesId)}.js" defer data-lodesta-runtime="${escapeAttribute(input.runtimeSeriesId)}"></script></head><body>${input.bodyHtml}</body></html>`;
 }
 
-function allowedExternalHrefsFor(buildInput: SitePublicBuildInput) {
+function allowedExternalHrefsFor(buildInput: SitePublicBuildInput, sourceSnapshots: SourceSnapshot[]) {
   const values = [
     ...buildInput.business.links.map((link) => link.url),
+    ...sourceSnapshots.flatMap((snapshot) => {
+      const observation = googleAggregateRatingObservationFromSnapshot(snapshot);
+      return observation?.profileUrl ? [observation.profileUrl] : [];
+    }),
     ...buildInput.business.locations.flatMap((location) => [
       legacyMapHrefForLocation(location),
       platformDirectionsHrefForLocation(location)

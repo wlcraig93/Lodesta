@@ -116,6 +116,8 @@ assert.equal(websiteManagerDiscussionPromptIdentity, `website-manager-discussion
 assert.notEqual(websiteManagerPromptIdentity, websiteManagerDiscussionPromptIdentity);
 assert.match(websiteManagerDiscussionSystemPrompt, /without modifying source/i);
 assert.doesNotMatch(websiteManagerAuthoringSystemPrompt, /editable.*recipe|recipe provenance|critic agent|automatic repair/i);
+assert.match(websiteManagerAuthoringSystemPrompt, /hundreds of words.*substantive explanatory arc.*three brief snippets.*not a complete route/i);
+assert.match(websiteManagerAuthoringSystemPrompt, /authored TSX and CSS readable, structurally formatted/i);
 
 const taskSkills = {
   initial_build: taskSkillFor("initial_build"),
@@ -185,8 +187,12 @@ assert.match(taskSkills.initial_build.knowledge.join(" "), /approved reviews or 
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Customer quotations visibly published in the retained first-party website.*ordinary owner-published source material/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Do not copy individual review text from Google, Yelp, Facebook.*third-party review surface/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /provisionalObservations\.googleAggregateRating.*render its displayText exactly.*complementary proof.*first-party testimonials/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Never infer, round up, refresh, or fabricate it.*never copy Google review prose.*unapproved profile URL/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Link to reviews only when.*managedCapabilities\.links.*structured observation is absent, omit the rating cleanly/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Never infer, round up, refresh, or fabricate it.*never copy Google review prose/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /includes profileUrl.*Read reviews on Google.*exact URL.*does not, never invent or search for a destination/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /ordinary anchor.*exact URL.*new tab.*noopener noreferrer.*Do not pass the URL to SafeLink/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Other external destinations remain restricted to managedCapabilities\.links.*structured observation is absent, omit the rating cleanly/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Never split one source testimonial into multiple apparent customer cards.*accompanying attribution.*generic label/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /article or guide.*hundreds of source words.*substantive explanatory arc.*three brief snippets.*teaser/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /initial build with a retained visual estate.*deliberate source-media decision.*browse the ranked source resources.*inspect promising pixels/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /At phone widths, recompose rather than squeeze a desktop relationship.*stack, reorder, recrop, simplify, or omit.*primary action remains legible/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Before finish, correct every repeated shared-family contrast, body-font, form-text, disclosure-text, target-size/i);

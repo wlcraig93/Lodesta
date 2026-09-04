@@ -309,6 +309,36 @@ assert.deepEqual(readableIndexedPullPreviewEvidence.map((file) => file.path), ["
 assert.match(readableIndexedPullPreviewEvidence[1].content, /\n  \{\n    "routePath": "\/"/);
 assert.match(readableIndexedPullPreviewEvidence[1].content, /"evidencePreviews": \[/);
 assert(readableIndexedPullPreviewEvidence[1].content.length > indexedPullPreviewEvidence[1].content.length);
+const deepEvidenceText = [
+  "Begin with the visible condition and explain why it matters to the property owner before discussing the service.",
+  "Describe the first decision in concrete language so a reader can understand what information will help the estimate.",
+  "Use one section for observable signs and another for the surrounding property context that changes the recommendation.",
+  "Explain how access, nearby structures, and the condition of the site can shape the practical next step for the customer.",
+  "Carry a specific preparation detail into the page instead of substituting a generic promise about professional service.",
+  "This later source detail gives the retained route a complete middle argument that the short routing sample cannot carry.",
+  "Close with a route-specific action that tells the customer what to share without inventing a response time or outcome."
+].join("\n");
+const deepEvidencePage = page("page_deep_service", "/deep-service", "Deep Service", deepEvidenceText);
+const deepEvidencePlan = siteArchitecturePlanSchema.parse({
+  strategy: "Preserve the source-rich service as a distinct customer answer.",
+  primaryNavigation: [{ label: "Deep Service", path: "/deep-service" }],
+  routes: [{
+    path: "/deep-service",
+    label: "Deep Service",
+    purpose: "Help customers understand the condition, decision, and next step.",
+    pageType: "service",
+    parentPath: null,
+    navigation: "primary",
+    sourcePaths: ["/deep-service"]
+  }],
+  sourceDispositions: [{ sourcePath: "/deep-service", disposition: "preserved", targetPath: "/deep-service" }],
+  authoringGuidance: []
+});
+const boundedDeepEvidence = createArchitectureEvidenceFiles([deepEvidencePage], deepEvidencePlan, { retainedContentMode: "indexed-pull-preview" });
+const readableDeepEvidence = createArchitectureEvidenceFiles([deepEvidencePage], deepEvidencePlan, { retainedContentMode: "indexed-pull-preview-readable" });
+assert.doesNotMatch(boundedDeepEvidence[1].content, /later source detail gives the retained route/i);
+assert.match(readableDeepEvidence[1].content, /later source detail gives the retained route/i);
+assert.doesNotMatch(readableDeepEvidence[1].content, /short routing sample cannot carr[^y]/i, "Readable preview ended in a partial word.");
 const authorDigestEvidence = createArchitectureEvidenceFiles(pages, plan, { retainedContentMode: "indexed-pull-preview-author-digest" });
 assert.deepEqual(authorDigestEvidence.map((file) => file.path), ["src/approved-architecture.ts", "src/approved-source-index.ts"]);
 assert.match(authorDigestEvidence[1].content, /"evidencePreviews": \[/);
@@ -350,6 +380,8 @@ assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-ta
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /release service already owns and applies its exhaustive redirect and retirement ledger/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /approved-source-index\.ts as the complete author-facing route manifest/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /Do not load src\/approved-architecture\.ts merely to repeat migration data/i);
+assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /evidencePreview is a routing sample, not a content budget/i);
+assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /use its mapped contentFiles whenever the preview does not carry the complete page argument/i);
 assert.equal(siteArchitectureSystemPromptFor(), siteArchitectureSystemPrompt);
 assert.equal(siteArchitecturePromptIdentityFor(), siteArchitecturePromptIdentity);
 assert.notEqual(siteArchitectureSystemPromptFor("commercial-core-pull"), siteArchitectureSystemPrompt);

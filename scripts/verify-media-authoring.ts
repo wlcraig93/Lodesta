@@ -169,6 +169,7 @@ assert.equal(builds, 2, "Finish rebuilt a workspace that already had a successfu
 let visualBuilds = 0;
 let visualInspections = 0;
 let visualMechanicalInspections = 0;
+let visualReleaseVerifications = 0;
 let inspectedTarget: { route?: string; selector?: string; label?: string } | undefined;
 const visualRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
@@ -207,6 +208,15 @@ const visualRuntime = new WorkspaceManagerRuntime<string>({
           { code: "shared-spacing", severity: "warning", area: "css", route: "/services", viewport: "mobile", selector: ".shared-card", message: "Shared card spacing is uneven on mobile." }
         ]
       },
+      diagnosticSummary: {}
+    };
+  },
+  verify: async () => {
+    visualReleaseVerifications += 1;
+    return {
+      passed: true,
+      inspectionHash: `sha256:${"e".repeat(64)}`,
+      modelSummary: { routes: ["/", "/services"] },
       diagnosticSummary: {},
       checkpoint: "verified"
     };
@@ -282,6 +292,7 @@ assert.equal(cachedInspectionFinish.diagnosticOutput.ok, true);
 assert.equal(cachedInspectionFinish.diagnosticOutput.buildPerformed, false);
 assert.equal(visualBuilds, 2, "Finish rebuilt a workspace whose exact hash already had a valid preview build.");
 assert.equal(visualMechanicalInspections, 2, "Finish repeated the mechanical sweep for an unchanged workspace hash.");
+assert.equal(visualReleaseVerifications, 1, "Finish did not run the exhaustive release verification after a mechanical inspection.");
 let initialBuildTarget: { route?: string; selector?: string; label?: string } | undefined;
 const initialBuildVisualRuntime = new WorkspaceManagerRuntime<string>({
   kind: "initial_build",

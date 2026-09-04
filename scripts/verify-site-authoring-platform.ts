@@ -223,6 +223,74 @@ assert(
   "An exact context-matched legal provision was rejected by the generic fact gate."
 );
 
+const sharedSourceShell = [
+  "Skip to content",
+  "Northstar Collision Repair",
+  "Collision repair and estimates in Austin",
+  "Call (512) 555-0142",
+  "Services About Contact",
+  "1200 Main Street Austin TX 78701"
+];
+const legalSubstantiveText = [
+  "Privacy Policy",
+  "We collect contact information that you choose to provide when requesting an estimate.",
+  "We use submitted information to answer questions, schedule requested work, and maintain appropriate business records.",
+  "We do not sell personal information and disclose it only as described in this policy.",
+  "You may contact the business to request a correction or ask a question about this policy.",
+  "We retain information only as long as reasonably necessary for the purposes described here."
+].join("\n");
+const privacyWithSharedShell = sourcePage(
+  "source_page_privacy_with_shell",
+  "/privacy-policy",
+  "Privacy Policy",
+  110,
+  [...sharedSourceShell, legalSubstantiveText, ...sharedSourceShell].join("\n")
+);
+const sourcePagesWithSharedShell = [
+  privacyWithSharedShell,
+  sourcePage("source_page_home_with_shell", "/", "Home", 80, [...sharedSourceShell, "Trusted repairs for local drivers."].join("\n")),
+  sourcePage("source_page_services_with_shell", "/services", "Services", 80, [...sharedSourceShell, "Explore collision repair services."].join("\n")),
+  sourcePage("source_page_about_with_shell", "/about", "About", 80, [...sharedSourceShell, "Meet the local repair team."].join("\n"))
+];
+const preservedPrivacyWithoutCopiedChrome = prepareSiteArtifact({
+  authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: input.business.name,
+    sharedCss: "body{font:16px Arial,sans-serif}",
+    routes: [
+      { path: "/", title: input.business.name, description: "Collision repair in Austin.", bodyHtml: validBody },
+      { path: "/privacy-policy", title: "Privacy Policy", description: "How the shop handles contact information.", bodyHtml: `<main><p>${legalSubstantiveText}</p></main>` }
+    ]
+  })),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourcePages: sourcePagesWithSharedShell
+});
+assert(
+  !errors(preservedPrivacyWithoutCopiedChrome).some((finding) => finding.id === "fact.legal_source_preservation"),
+  "Shared source-site chrome was incorrectly treated as part of a legal document's substantive provisions."
+);
+const summarizedPrivacyWithoutCopiedChrome = prepareSiteArtifact({
+  authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: input.business.name,
+    sharedCss: "body{font:16px Arial,sans-serif}",
+    routes: [
+      { path: "/", title: input.business.name, description: "Collision repair in Austin.", bodyHtml: validBody },
+      { path: "/privacy-policy", title: "Privacy Policy", description: "How the shop handles contact information.", bodyHtml: "<main><h1>Privacy Policy</h1><p>We respect your privacy.</p></main>" }
+    ]
+  })),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourcePages: sourcePagesWithSharedShell
+});
+assert(
+  errors(summarizedPrivacyWithoutCopiedChrome).some((finding) => finding.id === "fact.legal_source_preservation"),
+  "Removing shared source-site chrome allowed a substantive legal summary to pass."
+);
+
 const brandedTermsSourceText = [
   "AGMTS Terms and Conditions",
   "A $45.00 consultation fee applies before service begins.",

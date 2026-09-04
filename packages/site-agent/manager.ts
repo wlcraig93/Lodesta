@@ -1497,7 +1497,7 @@ export const websiteManagerTools: Tool[] = [
       question: { type: "string", minLength: 1, maxLength: 600 }
     }
   }),
-  tool("finish", "Finish when the workspace is ready. Declare only deliberate source-path redirects or retirements; preserved and new routes are inferred automatically.", {
+  tool("finish", "Finish when the workspace is ready. This runs the exhaustive deterministic release verification across the approved route set. Declare only deliberate source-path redirects or retirements; preserved and new routes are inferred automatically.", {
     type: "object", additionalProperties: false, required: ["ownerMessage", "focusRoute", "changedRoutes", "redirects", "retiredSourcePaths"],
     properties: {
       ownerMessage: { type: "string", minLength: 1, maxLength: 1200 },

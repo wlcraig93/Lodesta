@@ -236,6 +236,11 @@ const inspectionTool = websiteManagerTools.find(
 assert(inspectionTool?.type === "function");
 assert.match(inspectionTool.description!, /initial build, pass null.*representative route set.*passing '\/' inspects only the homepage/i);
 assert.match(inspectionTool.description!, /route-local finding or change.*pass that exact route.*instead of repeating the representative set/i);
+const finishTool = websiteManagerTools.find(
+  (tool) => tool.type === "function" && tool.name === "finish"
+);
+assert(finishTool?.type === "function");
+assert.match(finishTool.description!, /exhaustive deterministic release verification across the approved route set/i);
 
 const validMutationSite = [
   "export const siteDefinition = {",

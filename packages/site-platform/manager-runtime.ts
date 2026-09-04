@@ -123,6 +123,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     selection?: ManagerRunRequest["selection"];
     applyBuild(files: WorkspaceSourceFile[], expectedRevision: string, signal?: AbortSignal): Promise<BuildResult>;
     inspect(files: WorkspaceSourceFile[], sandboxRevision: string, signal?: AbortSignal): Promise<RuntimeInspection<Checkpoint>>;
+    verify?(files: WorkspaceSourceFile[], sandboxRevision: string, signal?: AbortSignal): Promise<RuntimeInspection<Checkpoint>>;
     listBuiltRoutePaths?(sandboxRevision: string): Promise<string[]>;
     inspectVisual?(files: WorkspaceSourceFile[], sandboxRevision: string, target: {
       route?: string;
@@ -693,10 +694,10 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         return invalidSourceDisposition(error);
       }
     }
-    const cached = Boolean(this.inspection);
-    if (!this.inspection) {
+    const cached = Boolean(this.inspection?.checkpoint);
+    if (!this.inspection?.checkpoint) {
       this.inspections += 1;
-      this.inspection = await this.options.inspect(this.currentFiles(), this.sandboxRevision);
+      this.inspection = await (this.options.verify ?? this.options.inspect)(this.currentFiles(), this.sandboxRevision);
       this.inspection.diagnosticSummary = {
         ...this.inspection.diagnosticSummary,
         verificationTimings: {

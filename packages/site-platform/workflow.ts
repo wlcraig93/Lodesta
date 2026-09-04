@@ -2597,6 +2597,20 @@ export class SiteAuthoringWorkflow {
       inspect: async (files, sandboxRevision, inspectionSignal): Promise<RuntimeInspection<Checkpoint>> => {
         const operationSignal = combineAbortSignals(input.signal, inspectionSignal);
         run = await this.updateRun(run, { stage: "verifying" });
+        return this.inspectSandboxMechanical({
+          run,
+          session: activeSession,
+          buildInput: effectiveBuildInput,
+          sourceSnapshots: input.snapshots,
+          sourcePages: input.sourcePages,
+          workspaceHash: sha256(stableJson(files)),
+          sandboxRevision,
+          signal: operationSignal
+        });
+      },
+      verify: async (files, sandboxRevision, inspectionSignal): Promise<RuntimeInspection<Checkpoint>> => {
+        const operationSignal = combineAbortSignals(input.signal, inspectionSignal);
+        run = await this.updateRun(run, { stage: "verifying" });
         const site = await this.repository.getSite(run.siteId);
         if (!site) throw new Error("Site not found.");
         const parent = site.currentWorkspaceRevisionId ? await this.repository.getWorkspaceRevision(site.currentWorkspaceRevisionId) : undefined;
@@ -3201,6 +3215,103 @@ export class SiteAuthoringWorkflow {
         completedAt: new Date().toISOString()
       });
     }
+  }
+
+  private async inspectSandboxMechanical(input: {
+    run: SiteAgentRun;
+    session: SiteAgentSession;
+    buildInput: SitePublicBuildInput;
+    sourceSnapshots?: SourceSnapshot[];
+    sourcePages?: SourceSnapshotPage[];
+    workspaceHash: `sha256:${string}`;
+    sandboxRevision: string;
+    signal?: AbortSignal;
+  }) {
+    input.signal?.throwIfAborted();
+    const startedAt = Date.now();
+    const authored = await this.sandbox.getArtifact(input.session.sandboxId!);
+    if (!sandboxManifestMatches(authored.compilerManifest, this.expectedSandboxManifest())) {
+      throw new SiteAuthoringTerminalError(
+        "platform_version_mismatch",
+        "platform",
+        false,
+        `Artifact compiler manifest does not match pinned deployment ${stableJson(this.expectedSandboxManifest())}; received ${stableJson(authored.compilerManifest)}.`
+      );
+    }
+    const runtimeSeriesId = input.buildInput.capabilityConfiguration.trustedRuntimeSeries;
+    const runtime = await this.ensureRuntime(runtimeSeriesId);
+    const prepared = prepareSiteArtifact({
+      authoredArtifact: authored,
+      buildInput: input.buildInput,
+      runtimeSeriesId,
+      sourceSnapshots: input.sourceSnapshots,
+      sourcePages: input.sourcePages
+    });
+    input.signal?.throwIfAborted();
+    const findings = prepared.findings;
+    const errors = findings.filter((finding) => finding.severity === "error");
+    const warnings = findings.filter((finding) => finding.severity === "warning");
+    const blockerFeedback = verificationBlockerFeedback(errors);
+    const inspectionHash = createInspectionIdentity({
+      context: {
+        mechanicalOnly: true,
+        workspaceHash: input.workspaceHash,
+        publicBuildInputHash: input.buildInput.inputHash,
+        sandboxRevision: input.sandboxRevision,
+        verificationPolicyVersion: siteVerificationPolicyIdentity,
+        sourcePolicyVersion: workspaceSourcePolicyIdentity,
+        toolchainVersion: this.expectedSandboxManifest().toolchainIdentity,
+        sandboxImageDigest: this.currentSandboxImageDigest(),
+        runtimePatchHash: runtime.patch.contentHash,
+        authoredArtifactHash: sha256(stableJson(authored))
+      },
+      findings,
+      captures: []
+    });
+    const verificationTimings = {
+      compilationMs: 0,
+      hardChecksMs: Date.now() - startedAt,
+      browserCaptureMs: 0,
+      advisoryEvaluationMs: 0
+    };
+    return {
+      passed: errors.length === 0,
+      inspectionHash,
+      modelSummary: {
+        ok: errors.length === 0,
+        mechanicalOnly: true,
+        workspaceHash: input.workspaceHash,
+        sandboxRevision: input.sandboxRevision,
+        publicBuildInputId: input.buildInput.id,
+        toolchainVersion: this.expectedSandboxManifest().toolchainIdentity,
+        sandboxImageDigest: this.currentSandboxImageDigest(),
+        inspectionHash,
+        routes: prepared.routes,
+        findingCount: findings.length,
+        blockerCount: blockerFeedback.uniqueBlockerCount,
+        uniqueBlockerCount: blockerFeedback.uniqueBlockerCount,
+        returnedBlockerCount: blockerFeedback.returnedBlockerCount,
+        blockersTruncated: blockerFeedback.blockersTruncated,
+        advisoryCount: warnings.length,
+        blockers: blockerFeedback.blockers,
+        advisories: warnings.slice(0, 8)
+      },
+      diagnosticSummary: {
+        ok: errors.length === 0,
+        mechanicalOnly: true,
+        workspaceHash: input.workspaceHash,
+        sandboxRevision: input.sandboxRevision,
+        inspectionHash,
+        findingCount: findings.length,
+        errorCount: errors.length,
+        warningCount: warnings.length,
+        findings,
+        routeSimilarity: prepared.qualityMetrics.routeSimilarity,
+        informationArchitecture: prepared.qualityMetrics.informationArchitecture,
+        screenshotKeys: [],
+        verificationTimings
+      }
+    };
   }
 
   private async inspectSandboxVisual(input: {

@@ -357,13 +357,43 @@ function validateSourceSensitiveLegalRoutes(
   const findings: ArtifactGateFinding[] = [];
   const authoredByPath = new Map(routes.map((route) => [normalizedSourcePagePath(route.path), route]));
   const richestLegalSourceByPath = new Map<string, string[]>();
+  const richestFetchedSourceByPath = new Map<string, SourceSnapshotPage>();
 
   for (const page of sourcePages) {
-    if (page.outcome !== "fetched" || !isLegalSourcePagePath(page.path)) continue;
+    if (page.outcome !== "fetched" || !page.extractedText.trim()) continue;
     const path = normalizedSourcePagePath(page.path);
-    const tokens = canonicalSourceTokens(page.extractedText).map((token) => token.value);
-    const prior = richestLegalSourceByPath.get(path);
-    if (!prior || tokens.length > prior.length) richestLegalSourceByPath.set(path, tokens);
+    const prior = richestFetchedSourceByPath.get(path);
+    if (!prior || canonicalSourceTokens(page.extractedText).length > canonicalSourceTokens(prior.extractedText).length) {
+      richestFetchedSourceByPath.set(path, page);
+    }
+  }
+
+  // Crawled text contains the source site's header, navigation, and footer on
+  // every page. Those shared shell lines are not provisions of each legal
+  // document and the authoring contract explicitly tells the model not to
+  // reproduce them. Remove only exact lines repeated across at least three
+  // distinct source paths; unique legal prose remains authoritative verbatim.
+  const nonLegalLineFrequency = new Map<string, number>();
+  for (const page of richestFetchedSourceByPath.values()) {
+    // A repeated provision can legitimately appear across several legal
+    // documents. Only non-legal pages can prove that a line belongs to the
+    // shared site shell rather than the legal body itself.
+    if (isLegalSourcePagePath(page.path)) continue;
+    for (const line of new Set(sourceTextLines(page.extractedText).map(normalizedSourceLine).filter(Boolean))) {
+      nonLegalLineFrequency.set(line, (nonLegalLineFrequency.get(line) ?? 0) + 1);
+    }
+  }
+
+  for (const page of richestFetchedSourceByPath.values()) {
+    if (!isLegalSourcePagePath(page.path)) continue;
+    const path = normalizedSourcePagePath(page.path);
+    const substantiveText = sourceTextLines(page.extractedText)
+      .filter((line) => (nonLegalLineFrequency.get(normalizedSourceLine(line)) ?? 0) < 3)
+      .join("\n");
+    richestLegalSourceByPath.set(
+      path,
+      canonicalSourceTokens(substantiveText).map((token) => token.value)
+    );
   }
 
   for (const [path, sourceTokens] of richestLegalSourceByPath) {
@@ -397,6 +427,14 @@ function validateSourceSensitiveLegalRoutes(
   }
 
   return findings;
+}
+
+function sourceTextLines(value: string) {
+  return value.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
+}
+
+function normalizedSourceLine(value: string) {
+  return value.normalize("NFKC").toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function tokenShingles(tokens: string[], size: number) {

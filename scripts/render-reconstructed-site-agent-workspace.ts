@@ -68,6 +68,9 @@ if (!retainedBuildInput) throw new Error(`Retained public build input ${retained
 const retainedSourceSnapshots = (await Promise.all(
   retainedBuildInput.sourceSnapshotIds.map((snapshotId) => repository.getSourceSnapshot(snapshotId))
 )).filter((snapshot): snapshot is NonNullable<typeof snapshot> => Boolean(snapshot));
+const retainedSourcePages = (await Promise.all(
+  retainedBuildInput.sourceSnapshotIds.map((snapshotId) => repository.listSourceSnapshotPages(snapshotId))
+)).flat();
 
 const adoptedAssets: AssetRevisionRef[] = [];
 for (const event of events.filter((item) => (
@@ -177,6 +180,7 @@ try {
     authoredArtifact,
     buildInput: effectiveBuildInput,
     sourceSnapshots: retainedSourceSnapshots,
+    sourcePages: retainedSourcePages,
     runtimeSeriesId: effectiveBuildInput.capabilityConfiguration.trustedRuntimeSeries
   });
   for (let inspection = 1; inspection <= inspectionCount; inspection += 1) {

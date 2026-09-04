@@ -614,7 +614,12 @@ export function createArchitectureEvidenceFiles(
   ) {
     const sourceIndex = createApprovedSourceIndex(pages, plan, {
       includePreviews: input.retainedContentMode !== "indexed-pull",
-      authorDigest: input.retainedContentMode === "indexed-pull-preview-author-digest"
+      authorDigest: input.retainedContentMode === "indexed-pull-preview-author-digest",
+      // The readable index is the canonical workspace author's evidence map.
+      // Give it enough substantive source context to support a real page
+      // argument while keeping the shorter historical/digest variants bounded.
+      previewCharacters: input.retainedContentMode === "indexed-pull-preview-readable" ? 1_400 : undefined,
+      previewLines: input.retainedContentMode === "indexed-pull-preview-readable" ? 8 : undefined
     });
     return [
       { path: "src/approved-architecture.ts", content: architectureModule },
@@ -641,7 +646,12 @@ export function createArchitectureEvidenceFiles(
 function createApprovedSourceIndex(
   pages: SourceSnapshotPage[],
   plan: SiteArchitecturePlan,
-  input: { includePreviews?: boolean; authorDigest?: boolean } = {}
+  input: {
+    includePreviews?: boolean;
+    authorDigest?: boolean;
+    previewCharacters?: number;
+    previewLines?: number;
+  } = {}
 ) {
   const bestByPath = new Map<string, SourceSnapshotPage>();
   for (const page of pages) {
@@ -687,7 +697,9 @@ function createApprovedSourceIndex(
           .flatMap(({ sourcePath, page }) => {
             const preview = retainedEvidencePreview(page, lineFrequency, {
               authorDigest: input.authorDigest,
-              includeTestimonials: sourcePageCarriesCustomerProof(sourcePath, page)
+              includeTestimonials: sourcePageCarriesCustomerProof(sourcePath, page),
+              maxCharacters: input.previewCharacters,
+              maxLines: input.previewLines
             });
             return preview ? [{ sourcePath, sourcePageId: page.id, preview }] : [];
           })
@@ -730,7 +742,12 @@ function sourcePageCarriesCustomerProof(sourcePath: string, page: SourceSnapshot
 function retainedEvidencePreview(
   page: SourceSnapshotPage,
   lineFrequency: Map<string, number>,
-  input: { authorDigest?: boolean; includeTestimonials?: boolean } = {}
+  input: {
+    authorDigest?: boolean;
+    includeTestimonials?: boolean;
+    maxCharacters?: number;
+    maxLines?: number;
+  } = {}
 ) {
   const candidates: Array<{ index: number; line: string; score: number }> = [];
   for (const [lineIndex, rawLine] of lines(page.extractedText).entries()) {
@@ -756,16 +773,28 @@ function retainedEvidencePreview(
     ? candidates.sort((left, right) => right.score - left.score || left.index - right.index)
     : candidates;
   const selected: Array<{ index: number; line: string }> = [];
+  const maxCharacters = input.maxCharacters ?? 700;
+  const maxLines = input.maxLines ?? 4;
   let totalCharacters = 0;
   for (const candidate of ranked) {
-    const remaining = 700 - totalCharacters;
+    const remaining = maxCharacters - totalCharacters;
     if (remaining < 45) break;
-    const line = candidate.line.slice(0, remaining);
+    const line = truncatePreviewLine(candidate.line, remaining);
+    if (line.length < 45) continue;
     selected.push({ index: candidate.index, line });
     totalCharacters += line.length + 1;
-    if (selected.length >= 4 || totalCharacters >= 700) break;
+    if (selected.length >= maxLines || totalCharacters >= maxCharacters) break;
   }
   return selected.sort((left, right) => left.index - right.index).map((candidate) => candidate.line).join(" ").trim();
+}
+
+function truncatePreviewLine(value: string, maxCharacters: number) {
+  if (value.length <= maxCharacters) return value;
+  const bounded = value.slice(0, maxCharacters + 1);
+  const lastWhitespace = bounded.lastIndexOf(" ");
+  return (lastWhitespace >= Math.floor(maxCharacters * 0.8)
+    ? bounded.slice(0, lastWhitespace)
+    : bounded.slice(0, maxCharacters)).trimEnd();
 }
 
 function isLowSignalAuthorDigestLine(line: string, input: { includeTestimonials?: boolean } = {}) {
@@ -816,7 +845,7 @@ export function initialArchitectureAuthoringInstruction(mode: SiteArchitectureMo
   if (mode === "commercial-core-message-target") {
     return `This initial build has completed a model-authored, mechanically validated information architecture. The release service already owns and applies its exhaustive redirect and retirement ledger. Use src/approved-source-index.ts as the complete author-facing route manifest: every routePath is an approved live route. Treat each route's purpose as its compact message and conversion target, not as customer-facing copy. Do not load src/approved-architecture.ts merely to repeat migration data; inspect it only if the source index or release feedback exposes a concrete route ambiguity.
 
-The retained mirror remains searchable through source-site/ and the source tools. It is research, not render-time data: pull only the evidence needed to author final customer-ready shared route data, and never map raw extracted paragraphs into pages, cards, or metadata. Owner facts outrank retained observations. You may use exact first-party qualitative positioning that the retained source clearly and consistently attributes to the business; specific safety, toxicity, chemical-use, certification, guarantee, price, availability, or outcome claims still require exact publicFacts support.
+The retained mirror remains searchable through source-site/ and the source tools. It is research, not render-time data: pull only the evidence needed to author final customer-ready shared route data, and never map raw extracted paragraphs into pages, cards, or metadata. Each evidencePreview is a routing sample, not a content budget or a substitute for mapped raw source. If an approved editorial, service, project, proof, or other source-rich route remains distinct, its customer value must not be reduced to the preview; use its mapped contentFiles whenever the preview does not carry the complete page argument. Owner facts outrank retained observations. You may use exact first-party qualitative positioning that the retained source clearly and consistently attributes to the business; specific safety, toxicity, chemical-use, certification, guarantee, price, availability, or outcome claims still require exact publicFacts support.
 
 Build a coherent commercial site rather than a legacy archive skin. Give the home, service hub, service details, service-area hub or locations, about, contact, FAQ, and editorial routes compositions suited to their distinct customer jobs. Every live route must be reachable from the concise navigation or an explicit hub. Call finish without copying the migration ledger into finish arguments.`;
   }

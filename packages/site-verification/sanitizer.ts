@@ -397,8 +397,8 @@ function sanitizeImage(
   element.attribs.alt = element.attribs.alt?.trim() || asset.alt;
   element.attribs.loading ??= "lazy";
   element.attribs.decoding ??= "async";
-  if (asset.width) element.attribs.width ??= String(asset.width);
-  if (asset.height) element.attribs.height ??= String(asset.height);
+  // Geometry belongs to authored source. Intrinsic pixel dimensions are not
+  // layout defaults: adding a height attribute overrides CSS aspect-ratio.
   if (element.attribs.srcset !== undefined) sanitizeSrcset(element, assets, findings, route);
   if (element.attribs.sizes !== undefined && !validSizes(element.attribs.sizes)) {
     findings.push(finding("asset.sizes_invalid", "asset", "Responsive image sizes is malformed or unsupported.", route));

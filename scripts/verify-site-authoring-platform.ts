@@ -1197,6 +1197,17 @@ const prioritizedAsset = sanitizeAgentHtml({
 assert.equal(prioritizedAsset.findings.length, 0, "Explicit image loading hints were rejected by the public artifact sanitizer.");
 assert(prioritizedAsset.html.includes('loading="eager"') && prioritizedAsset.html.includes('fetchpriority="high"'), "The sanitizer dropped explicitly allowlisted image loading hints.");
 
+const authoredImageGeometry = sanitizeAgentHtml({
+  route: "/",
+  bodyHtml: `<img src="asset://${asset.assetId}" alt="Workshop"><img src="asset://${asset.assetId}" alt="Workshop" width="240" height="120">`,
+  declaredRoutes: new Set(["/"]),
+  assets: [{ ...asset, width: 1800, height: 900 }],
+  allowedFormIds: new Set(), allowedExternalHrefs: new Set(), allowedPhoneNumbers: new Set(), allowedEmailAddresses: new Set()
+});
+assert.equal(authoredImageGeometry.findings.length, 0);
+assert(!authoredImageGeometry.html.includes('width="1800"') && !authoredImageGeometry.html.includes('height="900"'), "Asset metadata silently imposed image layout.");
+assert(authoredImageGeometry.html.includes('width="240" height="120"'), "Explicit authored dimensions were not preserved.");
+
 const nativeResponsiveMarkup = sanitizeAgentHtml({
   route: "/",
   bodyHtml: `<header><button type="button" popovertarget="site-navigation" popovertargetaction="toggle">Menu</button><nav id="site-navigation" popover="auto"><a href="/">Home</a></nav></header><main><picture><source media="(max-width: 40rem)" sizes="100vw" srcset="asset://${asset.assetId} 480w, asset://${asset.assetId} 960w"><img src="asset://${asset.assetId}" srcset="asset://${asset.assetId} 1x, asset://${asset.assetId} 2x" sizes="(max-width: 40rem) 100vw, 50vw" alt="Workshop"></picture><dialog open>Native semantics</dialog></main>`,

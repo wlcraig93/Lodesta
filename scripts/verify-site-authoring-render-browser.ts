@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import sharp from "sharp";
+import { chromium } from "playwright";
+import { sanitizeAgentHtml } from "../packages/site-verification/sanitizer";
 import { sha256 } from "../packages/business-data";
 import type { ArtifactBlobStore, BlobListInput, ImmutableBlob } from "../packages/site-artifacts/blob-store";
 import {
@@ -33,6 +35,39 @@ class MemoryBlobStore implements ArtifactBlobStore {
 }
 
 const buildInput = buildSyntheticSiteInput();
+
+// Asset metadata must not change authored layout during finalization. In
+// particular, an injected height attribute defeats CSS width + aspect-ratio.
+const imageLayoutBrowser = await chromium.launch({ headless: true });
+try {
+  const page = await imageLayoutBrowser.newPage();
+  const imageBytes = await sharp({ create: { width: 1800, height: 900, channels: 3, background: "#315a46" } }).png().toBuffer();
+  await page.route("https://image-layout.example/**", (route) => route.fulfill({ body: imageBytes, contentType: "image/png" }));
+  const asset = { assetId: "layout_photo", revisionId: "layout_revision", width: 1800, height: 900, kind: "photo" as const, contentHash: sha256(imageBytes), storageKey: "test/layout.png", publicUrl: "https://image-layout.example/photo.png", mimeType: "image/png" as const, alt: "Crew", origin: "owner_upload" as const, sourceFactIds: [], activeForFutureBuilds: true };
+  const source = `<img class="responsive" src="asset://layout_photo" alt="Crew"><img class="natural" src="asset://layout_photo" alt="Crew"><img class="explicit" src="asset://layout_photo" alt="Crew" width="240" height="120">`;
+  const sanitized = sanitizeAgentHtml({ route: "/", bodyHtml: source, assets: [asset], declaredRoutes: new Set(["/"]), allowedFormIds: new Set(), allowedExternalHrefs: new Set(), allowedPhoneNumbers: new Set(), allowedEmailAddresses: new Set() });
+  assert.equal(sanitized.findings.length, 0);
+  const styles = `<style>body{margin:16px}.responsive{display:block;width:100%;aspect-ratio:1.15;object-fit:cover}.natural{display:block;width:100%;height:auto}.explicit{display:block}@media(max-width:600px){.responsive{aspect-ratio:1.25}}</style>`;
+  for (const width of [375, 768, 1280]) {
+    // Keep all three fixtures visible so native lazy loading cannot defer a
+    // decode indefinitely. Width, not viewport height, controls this fixture.
+    await page.setViewportSize({ width, height: 3000 });
+    const dimensions = async (html: string) => {
+      await page.setContent(styles + html);
+      await page.locator("img").evaluateAll(async (images) => { await Promise.all(images.map((image) => (image as HTMLImageElement).decode())); });
+      return page.locator("img").evaluateAll((images) => images.map((image) => ({ width: image.getBoundingClientRect().width, height: image.getBoundingClientRect().height })));
+    };
+    const authored = await dimensions(source.replaceAll("asset://layout_photo", "https://image-layout.example/photo.png"));
+    const finalized = await dimensions(sanitized.html.replaceAll("/_lodesta/assets/layout_revision", "https://image-layout.example/photo.png"));
+    assert.deepEqual(finalized, authored, `Finalization changed authored image geometry at ${width}px.`);
+    assert.equal(finalized[2].height, 120, "Explicit owner-authored image dimensions were not preserved.");
+    assert(Math.abs(finalized[0].height - (width - 32) / (width <= 600 ? 1.25 : 1.15)) < 0.1);
+  }
+} finally {
+  await imageLayoutBrowser.close();
+}
+console.log(JSON.stringify({ ok: true, imageGeometry: "authored-source-preserved", viewports: [375, 768, 1280] }));
+
 const name = buildInput.publicFacts.find((fact) => fact.kind === "business_name")!;
 const phone = buildInput.publicFacts.find((fact) => fact.kind === "phone")!;
 const service = buildInput.publicFacts.find((fact) => fact.kind === "offering")!;

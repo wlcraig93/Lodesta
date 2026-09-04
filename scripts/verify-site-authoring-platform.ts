@@ -11,6 +11,7 @@ import {
   buildInformationArchitectureAdvisory,
   routeFamilyContactSheetRouteGroups,
   finalizePreparedArtifact,
+  FactBindingValidator,
   normalizeAgentAuthoredArtifact,
   prepareSiteArtifact,
   representativeRoutePaths,
@@ -776,6 +777,50 @@ assert(
   errors(unsupportedBestCompanyCopy).some((finding) => finding.id === "fact.sensitive_unsupported"),
   "A genuine unsupported best-company claim escaped the fact gate."
 );
+
+const quotationText = "A storm damaged the tree beside our house. The crew removed it the same day and carefully cleared the driveway before leaving.";
+const quotationPage = sourcePage("source_page_quotation", "/services/storm-cleanup", "Storm cleanup", 32,
+  `Storm cleanup\n${quotationText}\nEH\nContact our team`);
+const quotationSnapshot = sourceSnapshotSchema.parse({
+  schemaVersion: 1, id: quotationPage.sourceSnapshotId, businessId: input.businessId,
+  sourceType: "website", sourceUrl: "https://northstar.example/",
+  contentHash: `sha256:${"e".repeat(64)}`, capturedAt: "2026-07-20T00:00:00.000Z", payload: {}
+});
+const quotationInput = sitePublicBuildInputSchema.parse({ ...input, sourceSnapshotIds: [...input.sourceSnapshotIds, quotationSnapshot.id] });
+const quotationHtml = `<blockquote><p>“${quotationText}”</p><cite>E.H.</cite></blockquote>`;
+const checkQuotation = (html: string, options: {
+  pages?: typeof quotationPage[]; snapshots?: typeof quotationSnapshot[]; buildInput?: SitePublicBuildInput; description?: string
+} = {}) => new FactBindingValidator().validate({
+  routes: [{ path: "/reviews", html: `<main>${html}</main>`, description: options.description }],
+  buildInput: options.buildInput ?? quotationInput,
+  sourceSnapshots: options.snapshots ?? [quotationSnapshot],
+  sourcePages: options.pages ?? [quotationPage]
+});
+assert.equal(checkQuotation(quotationHtml).status, "pass", "An exact retained attributed customer experience was classified as a new company promise.");
+for (const [label, html] of [
+  ["invented attribution", quotationHtml.replace("E.H.", "Jane Doe")],
+  ["missing attribution", quotationHtml.replace("<cite>E.H.</cite>", "")],
+  ["altered quotation", quotationHtml.replace("removed it the same day", "guaranteed same day removal")],
+  ["unverified excerpt", `<blockquote><p>The crew removed it the same day</p><cite>EH</cite></blockquote>`],
+  ["unquoted company promise", `${quotationHtml}<p>We provide same day removal.</p>`],
+  ["ordinary company copy", `<p>${quotationText}</p><cite>EH</cite>`]
+]) {
+  assert.equal(checkQuotation(html!).status, "fail", `Quotation evidence authorized ${label}.`);
+}
+assert.equal(checkQuotation(quotationHtml, { description: "Same day removal" }).status, "fail", "A customer quote authorized an unqualified metadata promise.");
+assert.equal(checkQuotation(quotationHtml, { buildInput: input }).status, "fail", "An unretained source authorized a quote.");
+assert.equal(checkQuotation(quotationHtml, { snapshots: [{ ...quotationSnapshot, sourceType: "web_research" }] }).status, "fail", "Third-party research authorized testimonial prose.");
+assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, finalUrl: "https://third-party.example/reviews" }] }).status, "fail", "An off-site redirect authorized a first-party quote.");
+assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, outcome: "excluded" }] }).status, "fail", "An excluded page authorized a quote.");
+assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, extractedText: `They could not promise this. ${quotationText}\nEH` }] }).status, "fail", "A truncated source qualifier authorized a quotation.");
+assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, extractedText: `${quotationText}\nJane Doe\nAnother testimonial\nEH` }] }).status, "fail", "A disconnected attribution authorized a quotation.");
+assert.equal(checkQuotation(`<blockquote><p>They quoted 500% for same day removal.</p><cite>EH</cite></blockquote>`, {
+  pages: [{ ...quotationPage, extractedText: "They quoted $500 for same day removal.\nEH" }]
+}).status, "fail", "Token-only matching lost semantic punctuation in a quotation.");
+const numberQuotation = "I reached their 24/7 phone line during a storm and described the fallen tree near my driveway.";
+assert.equal(checkQuotation(`<blockquote><p>${numberQuotation}</p><cite>EH</cite></blockquote>`, {
+  pages: [{ ...quotationPage, extractedText: `${numberQuotation}\nEH` }]
+}).status, "pass", "An exact source quotation was still blocked by the duplicate numeric-marker scanner.");
 
 const emergencyDescriptionFact = {
   id: "fact_emergency_description",

@@ -37,6 +37,7 @@ type VisibleRoute = {
   title: string;
   description: string;
   bodyText: string;
+  sourceQuotationSpans: Array<{ start: number; end: number }>;
   bindings: FactBinding[];
   hasBusinessNameMarker: boolean;
   businessNameMarkerTexts: string[];
@@ -55,7 +56,8 @@ export class FactBindingValidator {
       return observation ? [observation.rating] : [];
     });
     const facts = new Map(input.buildInput.publicFacts.map((fact) => [fact.id, fact]));
-    const routes = input.routes.map((route) => visibleRoute(route, input.buildInput, facts, findings));
+    const quotationSources = firstPartyQuotationSources(input.buildInput, input.sourceSnapshots ?? [], input.sourcePages ?? []);
+    const routes = input.routes.map((route) => visibleRoute(route, input.buildInput, facts, findings, quotationSources));
     const bindings = routes.flatMap((route) => route.bindings);
     const legalSourceTextByPath = richestLegalSourceTextByPath(input.sourcePages ?? []);
 
@@ -103,11 +105,13 @@ function visibleRoute(
   route: FactBindingValidationRoute,
   buildInput: SitePublicBuildInput,
   facts: Map<string, PublicFact>,
-  findings: ArtifactGateFinding[]
+  findings: ArtifactGateFinding[],
+  quotationSources: string[][]
 ): VisibleRoute {
   const document = parseDocument(route.html, { decodeEntities: true });
   const state = {
     text: "",
+    sourceQuotationSpans: [] as Array<{ start: number; end: number }>,
     bindings: [] as FactBinding[],
     bindingIndex: 0,
     hasBusinessNameMarker: false,
@@ -134,6 +138,9 @@ function visibleRoute(
       const start = state.text.length;
       visit(node.children);
       const end = state.text.length;
+      if (node.name === "blockquote" && sourceBackedQuotation(node, quotationSources)) {
+        state.sourceQuotationSpans.push({ start, end });
+      }
       if (isBusinessName) state.businessNameMarkerTexts.push(state.text.slice(start, end).trim());
       const factId = node.attribs["data-lodesta-fact-id"];
       if (!factId) continue;
@@ -198,6 +205,7 @@ function visibleRoute(
     title: route.title ?? "",
     description: route.description ?? "",
     bodyText: state.text,
+    sourceQuotationSpans: state.sourceQuotationSpans,
     bindings: state.bindings,
     hasBusinessNameMarker: state.hasBusinessNameMarker,
     businessNameMarkerTexts: state.businessNameMarkerTexts
@@ -222,6 +230,7 @@ function bodyMarkerFindings(
   return factualMarkers(route.bodyText).flatMap((marker) => {
     const supported = naturallySupportedFactualMarker(marker.text, buildInput, provisionalGoogleRatings)
       || legalSourceContextSupports(route.bodyText, marker, legalSourceText)
+      || route.sourceQuotationSpans.some((span) => marker.start >= span.start && marker.end <= span.end)
       || route.bindings.some((binding) => binding.span
       && marker.start >= binding.span.start
       && marker.end <= binding.span.end
@@ -238,6 +247,7 @@ function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildI
   return scanSensitiveClaimText(route.bodyText).flatMap((match) => {
     const supported = naturallySupportedSensitiveClaim(match, buildInput)
       || legalSourceContextSupports(route.bodyText, match, legalSourceText)
+      || route.sourceQuotationSpans.some((span) => match.start >= span.start && match.end <= span.end)
       || route.bindings.some((binding) => binding.span
       && match.start >= binding.span.start
       && match.end <= binding.span.end
@@ -248,6 +258,47 @@ function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildI
       route.path
     )];
   });
+}
+
+/** A customer's retained quotation is evidence of what that customer said,
+ * not a new promise by the business. Only a complete first-party source block
+ * immediately followed by the same attribution qualifies. A blockquote tag,
+ * a matching phrase, or a quotation elsewhere never authorizes new claims.
+ */
+function firstPartyQuotationSources(buildInput: SitePublicBuildInput, snapshots: SourceSnapshot[], pages: SourceSnapshotPage[]) {
+  const hosts = new Map(snapshots.flatMap((snapshot) => {
+    if (!buildInput.sourceSnapshotIds.includes(snapshot.id) || snapshot.sourceType !== "website" || !snapshot.sourceUrl) return [];
+    return [[snapshot.id, new URL(snapshot.sourceUrl).hostname.replace(/^www\./, "")] as const];
+  }));
+  return pages.filter((page) => page.outcome === "fetched"
+    && hosts.get(page.sourceSnapshotId) === new URL(page.finalUrl ?? page.requestedUrl).hostname.replace(/^www\./, ""))
+    .map((page) => page.extractedText.split(/\n+/).map((line) => line.trim()).filter(Boolean));
+}
+
+function sourceBackedQuotation(element: Element, sources: string[][]) {
+  const citations = DomUtils.findAll((node) => node.name === "cite", element.children);
+  if (citations.length !== 1) return false;
+  const citation = citations[0]!;
+  const attribution = DomUtils.textContent(citation).trim();
+  if (!attribution) return false;
+  const quoteText = (nodes: AnyNode[]): string => nodes.map((node): string => {
+    if (node === citation) return "";
+    if (node.type === "text") return node.data;
+    return node.type === "tag" ? quoteText(node.children) : "";
+  }).join(" ");
+  const quotation = quoteText(element.children).trim();
+  if (!quotation) return false;
+  // Preserve complete wording and semantic punctuation (currency, percentages,
+  // qualifiers). Only quote typography, whitespace, and initial periods vary.
+  return sources.some((lines) => lines.some((line, index) => normalizedQuotation(line) === normalizedQuotation(quotation)
+    && Boolean(lines[index + 1])
+    && normalizedQuotation(lines[index + 1]!.replaceAll(".", "")) === normalizedQuotation(attribution.replaceAll(".", ""))));
+}
+
+function normalizedQuotation(value: string) {
+  return value.normalize("NFKC").replace(/\s+/g, " ").trim()
+    .replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[–—]/g, "-")
+    .replace(/^"(.*)"$/, "$1");
 }
 
 function richestLegalSourceTextByPath(sourcePages: SourceSnapshotPage[]) {

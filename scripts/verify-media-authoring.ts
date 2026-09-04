@@ -374,7 +374,7 @@ assert.deepEqual(trailingSlashVisualFinish.completion?.changedRoutes, ["/", "/se
 
 let releasePlanBuilds = 0;
 let releasePlanInspections = 0;
-let emittedRoutes = ["/"];
+let emittedRoutes = ["/", "/old-services"];
 const releasePlanRuntime = new WorkspaceManagerRuntime<string>({
   kind: "initial_build",
   publicBuildInputId: "input_release_plan",
@@ -416,6 +416,13 @@ const mismatchedRelease = await releasePlanRuntime.execute({
 });
 assert.equal(mismatchedRelease.diagnosticOutput.error, "release_plan_route_mismatch");
 assert.deepEqual(mismatchedRelease.diagnosticOutput.missingRoutes, ["/services"]);
+assert.deepEqual(mismatchedRelease.diagnosticOutput.extraRoutes, ["/old-services"]);
+assert.deepEqual(mismatchedRelease.diagnosticOutput.extraRouteRepairs, [{
+  sourcePath: "/old-services",
+  action: "remove_route_and_repoint_all_internal_links",
+  destinationPath: "/services"
+}]);
+assert.match(String(mismatchedRelease.diagnosticOutput.guidance), /shared navigation, footers, hubs, breadcrumbs, sitemaps, related-content data, and route components/i);
 assert.equal(releasePlanInspections, 0, "A route mismatch reached expensive browser verification.");
 emittedRoutes = ["/", "/services"];
 const plannedRelease = await releasePlanRuntime.execute({

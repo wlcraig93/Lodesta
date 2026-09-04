@@ -668,12 +668,16 @@ function createApprovedSourceIndex(
       for (const line of uniqueLines) lineFrequency.set(line, (lineFrequency.get(line) ?? 0) + 1);
     }
   }
-  return plan.routes.map((route) => {
+  const routes = plan.routes.map((route) => {
     const sources = route.sourcePaths.flatMap((sourcePath) => {
       const page = bestByPath.get(canonicalPathname(sourcePath));
       if (!page) return [];
       return [{
         sourcePath,
+        sourceRouteRole: canonicalPathname(sourcePath) === route.path
+          ? "approved_live_route" as const
+          : "consolidated_evidence_only" as const,
+        approvedLinkPath: route.path,
         title: page.title ?? "",
         headings: page.headings.slice(0, 24),
         wordCount: page.wordCount,
@@ -701,7 +705,15 @@ function createApprovedSourceIndex(
               maxCharacters: input.previewCharacters,
               maxLines: input.previewLines
             });
-            return preview ? [{ sourcePath, sourcePageId: page.id, preview }] : [];
+            return preview ? [{
+              sourcePath,
+              sourceRouteRole: canonicalPathname(sourcePath) === route.path
+                ? "approved_live_route" as const
+                : "consolidated_evidence_only" as const,
+              approvedLinkPath: route.path,
+              sourcePageId: page.id,
+              preview
+            }] : [];
           })
           .slice(0, 2)
       : undefined;
@@ -711,6 +723,8 @@ function createApprovedSourceIndex(
           .filter((source) => previewSourcePaths.has(source.sourcePath))
           .map((source) => ({
             sourcePath: source.sourcePath,
+            sourceRouteRole: source.sourceRouteRole,
+            approvedLinkPath: source.approvedLinkPath,
             title: source.title,
             sourcePageId: source.sourcePageId,
             contentFiles: source.contentFiles
@@ -718,11 +732,20 @@ function createApprovedSourceIndex(
       : sources;
     return {
       routePath: route.path,
+      label: route.label,
+      pageType: route.pageType,
+      parentRoutePath: route.parentPath,
+      navigation: route.navigation,
       purpose: route.purpose,
       sources: indexedSources,
       ...(evidencePreviews ? { evidencePreviews } : {})
     };
   });
+  return {
+    liveRoutePaths: plan.routes.map((route) => route.path),
+    primaryNavigation: plan.primaryNavigation,
+    routes
+  };
 }
 
 function sourcePageCarriesCustomerProof(sourcePath: string, page: SourceSnapshotPage) {
@@ -893,11 +916,11 @@ export function mergeArchitectureEvidenceFiles(
 
 export function initialArchitectureAuthoringInstruction(mode: SiteArchitectureMode = "canonical") {
   if (mode === "commercial-core-message-target") {
-    return `This initial build has completed a model-authored, mechanically validated information architecture. The release service already owns and applies its exhaustive redirect and retirement ledger. Use src/approved-source-index.ts as the complete author-facing route manifest: every routePath is an approved live route. Treat each route's purpose as its compact message and conversion target, not as customer-facing copy. Do not load src/approved-architecture.ts merely to repeat migration data; inspect it only if the source index or release feedback exposes a concrete route ambiguity.
+    return `This initial build has completed a model-authored, mechanically validated information architecture. The release service already owns and applies its exhaustive redirect and retirement ledger. Use src/approved-source-index.ts as the complete author-facing route manifest: approvedSourceIndex.liveRoutePaths is the only live internal-route set, approvedSourceIndex.primaryNavigation is the approved primary navigation, and approvedSourceIndex.routes describes those live routes. Any nested sourcePath in sources or evidencePreviews is historical evidence, never a route or link target; use its approvedLinkPath whenever customer-facing source evidence needs an internal destination. Treat each route's purpose as its compact message and conversion target, not as customer-facing copy. Do not load src/approved-architecture.ts merely to repeat migration data; inspect it only if the source index or release feedback exposes a concrete route ambiguity.
 
 The retained mirror remains searchable through source-site/ and the source tools. It is research, not render-time data: pull only the evidence needed to author final customer-ready shared route data, and never map raw extracted paragraphs into pages, cards, or metadata. Each evidencePreview is a routing sample, not a content budget or a substitute for mapped raw source. If an approved editorial, service, project, proof, or other source-rich route remains distinct, its customer value must not be reduced to the preview; use its mapped contentFiles whenever the preview does not carry the complete page argument. A retained article or guide with several supported headings and hundreds of source words needs an edited but substantive explanatory arc; a title, introduction, and three brief snippets is only a teaser, not a finished route. Shared editorial shells are appropriate, but each body must preserve the route-specific distinctions that justified retaining it. Owner facts outrank retained observations. You may use exact first-party qualitative positioning that the retained source clearly and consistently attributes to the business; specific safety, toxicity, chemical-use, certification, guarantee, price, availability, or outcome claims still require exact publicFacts support.
 
-Build a coherent commercial site rather than a legacy archive skin. Give the home, service hub, service details, service-area hub or locations, about, contact, FAQ, and editorial routes compositions suited to their distinct customer jobs. Every live route must be reachable from the concise navigation or an explicit hub. Call finish without copying the migration ledger into finish arguments.`;
+Build a coherent commercial site rather than a legacy archive skin. Give the home, service hub, service details, service-area hub or locations, about, contact, FAQ, and editorial routes compositions suited to their distinct customer jobs. For a source-rich multi-route site, establish readable focused route, content, and shared-shell modules on the first implementation; do not accumulate the whole route system or long legal and editorial bodies inside one giant site.tsx component. Every live route must be reachable from the concise navigation or an explicit hub. Call finish without copying the migration ledger into finish arguments.`;
   }
   if (mode === "commercial-core-pull") {
     return `This initial build has completed a model-authored, mechanically validated information architecture. Implement every explicit route in src/approved-architecture.ts and preserve its exhaustive redirect and retirement ledger.

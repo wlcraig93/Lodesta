@@ -682,7 +682,12 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (this.options.releasePlan) {
       if (!this.options.listBuiltRoutePaths) throw new Error("release_plan_route_reader_required");
       const builtRoutePaths = await this.options.listBuiltRoutePaths(this.sandboxRevision);
-      const plannedRouteError = invalidPlannedRoutes(this.options.releasePlan.routePaths, builtRoutePaths);
+      const plannedRouteError = invalidPlannedRoutes(
+        this.options.releasePlan.routePaths,
+        builtRoutePaths,
+        this.options.releasePlan.redirects,
+        this.options.releasePlan.retiredSourcePaths
+      );
       if (plannedRouteError) return plannedRouteError;
       try {
         validateCandidateSourceDispositions({
@@ -1199,7 +1204,12 @@ function invalidFinishRoutes(
     : undefined;
 }
 
-function invalidPlannedRoutes(expectedRoutes: string[], actualRoutes: string[]): ManagerToolExecution | undefined {
+function invalidPlannedRoutes(
+  expectedRoutes: string[],
+  actualRoutes: string[],
+  redirects: ManagerCompletion["redirects"] = [],
+  retiredSourcePaths: ManagerCompletion["retiredSourcePaths"] = []
+): ManagerToolExecution | undefined {
   const expectedCounts = countPaths(expectedRoutes);
   const actualCounts = countPaths(actualRoutes);
   const duplicateExpectedRoutes = [...expectedCounts].filter(([, count]) => count > 1).map(([path]) => path);
@@ -1209,6 +1219,17 @@ function invalidPlannedRoutes(expectedRoutes: string[], actualRoutes: string[]):
   const missingRoutes = [...expected].filter((path) => !actual.has(path)).sort();
   const extraRoutes = [...actual].filter((path) => !expected.has(path)).sort();
   if (!missingRoutes.length && !extraRoutes.length && actualRoutes.length === expectedRoutes.length) return undefined;
+  const redirectedDestinations = new Map(redirects.map((redirect) => [
+    normalizeRoutePath(redirect.sourcePath),
+    normalizeRoutePath(redirect.destinationPath)
+  ]));
+  const retired = new Set(retiredSourcePaths.map((entry) => normalizeRoutePath(entry.sourcePath)));
+  const extraRouteRepairs = extraRoutes.slice(0, 50).map((sourcePath) => {
+    const destinationPath = redirectedDestinations.get(sourcePath);
+    return destinationPath
+      ? { sourcePath, action: "remove_route_and_repoint_all_internal_links", destinationPath }
+      : { sourcePath, action: retired.has(sourcePath) ? "remove_route_and_all_internal_links" : "remove_unapproved_route_and_all_internal_links" };
+  });
   return result({
     ok: false,
     error: "release_plan_route_mismatch",
@@ -1218,7 +1239,8 @@ function invalidPlannedRoutes(expectedRoutes: string[], actualRoutes: string[]):
     extraRouteCount: extraRoutes.length,
     missingRoutes: missingRoutes.slice(0, 50),
     extraRoutes: extraRoutes.slice(0, 50),
-    guidance: "Make the emitted route set exactly match the approved architecture before finishing. The release plan is authoritative for this run."
+    extraRouteRepairs,
+    guidance: "Make the emitted route set exactly match the approved architecture before finishing. Remove every extra route declaration and every internal link to it across shared navigation, footers, hubs, breadcrumbs, sitemaps, related-content data, and route components; when extraRouteRepairs supplies destinationPath, repoint those links there. Removing only the emitted route array entry leaves broken links and is not a complete repair. The release plan is authoritative for this run."
   });
 }
 

@@ -306,8 +306,14 @@ assert.doesNotMatch(indexedPullPreviewEvidence[1].content, /every 2 months/i);
 assert(indexedPullPreviewEvidence[1].content.length > indexedPullEvidence[1].content.length);
 const readableIndexedPullPreviewEvidence = createArchitectureEvidenceFiles(pages, plan, { retainedContentMode: "indexed-pull-preview-readable" });
 assert.deepEqual(readableIndexedPullPreviewEvidence.map((file) => file.path), ["src/approved-architecture.ts", "src/approved-source-index.ts"]);
-assert.match(readableIndexedPullPreviewEvidence[1].content, /\n  \{\n    "routePath": "\/"/);
+assert.match(readableIndexedPullPreviewEvidence[1].content, /"liveRoutePaths": \[/);
+assert.match(readableIndexedPullPreviewEvidence[1].content, /"primaryNavigation": \[/);
+assert.match(readableIndexedPullPreviewEvidence[1].content, /"routes": \[\n    \{\n      "routePath": "\/"/);
+assert.match(readableIndexedPullPreviewEvidence[1].content, /"sourceRouteRole": "approved_live_route"/);
+assert.match(readableIndexedPullPreviewEvidence[1].content, /"sourceRouteRole": "consolidated_evidence_only"/);
+assert.match(readableIndexedPullPreviewEvidence[1].content, /"approvedLinkPath": "\/ant-control"/);
 assert.match(readableIndexedPullPreviewEvidence[1].content, /"evidencePreviews": \[/);
+assert.match(readableIndexedPullPreviewEvidence[1].content, /"evidencePreviews": \[[\s\S]*"approvedLinkPath": "\/ant-control"/);
 assert(readableIndexedPullPreviewEvidence[1].content.length > indexedPullPreviewEvidence[1].content.length);
 const deepEvidenceText = [
   "Begin with the visible condition and explain why it matters to the property owner before discussing the service.",
@@ -389,6 +395,9 @@ assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-ta
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /specific safety, toxicity, chemical-use, certification, guarantee, price, availability, or outcome claims still require exact publicFacts support/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /release service already owns and applies its exhaustive redirect and retirement ledger/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /approved-source-index\.ts as the complete author-facing route manifest/i);
+assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /liveRoutePaths is the only live internal-route set/i);
+assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /nested sourcePath in sources or evidencePreviews is historical evidence, never a route or link target/i);
+assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /readable focused route, content, and shared-shell modules on the first implementation/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /Do not load src\/approved-architecture\.ts merely to repeat migration data/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /evidencePreview is a routing sample, not a content budget/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /use its mapped contentFiles whenever the preview does not carry the complete page argument/i);

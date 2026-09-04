@@ -169,27 +169,21 @@ assert.match(websiteManagerAuthoringSystemPrompt, /no missing routes and no addi
 assert.match(websiteManagerAuthoringSystemPrompt, /evidence for that route, not permission to recreate the source URL/);
 assert.match(websiteManagerAuthoringSystemPrompt, /TSX and CSS readable, structurally formatted, and organized rather than minified/);
 const initialBuildSkill = taskSkillFor("initial_build").knowledge.join("\n");
-assert.match(initialBuildSkill, /implement no additional route/);
-assert.match(initialBuildSkill, /never make a project title deceptively link to an unrelated generic service page/);
-assert.match(initialBuildSkill, /shared eyebrow-title-paragraph intro used on every primary route is still a repeated opening composition/);
-assert.match(initialBuildSkill, /CSS readable and organized rather than minified/);
-assert.match(initialBuildSkill, /legacy typo is not owner-authoritative wording unless it is a proper name or exact quotation/);
-assert.match(initialBuildSkill, /Do not force a bare number, count, year, ordinal, or metric tile where the number adds no useful customer meaning/);
-assert.match(initialBuildSkill, /Do not put a decorative 01 or another ordinal beside a contact summary/);
-assert.match(initialBuildSkill, /safer-feeling/);
-assert.match(initialBuildSkill, /do not append an additional catch-all group that simply repeats the same items/);
-assert.match(initialBuildSkill, /A large circle containing a region name is still a prohibited geography circle/);
-assert.match(initialBuildSkill, /Central Texas never authorizes statewide Texas service/);
-assert.match(initialBuildSkill, /primary heading so it does not consume nearly the entire first viewport/);
-assert.match(initialBuildSkill, /keep the H1 and concise request context before the managed form at phone and tablet widths/);
-assert.match(initialBuildSkill, /an area code, list position, or other bare numeral is not evidence by itself/);
-assert.match(initialBuildSkill, /reserve quotation styling for exact attributable source quotations/);
-assert.match(initialBuildSkill, /do not repeat the same phone number through several adjacent call, text, and direct-contact treatments/);
-assert.match(initialBuildSkill, /distribute distinct proof across the customer journeys that it genuinely supports/);
-assert.match(initialBuildSkill, /not an image quota or permission to create an unapproved gallery route/);
-assert.match(initialBuildSkill, /use LeadField wrapper, label, and control class props/);
-assert.match(initialBuildSkill, /make inputs, selects, and textareas fill their assigned column/);
-assert.match(initialBuildSkill, /Inspect the complete form in its actual route composition/);
+for (const contract of [
+  /do not add, remove, merge, or redirect routes/,
+  /authored TSX and CSS readable, structurally formatted/,
+  /customer purpose determine each page's opening and main composition/,
+  /decorative numbers and diagrams are not proof/,
+  /Preserve geographic qualifiers/,
+  /primary action without an oversized headline crowding it out/,
+  /Keep the page purpose before its form/,
+  /exact excerpts with their exact attribution/,
+  /one clear role rather than repeating adjacent versions of the same phone number/,
+  /distribute useful distinct images across relevant routes without an image quota/,
+  /LeadField label and control class props/,
+  /full-column controls/,
+  /opened phone navigation and the complete form/
+]) assert.match(initialBuildSkill, contract);
 
 const [contracts, workflow, sourcePreparation, repository, architecture, browserGate] = await Promise.all([
   readFile("packages/site-agent/contracts.ts", "utf8"),

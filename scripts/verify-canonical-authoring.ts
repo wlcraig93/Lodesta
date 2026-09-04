@@ -123,14 +123,14 @@ assert.match(skills, /Preserve every existing workspace source file unconditiona
 assert.match(skills, /const knowledgeByKind =/);
 assert.match(skills, /blank initial build.*NavigationDisclosure behavior=/);
 assert.match(skills, /three-bar closed trigger.*unmistakable close state/i);
-assert.match(skills, /never collapse multiple bars onto one coordinate/i);
-assert.match(skills, /Every live route must have exactly one clear H1.*near-duplicated section must be removed/i);
-assert.match(skills, /target-size finding on navigation, contact, call, text, email, form.*unresolved essential-control defect/i);
-assert.match(skills, /approvedSourceIndex\.liveRoutePaths as the one exact set of internal routes/i);
-assert.match(skills, /nested sourcePath in sources or evidencePreviews is historical evidence only/i);
-assert.match(skills, /organize the implementation into readable focused modules from the first write/i);
+assert.match(skills, /closed bars distinct positions/i);
+assert.match(skills, /every live route one clear H1/i);
+assert.match(skills, /essential controls at least 48px/i);
+assert.match(skills, /approvedSourceIndex\.liveRoutePaths as the exact internal-route set/i);
+assert.match(skills, /Historical sourcePath values are evidence, not destinations/i);
+assert.match(skills, /readable focused route, content, legal, and shared-shell modules from the first write/i);
 assert.match(skills, /Never obscure customer-visible text to evade verification/i);
-assert.match(skills, /never feed all routes one global fallback description/i);
+assert.match(skills, /distinct truthful title and description for every route, never one global fallback description/i);
 assert.match(skills, /Never apply blank-build design defaults/);
 assert.match(skills, /websiteAuthoringSkillIdentityFor\(kind/);
 assert.match(workflow, /Older authoring format—full rebuild required/);
@@ -155,8 +155,8 @@ assert(managerRuntime.includes("const inspectionToolTimeoutMs = 8 * 60_000")
   && managerRuntime.includes("browserNavigationCaptureMs")
   && managerRuntime.includes("contactSheetGenerationMs")
   && managerRuntime.includes("persistenceMs"), "Inspection must retain mechanical feedback and surface the eight-minute ceiling as a recoverable tool failure with phase telemetry.");
-assert.match(managerRuntime, /every live route needs exactly one H1, accidental duplicated sections must be removed/i);
-assert.match(managerRuntime, /target-size finding on navigation, contact, call, text, email, form.*unresolved essential-control defect/i);
+assert.match(managerRuntime, /Readability, contrast, form text, essential target size/i);
+assert.match(managerRuntime, /Follow the task skill for design and content judgment/i);
 assert(workflow.includes("preferredRouteLimit: 5")
   && workflow.includes("defaultRoutes: input.releasePlan?.visualReviewRoutePaths")
   && workflow.includes("createArtifactRouteFamilyContactSheets")

@@ -137,86 +137,50 @@ for (const [kind, skill] of Object.entries(taskSkills)) {
 assert.equal(new Set(Object.values(taskSkills).map((skill) => skill.identity)).size, 3);
 assert.deepEqual(taskSkills.initial_build.knowledge.slice(0, 2), taskSkills.edit.knowledge.slice(0, 2));
 assert.deepEqual(taskSkills.initial_build.knowledge.slice(0, 2), taskSkills.rebase.knowledge.slice(0, 2));
-assert.match(taskSkills.initial_build.knowledge.join(" "), /blank initial build.*NavigationDisclosure behavior="modal"/i);
-assert.match(
-  taskSkills.initial_build.knowledge.join(" "),
-  /managed disclosure is the phone navigation.*separate ordinary semantic desktop nav.*exactly one navigation pattern/i,
-  "Initial-build guidance did not distinguish the managed phone disclosure from visible desktop navigation."
-);
-assert.match(
-  taskSkills.initial_build.knowledge.join(" "),
-  /full authoritative name remains visibly readable.*Pair a symbol, emblem, initials-only mark.*BusinessName/i,
-  "Initial-build guidance did not preserve readable business identification beside emblem-only marks."
-);
-assert.match(
-  taskSkills.initial_build.knowledge.join(" "),
-  /State the service, choice, or customer outcome directly.*organized around a decision/i,
-  "Initial-build guidance did not reject abstract process-language route openings."
-);
-assert.match(
-  taskSkills.initial_build.knowledge.join(" "),
-  /route-local browser failure.*re-inspect only that route/i,
-  "Initial-build guidance did not keep local repair inspection scoped to the failing route."
-);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /essential controls and destinations at least 48px/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Do not put emoji.*inline SVG/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /initial viewport.*loading=\"eager\".*fetchPriority=\"high\".*deeper images lazy/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /next step, starting point, clear path, service conversation/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /focus-visible treatment.*site's palette/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /never enlarge it into a hero.*higher-resolution retained resource.*type-led composition/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /colored square, circle, tile.*business initials.*invented logo/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /below 640px wide.*thumbnail evidence.*intrinsic pixel dimensions/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Read the customer-facing strings and asset roles once before finish.*the company describes.*retained story/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /authoritative BusinessName.*partial name.*imitation lockup/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Never draw a search box.*unless it actually works.*truthful approved link.*static content.*omission/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /placeholder-styled City or ZIP field.*separate link.*fake search control.*without an input-like shell/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /strongest supported proof.*primary customer decision.*near the relevant action.*actual supported path.*omit proof, urgency, offers, credentials, reviews, booking, or destinations/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /supported business-specific evidence earn the primary action.*exiling all meaningful proof/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /authentic business imagery.*invented illustration or decorative shapes.*deep route/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Every heading must receive a concrete answer.*never reuse one catch-all paragraph.*consolidated guide.*mapped source paths/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /architecture has already made consolidation decisions.*never remove, merge, redirect, or add a route during authoring/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Business-fact constraints are not a reason for empty copy.*accurate general information.*observable problem.*decision criteria.*useful preparation/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /advisory\.ia_structure and advisory\.ia_repetition.*evidence.*holistic source-and-pixel judgment.*not as numerical targets/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /shared catch-all middle copy, identical preparation lists, and interchangeable closing arguments.*customer situation.*observable signs or property context.*route-specific action/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /finish even if the heuristic remains.*do not edit or reinspect merely to make an advisory disappear/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /proof, review, project, gallery, team.*lacks its complete concrete material.*generic proof route.*mapped first-party examples/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /source-sensitive privacy, terms, cookie, legal, or accessibility route.*complete substantive source body.*readable authored source.*Do not replace numerals with words/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /approvedSourceIndex\.sourceSensitiveDocuments.*Never synthesize a source-site path/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /approvedSourceIndex\.routeSourceFiles.*compact exact route-to-evidence-file map.*Batch-read/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /source tables as accessible semantic tables.*responsive wrapper.*flattening their cells/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Never expose internal provenance labels such as Source details or First-party evidence/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /continuous emergency or on-call availability.*narrower ordinary hours.*scopes visibly distinct/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /keyboard-visible skip link.*shared main-content target/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Exact legal provisions.*required authored customer content.*not prohibited raw runtime mapping.*omit shared source header, navigation, and footer boilerplate/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /authored TSX and CSS readable, structurally formatted.*do not collapse components, route data, or long content bodies.*enormous single lines/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Customer quotations visibly published.*exact excerpt.*exact attribution.*never synthesize or paraphrase.*unquoted, unattributed business copy/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /approved reviews or testimonials route.*mapped attributable first-party feedback.*exact retained excerpts.*generic business-authored quotation.*why reviews matter/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Customer quotations visibly published in the retained first-party website.*ordinary owner-published source material/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Do not copy individual review text from Google, Yelp, Facebook.*third-party review surface/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /provisionalObservations\.googleAggregateRating.*render its displayText exactly.*complementary proof.*first-party testimonials/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Never infer, round up, refresh, or fabricate it.*never copy Google review prose/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /includes profileUrl.*Read reviews on Google.*exact URL.*does not, never invent or search for a destination/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /ordinary anchor.*exact URL.*new tab.*noopener noreferrer.*Do not pass the URL to SafeLink/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Other external destinations remain restricted to managedCapabilities\.links.*structured observation is absent, omit the rating cleanly/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Never split one source testimonial into multiple apparent customer cards.*accompanying attribution.*generic label/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /article or guide.*hundreds of source words.*substantive explanatory arc.*three brief snippets.*teaser/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /initial build with a retained visual estate.*deliberate source-media decision.*browse the ranked source resources.*inspect promising pixels/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /At phone widths, recompose rather than squeeze a desktop relationship.*stack, reorder, recrop, simplify, or omit.*primary action remains legible/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Before finish, correct every repeated shared-family contrast, body-font, form-text, disclosure-text, target-size/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /axe critical or serious accessibility violation.*unresolved/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Finish collection layouts deliberately.*placeholder-like remainder blocks/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /prohibition applies everywhere.*oversized initials.*decorative identity panel.*retained first-party material/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /do not implement materially different customer jobs through one full-page data renderer.*Split that renderer into content-led compositions/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Changing only text, surface tone, and one injected middle section.*same hero, body grid, callout, and closing sequence.*repeated full-page renderer/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Class names, tone colors, and different strings do not constitute a structural split.*one function renders the complete main element.*one full-page data renderer/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /pass route: null to inspect_site.*route: '\/' proves only the homepage.*exact path instead of route: null/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /repeated fake ordinals.*actual position or be omitted/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /baked-in lettering.*never overlay new copy.*partial fragments.*bounded image treatment/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /every baked-in word or line.*completely visible or completely outside the crop.*mid-word or mid-line is unfinished/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /remove accidental exact duplicate CSS selector blocks or repeated declarations.*one canonical rule/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /Distinct does not mean oblique.*service and customer situation.*look closer, careful response.*Manufacture neither poetry nor mystery/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /recurring decorative motif.*pseudo-chart, signal bars.*every route opening/i);
-assert.match(taskSkills.initial_build.knowledge.join(" "), /three absolutely positioned bars.*explicit position.*same center.*opposite directions.*7-like symbol.*recognizable close state/i);
+// Assert the enduring authoring contracts, not a growing list of historical
+// aesthetic examples or exact prose. Output quality is evaluated on real sites.
+const initialGuidance = taskSkills.initial_build.knowledge.join(" ");
+for (const contract of [
+  /Owner-authoritative facts outrank retained observations/i,
+  /publicFacts support/i,
+  /approvedSourceIndex\.liveRoutePaths.*exact internal-route set/i,
+  /do not add, remove, merge, or redirect routes/i,
+  /sourcePath values are evidence, not destinations.*approvedLinkPath/i,
+  /approvedSourceIndex\.routeSourceFiles.*previews.*complete page/i,
+  /approvedSourceIndex\.sourceSensitiveDocuments.*complete substantive source body/i,
+  /provisions, numerals, durations, and meaning exact/i,
+  /semantic headers.*keyboard-reachable scroll wrapper/i,
+  /Never obscure customer-visible text to evade verification/i,
+  /distinct truthful title and description.*never one global fallback/i,
+  /substantive retained guide needs its explanatory arc/i,
+  /copy.*sibling route or competitor.*mapped evidence/i,
+  /exact excerpts with their exact attribution.*do not paraphrase quotations/i,
+  /Do not copy individual review text from Google, Yelp, Facebook/i,
+  /provisionalObservations\.googleAggregateRating.*displayText exactly.*homepage/i,
+  /Do not infer, round, refresh, or fabricate a rating/i,
+  /profileUrl.*ordinary anchor.*exact URL.*noopener noreferrer/i,
+  /Do not pass this URL to SafeLink.*no observation, omit the rating/i,
+  /Other external destinations.*managedCapabilities\.links/i,
+  /Inspect promising retained media.*intrinsic dimensions/i,
+  /exact official logo, proportions.*BusinessName.*emblem/i,
+  /Invent no marks, initials devices.*business imagery/i,
+  /baked-in lettering.*loading="eager".*fetchPriority="high"/i,
+  /Share the header, footer, tokens.*customer purpose.*composition/i,
+  /first viewport.*useful content or the primary action/i,
+  /Recompose for phone and tablet.*page purpose before its form/i,
+  /geographic qualifiers.*emergency availability from ordinary hours/i,
+  /blank initial build.*NavigationDisclosure behavior="modal".*separate semantic desktop nav/i,
+  /three-bar closed trigger.*close state.*aria-expanded/i,
+  /distinct positions.*rotate the outer bars oppositely.*hide the middle/i,
+  /LeadField.*LeadSubmit.*LeadFormStatus.*each configured field exactly once/i,
+  /one clear H1.*keyboard-visible skip link/i,
+  /body and form text.*16px.*utility text.*12px.*essential controls.*48px/i,
+  /readable focused route, content, legal, and shared-shell modules/i,
+  /inspect_site with route: null.*route: '\/' inspects only home/i,
+  /critical or serious accessibility failures/i,
+  /Advisory IA similarity is evidence, not a score/i,
+  /Reinspect affected routes.*not as a site tour.*force warnings to zero/i
+]) assert.match(initialGuidance, contract);
 assert.doesNotMatch(taskSkills.edit.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
 assert.doesNotMatch(taskSkills.rebase.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
 assert.match(taskSkills.edit.knowledge.join(" "), /Preserve every existing workspace source file unconditionally/i);
@@ -373,11 +337,12 @@ const qualityLedFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary
   routes: ["/about", "/contact"],
   inspectedRoutes: ["/about", "/contact"]
 });
-assert.match(String(qualityLedFeedback.feedbackGuidance), /Rewrite every named render\.internal_provenance_copy example/i);
-assert.match(String(qualityLedFeedback.feedbackGuidance), /render\.form_text.*repair that canonical declaration before finish/i);
-assert.match(String(qualityLedFeedback.feedbackGuidance), /Architecture already owns the approved route ledger.*blocker-free result is not permission to finish.*interchangeable middle copy, preparation lists, and closing arguments.*Changing strings, class names, tone colors, and one injected middle section.*one function renders the complete main element.*do not call finish unchanged/i);
-assert.match(String(qualityLedFeedback.feedbackGuidance), /contact or estimate page's H1 and concise context before its managed form on phone and tablet/i);
-assert.match(String(qualityLedFeedback.feedbackGuidance), /primary heading that consumes nearly the entire first viewport/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /Correct every error.*grouped warnings.*canonical declaration/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /Readability, contrast, form text, essential target size/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /Preserve the approved route ledger.*IA similarity as evidence, not a score/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /Remove internal research language.*task skill/i);
+assert.deepEqual(qualityLedFeedback.findings.map((item) => item.id).sort(), ["render.form_text", "render.internal_provenance_copy"]);
+assert.equal(qualityLedFeedback.findingsTruncated, false, "Concise feedback must not discard mechanical evidence.");
 const iaHeuristicOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
   findings: [
     { id: "advisory.ia_repetition", severity: "warning", area: "content", message: "Service routes share structural signals.", route: "/services" }
@@ -387,7 +352,7 @@ const iaHeuristicOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSu
 });
 assert.match(
   String(iaHeuristicOnlyFeedback.feedbackGuidance),
-  /launch floor is clean.*evidence, not a score to clear.*finish now even if the heuristic remains.*Do not inspect routes one by one/i,
+  /IA similarity as evidence, not a score.*Do not edit merely to make an advisory disappear.*Finish when no concrete material problem remains/i,
   "A lone IA heuristic still instructed the author to chase a numerical zero."
 );
 const bootstrapRuntime = new WorkspaceManagerRuntime<string>({

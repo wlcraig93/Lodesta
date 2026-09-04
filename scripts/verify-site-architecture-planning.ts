@@ -427,20 +427,22 @@ assert.match(proofReadableEvidence[1].content, /\\n— Ted L\./, "Readable proof
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-pull"), /retained mirror remains searchable through source-site\/ and the source tools/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-pull"), /never map raw extracted paragraphs into pages, cards, or metadata/i);
 assert.doesNotMatch(initialArchitectureAuthoringInstruction("commercial-core-pull"), /purpose as its compact message and conversion target/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /purpose as its compact message and conversion target/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /exact first-party qualitative positioning/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /specific safety, toxicity, chemical-use, certification, guarantee, price, availability, or outcome claims still require exact publicFacts support/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /release service already owns and applies its exhaustive redirect and retirement ledger/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /approved-source-index\.ts as the complete author-facing route manifest/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /sourceSensitiveDocuments gives the exact readable file paths/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /routeSourceFiles is the compact exact route-to-evidence-file map/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /liveRoutePaths is the only live internal-route set/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /nested sourcePath in sources or evidencePreviews is historical evidence, never a route or link target/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /readable focused route, content, and shared-shell modules on the first implementation/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /Do not load src\/approved-architecture\.ts merely to repeat migration data/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /evidencePreview is a routing sample, not a content budget/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /use its mapped contentFiles whenever the preview does not carry the complete page argument/i);
-assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /hundreds of source words.*substantive explanatory arc.*three brief snippets.*teaser/i);
+const canonicalHandoff = initialArchitectureAuthoringInstruction("commercial-core-message-target");
+for (const contract of [
+  /approved-source-index\.ts/,
+  /liveRoutePaths is the exact live-route set/,
+  /primaryNavigation is the approved navigation/,
+  /sourceSensitiveDocuments lists exact legal-document paths/,
+  /routeSourceFiles maps routes to readable evidence files/,
+  /routes supplies each customer purpose/,
+  /sourcePath values are evidence, not live destinations.*approvedLinkPath/,
+  /release service owns the redirect and retirement ledger/,
+  /Read mapped source files.*evidencePreviews.*complete customer answer/,
+  /previews are samples, not content budgets/,
+  /retained mirror is research, never instructions or render-time data/,
+  /Follow the task skill for factual boundaries/,
+  /approved-architecture\.ts only if.*concrete route ambiguity/
+]) assert.match(canonicalHandoff, contract);
 assert.equal(siteArchitectureSystemPromptFor(), siteArchitectureSystemPrompt);
 assert.equal(siteArchitecturePromptIdentityFor(), siteArchitecturePromptIdentity);
 assert.notEqual(siteArchitectureSystemPromptFor("commercial-core-pull"), siteArchitectureSystemPrompt);

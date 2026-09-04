@@ -26,6 +26,13 @@ import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 import { isContinuousAvailabilityValue as sandboxAvailability } from "../workers/site-sandbox/scaffold/platform/presentation";
 import { sitemapXmlForSite } from "../packages/site-platform/public-site";
 import { retainedVisualInspectionRoutePaths, scopedVisualInspectionRoutePaths } from "../packages/site-platform/visual-inspection-scope";
+import { classifySourcePagePath } from "../packages/business-data/source-page-classification";
+
+assert.equal(classifySourcePagePath("/terms-and-conditions"), "technical_or_utility");
+assert.equal(classifySourcePagePath("/agmts-terms-and-conditions"), "technical_or_utility");
+assert.equal(classifySourcePagePath("/agmts-cancellation-policy"), "technical_or_utility");
+assert.equal(classifySourcePagePath("/disclaimer"), "technical_or_utility");
+assert.equal(classifySourcePagePath("/terms-and-conditions-explained"), "customer_content");
 
 assert.deepEqual(
   retainedVisualInspectionRoutePaths(
@@ -214,6 +221,49 @@ assert(
 assert(
   !errors(preservedPrivacy).some((finding) => finding.id === "fact.undeclared_marker" || finding.id === "fact.sensitive_unsupported"),
   "An exact context-matched legal provision was rejected by the generic fact gate."
+);
+
+const brandedTermsSourceText = [
+  "AGMTS Terms and Conditions",
+  "A $45.00 consultation fee applies before service begins.",
+  "Free estimates are available for qualifying work.",
+  "Our published terms describe the best care standard and confirm that the business is fully insured.",
+  "These provisions are part of the owner-published agreement."
+].join(" ");
+const brandedTermsSourcePage = sourcePage(
+  "source_page_branded_terms",
+  "/agmts-terms-and-conditions",
+  "AGMTS Terms and Conditions",
+  45,
+  brandedTermsSourceText
+);
+const preservedBrandedTerms = prepareSiteArtifact({
+  authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: input.business.name,
+    sharedCss: "body{font:16px Arial,sans-serif}",
+    routes: [
+      { path: "/", title: input.business.name, description: "Collision repair in Austin.", bodyHtml: validBody },
+      {
+        path: "/agmts-terms-and-conditions",
+        title: "AGMTS Terms and Conditions",
+        description: "The business's published service terms.",
+        bodyHtml: `<main><h1>AGMTS Terms and Conditions</h1><p>${brandedTermsSourceText}</p></main>`
+      }
+    ]
+  })),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourcePages: [brandedTermsSourcePage]
+});
+assert(
+  !errors(preservedBrandedTerms).some((finding) => finding.id === "fact.legal_source_preservation"),
+  "A branded source-sensitive terms route was not recognized for preservation."
+);
+assert(
+  !errors(preservedBrandedTerms).some((finding) => finding.id === "fact.undeclared_marker" || finding.id === "fact.sensitive_unsupported"),
+  "Exact owner-published provisions on a branded legal route were rejected by the generic fact gate."
 );
 
 const inventedLegalClaim = prepareSiteArtifact({

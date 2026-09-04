@@ -16,7 +16,10 @@ export type SourcePageRole = "customer_content" | "mechanical_archive" | "techni
 
 export function isLegalSourcePagePath(value: string) {
   const path = normalizedSourcePagePath(value).toLocaleLowerCase();
-  return /(?:^|\/)(?:privacy(?:-policy)?|terms(?:-of-(?:service|use))?|terms-conditions|legal|cookie(?:-policy)?|accessibility)(?:\/|$)/.test(path);
+  const segments = path.split("/").filter(Boolean);
+  return segments.some((segment) =>
+    /^(?:privacy(?:-policy)?|terms(?:-of-(?:service|use))?|terms-(?:and-)?conditions|legal|cookie(?:-policy)?|accessibility(?:-statement)?|disclaimer|cancellation-policy|refund-policy|return-policy|returns-policy)$/.test(segment)
+    || /-(?:privacy-policy|terms-and-conditions|terms-of-service|terms-of-use|cookie-policy|accessibility-statement|disclaimer|cancellation-policy|refund-policy|return-policy|returns-policy)$/.test(segment));
 }
 
 export function normalizedSourcePagePath(value: string) {

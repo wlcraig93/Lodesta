@@ -175,6 +175,13 @@ const rotationMs = 2 * 60 * 60_000;
 export const initialGenerationDeadlineMs = siteAgentRunGuardrailDefaults.initial_build.deadlineMs;
 export const siteEditDeadlineMs = siteAgentRunGuardrailDefaults.edit.deadlineMs;
 
+export function retainedCanarySourceIsAvailable(
+  snapshot: SourceSnapshot | undefined,
+  pageCount: number
+) {
+  return Boolean(snapshot && (snapshot.sourceType !== "website" || pageCount > 0));
+}
+
 class SiteAgentRunNoLongerActiveError extends Error {
   readonly name = "SiteAgentRunNoLongerActiveError";
   constructor(readonly run: SiteAgentRun) {
@@ -418,7 +425,10 @@ export class SiteAuthoringWorkflow {
           this.repository.resolveRetainedSourceSnapshotId(sourceId),
           this.repository.listSourceSnapshotPages(sourceId)
         ]);
-        if (!snapshot || pages.length === 0) throw new Error(`retained_canary_source_unavailable:${sourceId}`);
+        if (!retainedCanarySourceIsAvailable(snapshot, pages.length)) {
+          throw new Error(`retained_canary_source_unavailable:${sourceId}`);
+        }
+        if (!snapshot) throw new Error(`retained_canary_source_unavailable:${sourceId}`);
         return {
           retainedSourceSnapshotId,
           pages,

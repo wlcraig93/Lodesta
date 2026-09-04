@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/security";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
+import {
+  retainedCanarySourceIsAvailable,
+  siteAuthoringWorkflow
+} from "@/packages/site-platform/workflow";
 import { normalizeBootstrapSourceUrl } from "@/packages/site-platform/source-url";
 
 export const runtime = "nodejs";
@@ -49,10 +52,14 @@ export async function POST(request: Request) {
     if (!retainedInput?.sourceSnapshotIds.length) {
       return NextResponse.json({ error: "The retained canary source is incomplete. Capture it once before running a canary." }, { status: 409 });
     }
-    const retainedPageCounts = await Promise.all(retainedInput.sourceSnapshotIds.map((sourceId) =>
-      sitePlatformRepository.listSourceSnapshotPages(sourceId).then((pages) => pages.length)
-    ));
-    if (retainedPageCounts.some((count) => count === 0)) {
+    const retainedSourceAvailability = await Promise.all(retainedInput.sourceSnapshotIds.map(async (sourceId) => {
+      const [snapshot, pages] = await Promise.all([
+        sitePlatformRepository.getSourceSnapshot(sourceId),
+        sitePlatformRepository.listSourceSnapshotPages(sourceId)
+      ]);
+      return retainedCanarySourceIsAvailable(snapshot, pages.length);
+    }));
+    if (retainedSourceAvailability.some((available) => !available)) {
       return NextResponse.json({ error: "The retained canary source is incomplete. Capture it once before running a canary." }, { status: 409 });
     }
     const modelId = `gpt-5.6-${parsed.data.model}`;

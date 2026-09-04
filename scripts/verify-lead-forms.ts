@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { extractInquiryContact, inquiryMessageText } from "../lib/inquiries";
 import { validateFormSubmission } from "../lib/form-validation";
 import { managerToolArguments } from "../packages/site-agent/contracts";
 import { formDefinitionSchema } from "../packages/site-contracts";
-import { leadFieldAutocomplete } from "../workers/site-sandbox/scaffold/platform/sdk";
+import { leadFieldAutocomplete, LeadForm, LodestaSite } from "../workers/site-sandbox/scaffold/platform/sdk";
+import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const createdAt = "2026-07-30T00:00:00.000Z";
 const form = formDefinitionSchema.parse({
@@ -85,6 +87,22 @@ assert.equal(leadFieldAutocomplete("contact_email"), "email");
 assert.equal(leadFieldAutocomplete("contact_phone"), "tel");
 assert.equal(leadFieldAutocomplete("message"), undefined);
 assert.equal(leadFieldAutocomplete("custom"), undefined);
+
+const sdkInput = buildSyntheticSiteInput();
+// Resolve the renderer beside the scaffold SDK so local scaffold installs and
+// root-only CI use the same React instance as its hooks.
+const scaffoldRequire = createRequire(new URL("../workers/site-sandbox/scaffold/platform/sdk.tsx", import.meta.url));
+const { createElement } = scaffoldRequire("react") as typeof import("react");
+const { renderToStaticMarkup } = scaffoldRequire("react-dom/server") as typeof import("react-dom/server");
+for (const incorrectId of [sdkInput.forms[0]!.id.slice(0, -1), sdkInput.forms[0]!.key]) {
+  assert.throws(() => renderToStaticMarkup(createElement(LodestaSite, {
+    input: { ...sdkInput, publicFacts: sdkInput.publicFacts.map((fact) => ({ ...fact, value: fact.value })) },
+    children: createElement(LeadForm, { id: incorrectId })
+  })), (error: unknown) => error instanceof Error
+    && error.message.includes(`Unknown form ${incorrectId}.`)
+    && error.message.includes(JSON.stringify({ id: sdkInput.forms[0]!.id, key: sdkInput.forms[0]!.key, revision: 1 }))
+    && error.message.includes("Use an exact id"), "Unknown form diagnostics must expose the exact valid ID without silently resolving aliases.");
+}
 
 process.stdout.write(`${JSON.stringify({
   ok: true,

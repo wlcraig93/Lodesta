@@ -3257,6 +3257,39 @@ for (const path of ["/clipped-cell", "/clipped-scrollport"]) {
     `Genuinely hidden table text escaped clipping verification at ${path}.`
   );
 }
+const skipLinkPrepared = prepareSiteArtifact({
+  buildInput,
+  runtimeSeriesId: "site-runtime-v4",
+  authoredArtifact: {
+    kind: "agent-authored-artifact",
+    compilerManifest: expectedSiteSandboxManifest,
+    siteName: String(name.value),
+    sharedCss: 'body{margin:0;padding:24px;font:18px/1.6 Arial;color:#111;background:#fff}*{box-sizing:border-box}.skip{position:fixed;top:-80px;left:20px;padding:12px;background:#fff;color:#111;z-index:100}.reveal:focus{top:8px}.translated{top:10px;transform:translateY(-150%)}.translated:focus{transform:translateY(0)}.cover{position:fixed;inset:0 0 auto;height:70px;background:#fff;z-index:200}main{padding-top:70px}.cut{display:block;width:25px;overflow:hidden;white-space:nowrap}',
+    routes: [
+      { path: "/", title: "Focus revealed skip link", description: "A keyboard-accessible bypass link.", bodyHtml: '<a class="skip reveal" href="#content"><span>Skip to content</span></a><main id="content" tabindex="-1"><h1>Welcome</h1><p>Service information.</p></main>' },
+      { path: "/transformed", title: "Transformed skip link", description: "A bypass link translated into view on focus.", bodyHtml: '<a class="skip translated" href="#content">Skip to content</a><main id="content" tabindex="-1"><h1>Welcome</h1></main>' },
+      { path: "/obscured", title: "Obscured skip link", description: "A focused bypass link hidden by another element.", bodyHtml: '<a class="skip reveal" href="#content">Skip to content</a><div class="cover"></div><main id="content"><h1>Welcome</h1></main>' },
+      { path: "/clipped-text", title: "Clipped skip-link text", description: "A revealed control whose label remains clipped.", bodyHtml: '<a class="skip reveal" href="#content"><span class="cut">Skip to content</span></a><main id="content"><h1>Welcome</h1></main>' },
+      { path: "/hidden", title: "Permanently hidden link", description: "A skip link that never appears.", bodyHtml: '<a class="skip" href="#content">Skip to content</a><main id="content"><h1>Welcome</h1></main>' },
+      { path: "/not-tabbable", title: "Untabbable link", description: "A bypass link excluded from keyboard navigation.", bodyHtml: '<a class="skip reveal" tabindex="-1" href="#content">Skip to content</a><main id="content"><h1>Welcome</h1></main>' },
+      { path: "/ordinary", title: "Hidden ordinary action", description: "An offscreen action is not a bypass link.", bodyHtml: '<a class="skip reveal" href="/contact">Contact us</a><main><h1>Welcome</h1></main>' }
+    ],
+    capabilityBindings: []
+  }
+});
+const skipLinkBrowser = await runArtifactBrowserGate({
+  prepared: skipLinkPrepared, buildInput, blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-focus-revealed-skip-link",
+  routePaths: ["/", "/transformed", "/obscured", "/clipped-text", "/hidden", "/not-tabbable", "/ordinary"],
+  viewports: [{ name: "mobile", width: 375, height: 812 }]
+});
+assert(!skipLinkBrowser.findings.some((finding) => ["/", "/transformed"].includes(finding.route ?? "")
+  && ["render.clipping_overlap", "render.text_clipping"].includes(finding.id)),
+"A focus-revealed semantic skip link was treated as permanently clipped.");
+for (const path of ["/hidden", "/not-tabbable", "/ordinary", "/obscured", "/clipped-text"]) {
+  assert(skipLinkBrowser.findings.some((finding) => finding.route === path && finding.id === "render.clipping_overlap"),
+    `An inaccessible offscreen link escaped clipping verification at ${path}.`);
+}
 console.log(JSON.stringify({ ok: true, routes: browser.routesChecked, captures: browser.captures.length, links: browser.linksChecked }));
 
 async function canonicalLogoFixture(

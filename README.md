@@ -73,7 +73,9 @@ The model-spending owner journey is intentionally outside ordinary CI. Configure
 the dedicated non-production values documented in `.env.example`, start the
 target application, and run `npm run canary:owner-journey`. The command uses a
 real Supabase magic link, creates and edits a multi-file site, publishes it,
-then disposes it while retaining audit records. Screenshots and non-secret
+submits a synthetic lead through the published form, verifies its exact values
+are retained once and visible in the owner's inbox, then disposes the dedicated
+canary site while retaining audit records. Screenshots and non-secret
 evidence are written under gitignored `.data/owner-journey/`.
 
 After the runtime release suite passes, promote the content-hashed trusted runtime through the audited series RPC:

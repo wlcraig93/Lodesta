@@ -8,6 +8,7 @@ import { sitePublicBuildInputSchema, sourceSnapshotPageSchema, sourceSnapshotSch
 import { continuousAvailabilityConformanceVectors } from "../packages/site-contracts/availability-conformance";
 import {
   agentAuthoredArtifactSchema,
+  buildInformationArchitectureAdvisory,
   routeFamilyContactSheetRouteGroups,
   finalizePreparedArtifact,
   normalizeAgentAuthoredArtifact,
@@ -150,6 +151,23 @@ const prepared = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert.equal(errors(prepared).length, 0, JSON.stringify(errors(prepared)));
+const largeRouteAdvisory = buildInformationArchitectureAdvisory({
+  sourcePaths: [],
+  routes: Array.from({ length: 40 }, (_, index) => ({
+    path: `/services/${"long-customer-service-name-".repeat(6)}${index}`,
+    title: `Service ${index}`, description: `Details for service ${index}`,
+    html: `<main><section><h1>Service ${index}</h1><p>${"Specific customer evidence and service guidance. ".repeat(35)}</p></section></main>`
+  }))
+});
+assert(largeRouteAdvisory.findings.some((finding) => finding.id === "advisory.ia_repetition"));
+assert(largeRouteAdvisory.findings.every((finding) => finding.message.length <= 1000));
+assert.equal(largeRouteAdvisory.report.repeatedMainStructureGroups[0]?.routes.length, 40,
+  "Bounding diagnostic prose must not discard structured route evidence.");
+const largeAdvisoryArtifact = finalizeForTest({ ...prepared,
+  findings: [...prepared.findings, ...largeRouteAdvisory.findings] }, input);
+assert.equal(largeAdvisoryArtifact.qa.hardGate, "passed", "A large subjective advisory must not fail or crash finalization.");
+assert(largeAdvisoryArtifact.qa.findings.some((finding) => finding.id === "advisory.ia_repetition"),
+  "The advisory must remain visible in retained QA.");
 const trustedSiteCss = prepared.files.find((file) => file.path === "site.css")?.bytes.toString("utf8") ?? "";
 assert(trustedSiteCss.includes('font-family: "Lodesta Inter"'), "Finalized site CSS omitted the trusted self-hosted font library.");
 assert(trustedSiteCss.includes('url("/_lodesta/fonts/inter-latin-variable.woff2")'), "Trusted font CSS did not use the platform-owned font route.");

@@ -1,12 +1,28 @@
 # Generated-site authoring status
 
-Date: 2026-09-04
+Date: 2026-09-05
 
 ## Current decision: generator still under evaluation
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-The latest ordinary hosted Good Morning Tree Service run, `run_e4c5fa285de128c9424abdf2c88bf794` on release `0d72518e`, did not produce a candidate. Nine successful sandbox applies used the same sandbox on first submission with no transport replay or recycle. Repeated inspection failures, not sandbox continuity, prevented completion. Its $0.38185962 catalog-estimated model cost and 28m 07s duration remain failed-run evidence.
+Release `ca7230dd` passed coordinated deployment and deep health. Its concise-context model screen queued two ordinary hosted Good Morning Tree Service builds against the same retained authority and a $5 fuse per arm. Luna `run_40ff13c76b2b40f4a7671a7d6e9ff0e3` failed in finalization after 13m 47s at $0.2052094 (catalog estimate): an architecture advisory exceeded the retained QA message limit. Sol `run_09672a10d1ba4c2f994ea370531fc65d` exhausted its cost fuse after 12m 14s at $5.4206613 (the in-flight request can exceed the fuse). Neither is accepted, and this screen does not establish reliability or economic superiority. Both retained one sandbox with no transport replay or recycle; compilation and authoring repairs are separate from infrastructure failures.
+
+Source inspection of the unfinished drafts found weak generic route copy in Luna and more business-specific material in Sol, but Sol's later repairs also introduced duplicate headings/actions and rejected JSX edits. These are diagnostic observations, not a completed all-route visual assessment or a winning-model judgment. The next trial must retain these failures, use the corrected tools, and earn acceptance through a completed artifact and rendered review.
+
+The Luna trace also exposed a real form/media boundary defect. A form change after provisional image adoption used the unsaved media input as its transactional comparison authority, returning a misleading inactive-run error. Separately, the model truncated a valid form ID by one character and failed to use the exact ID returned by the form tool. Local fixes use retained authority for form transactions, preserve provisional media in the next build, refresh the media-input identity after a form change, and expose exact available form IDs in SDK errors without aliases. A workflow regression exercises consecutive form changes and subsequent sandbox rebasing; a large-route fixture proves advisory summaries fit the existing schema while the complete structured report remains intact. The prior release is not silently relabeled with these fixes.
+
+The existing owner-journey canary now includes a real published form submission, exact persisted field values, a single inbox event, and authenticated owner-inbox visibility before disposal. This expands the test, not the authoring runtime. Its new end-to-end step has not yet been executed against the hosted application.
+
+Both runs also received clipping findings for an offscreen skip link that becomes visible on focus. The corrected browser check tests a tabbable fragment link to the main landmark in its focused state; class names do not grant an exemption. Permanently hidden links, untabbable links, and ordinary offscreen actions remain subject to clipping checks.
+
+Current implementation descriptors are `site-authoring-platform:retained-form-media-authority:focus-revealed-bypass:concise-authoring:2026-09-05` and `site-verification-policy:semantic-text:scroll-reachable:focus-revealed-bypass:bounded-ia-advisory:2026-09-05`. Runtime JavaScript and artifact schemas are unchanged. The compiler scaffold changes only to improve invalid-form diagnostics; its manifest is regenerated from source.
+
+Local verification passes: full preflight, typecheck, launch-flow smoke, and the final browser suite with focused skip-link regressions (including clipped labels). Hosted deployment and a fresh post-fix generation remain required. The next run keeps Luna, the concise skill, the frozen business authority, and the $5 fuse unchanged; it diagnoses tool corrections rather than claiming model superiority.
+
+## Earlier September 4 diagnostic
+
+The ordinary hosted Good Morning Tree Service run `run_e4c5fa285de128c9424abdf2c88bf794` on release `0d72518e` did not produce a candidate. Nine successful sandbox applies used the same sandbox on first submission with no transport replay or recycle. Repeated inspection failures, not sandbox continuity, prevented completion. Its $0.38185962 catalog-estimated model cost and 28m 07s duration remain failed-run evidence.
 
 A retained-source reconstruction isolated verifier defects without another model call: semantic table cells were concatenated into words, standard table-header `scope` attributes were disallowed, and reachable horizontal-scroll text was classified as hidden. With the same authored source, the corrected verifier removes the legal-preservation and text-clipping blockers. Regression fixtures still reject deleted legal provisions, invalid table scope, hidden table cells, and a genuinely clipped scrollport. The full browser verification suite passes. No legal threshold was lowered, and no retained artifact was rewritten.
 

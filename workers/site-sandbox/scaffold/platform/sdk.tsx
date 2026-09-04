@@ -141,8 +141,9 @@ type LeadFormFieldDefinition = LeadFormDefinition["fields"][number];
 const LeadFormContext = createContext<LeadFormDefinition | null>(null);
 
 export function LeadForm({ id, className, children }: { id: string; className?: string; children?: ReactNode }) {
-  const form = useInput().forms.find((item) => item.id === id);
-  if (!form) throw new Error(`Unknown form ${id}.`);
+  const forms = useInput().forms;
+  const form = forms.find((item) => item.id === id);
+  if (!form) throw new Error(`Unknown form ${id}. Available form IDs: ${JSON.stringify(forms.map((item) => ({ id: item.id, key: item.key, revision: item.revision })))}. Use an exact id, not the key.`);
   return <form
     className={className}
     data-lodesta-form-id={id}

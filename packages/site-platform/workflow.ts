@@ -2112,6 +2112,7 @@ export class SiteAuthoringWorkflow {
         id: deterministicId("input", {
           schemaVersion: 1,
           runId: run.id,
+          retainedPublicBuildInputId: retainedBuildInput.id,
           generatedAssetRevisionIds: generatedRevisions.filter((item) => revisionIds.has(item.id)).map((item) => item.id),
           sourceSnapshotIds
         }),
@@ -2398,11 +2399,13 @@ export class SiteAuthoringWorkflow {
         signal: input.signal
       }),
       configureLeadForm: async (rawArgs) => {
+        // Compare and commit against persisted authority, not the provisional
+        // media projection: its input and asset rows do not exist until finish.
         const configured = await this.configureLeadFormForRun({
           run,
           session: activeSession,
-          buildInput: effectiveBuildInput,
-          state: effectiveState,
+          buildInput: retainedBuildInput,
+          state: baseState,
           arguments: rawArgs
         });
         if (configured.unchanged) {
@@ -2415,7 +2418,8 @@ export class SiteAuthoringWorkflow {
         activeSession = configured.session;
         effectiveIntent = configured.buildInput.intent;
         effectiveForms = configured.buildInput.forms;
-        effectiveBuildInput = configured.buildInput;
+        retainedBuildInput = configured.buildInput;
+        refreshEffectiveMedia(generatedRefs);
         return {
           modelOutput: JSON.stringify(configured.result),
           diagnosticOutput: configured.result

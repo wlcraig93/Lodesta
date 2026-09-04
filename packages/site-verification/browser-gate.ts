@@ -2352,9 +2352,47 @@ const browserInspectionSource = String.raw`(() => {
         && overflowClipped
         && (clipped || style.whiteSpace === "nowrap");
     };
+    // A semantic bypass link may live offscreen until keyboard focus. Test
+    // that state rather than treating its resting position as lost content.
+    // No class-name exemption: untabbable, obscured, or still-hidden links fail.
+    const focusRevealedBypassLinks = new Set();
+    const previousFocus = document.activeElement;
+    for (const link of document.querySelectorAll('a[href^="#"]')) {
+      if (!(link instanceof HTMLAnchorElement) || link.tabIndex < 0) continue;
+      let target;
+      try { target = document.getElementById(decodeURIComponent(link.hash.slice(1))); } catch { continue; }
+      if (!target || !target.matches('main,[role="main"]')) continue;
+      const resting = link.getBoundingClientRect();
+      if (resting.left >= 0 && resting.top >= 0 && resting.right <= innerWidth
+        && resting.bottom <= innerHeight && !intentionallyVisuallyHidden(link)) continue;
+      link.focus({ preventScroll: true });
+      const focused = link.getBoundingClientRect();
+      const hit = document.elementFromPoint(focused.left + focused.width / 2, focused.top + focused.height / 2);
+      const textWalker = document.createTreeWalker(link, NodeFilter.SHOW_TEXT);
+      let focusedTextIsReachable = true;
+      for (let node = textWalker.nextNode(); node; node = textWalker.nextNode()) {
+        if (!node.textContent?.trim() || !node.parentElement) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        if ([...range.getClientRects()].some((rect) => permanentlyClippedArea(node.parentElement, rectValue(rect)) > 1)) {
+          focusedTextIsReachable = false;
+          break;
+        }
+      }
+      if (document.activeElement === link && colorTools.visible(link)
+        && focusedTextIsReachable
+        && !intentionallyVisuallyHidden(link) && focused.width > 2 && focused.height > 2
+        && focused.left >= 0 && focused.top >= 0 && focused.right <= innerWidth && focused.bottom <= innerHeight
+        && permanentlyClippedArea(link, rectValue(focused)) <= 1
+        && (hit === link || (hit && link.contains(hit)))) focusRevealedBypassLinks.add(link);
+      link.blur();
+    }
+    if (previousFocus instanceof HTMLElement && previousFocus !== document.body) previousFocus.focus({ preventScroll: true });
+    const isFocusRevealedBypassContent = (element) => focusRevealedBypassLinks.has(element.closest('a[href]'));
     const clippedElements = elements.filter((element) => {
       if (!colorTools.visible(element) || !element.matches("h1,h2,h3,p,img,a[href],button,input,select,textarea")) return false;
       if (intentionallyVisuallyHidden(element)) return false;
+      if (isFocusRevealedBypassContent(element)) return false;
       if (intentionalHeaderLogoCrop(element)) return false;
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
@@ -2371,6 +2409,7 @@ const browserInspectionSource = String.raw`(() => {
       const parent = node.parentElement;
       if (!text || !parent || !colorTools.visible(parent)) continue;
       if (intentionallyVisuallyHidden(parent)) continue;
+      if (isFocusRevealedBypassContent(parent)) continue;
       const parentStyle = getComputedStyle(parent);
       const parentClips = ["hidden", "clip"].includes(parentStyle.overflowX)
         || ["hidden", "clip"].includes(parentStyle.overflowY);

@@ -1,6 +1,6 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
-export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:9d08c6aa5f53d995359abeb2812a946cb79292cf1c866b0be308ccd51e75dae8";
+export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:c77b6871c0a841df36ef4a29919d2da672efb2b663d64d2bd7dd608502fde8ad";
 export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
@@ -8,10 +8,10 @@ export const siteSandboxDurableObjectIdentity = "site-sandbox-durable-object@sha
 export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:49565a3bfd2348b4a3baa50be7641bccc4927a43d83b0222b4f262638509ff37";
 // Checked-in release identity for the compiler scaffold, including platform capability CSS.
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
-export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:b562a2e535046fe32894f3e5986d4f4df6bb2ae6007418d4d78298c86e7d1ec7";
+export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:e6aa0859bace45bd3280f37f3292ead2501fbd6d0c2fba85a2ed8e18842f807d";
 export const websiteManagerPromptIdentity = "website-manager@sha256:e679d32d00100ed66aa44f0077f51a86d7e2f14d7183fd995506c345a179ec6e";
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:bf3d30d1824548f388df740dce1cf284d20a073b3e42eb209497598fb4f4db7a";
-export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:3bf04b6ab1e21864866c0256c76555d6476fc5485ab8c504a34807ed7a66047d";
+export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:8581abedee06c5fde8aa3f8cc7a982fe943fca716a4537ce0605b7bf3bedb754";
 export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:a9dc99a379ac4ccb9bd4a590bda1b4864ac05827a8d2e560fe06f46706974cab";
 
 export const siteTechnicalReleasePolicy = {

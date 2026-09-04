@@ -40,7 +40,12 @@ for (const requiredBehavior of [
   '".data", "owner-journey"',
   "readDevelopmentSandboxReceipt",
   "active_deployment_id",
-  '"atomic_project_handoff"'
+  '"atomic_project_handoff"',
+  '"published_lead_delivery"',
+  "verifyPublishedLead",
+  '"inquiry_events"',
+  '"A silently ignored lead is not successful delivery."',
+  "matches.length, 1"
 ]) {
   assert(source.includes(requiredBehavior), `Owner canary behavior is missing ${requiredBehavior}.`);
 }

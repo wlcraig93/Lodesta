@@ -215,7 +215,7 @@ export function buildInformationArchitectureAdvisory(input: {
   if (structural.length) findings.push({ id: "advisory.ia_structure", severity: "warning", area: "route", message: structural.join("; ") });
   const repetition = [
     report.highSimilarityPairCount ? `${report.highSimilarityPairCount} main-content pair(s) are highly similar: ${report.highSimilarityPairs.slice(0, 8).map((pair) => `${pair.left} ↔ ${pair.right} (${pair.similarity})`).join(", ")}` : "",
-    report.repeatedMainStructureGroups.length ? `${report.repeatedMainStructureGroups.length} complete main-structure group(s) repeat across at least three commercial routes: ${report.repeatedMainStructureGroups.slice(0, 6).map((group) => group.routes.slice(0, 8).join(" ↔ ")).join("; ")}. Shared structure is acceptable only when those routes serve the same customer job; otherwise split the full-page renderer.` : "",
+    report.repeatedMainStructureGroups.length ? `${report.repeatedMainStructureGroups.length} complete main-structure group(s) repeat across at least three commercial routes: ${report.repeatedMainStructureGroups.slice(0, 6).map((group) => group.routes.slice(0, 8).join(" ↔ ")).join("; ")}. Assess whether the shared structure suits each route's customer purpose.` : "",
     report.suspectedCartesianRoutes.length ? `${report.suspectedCartesianRoutes.length} routes form a possible repeated route product beneath a common family` : ""
   ].filter(Boolean);
   if (repetition.length) findings.push({ id: "advisory.ia_repetition", severity: "warning", area: "route", message: repetition.join("; ") });
@@ -243,7 +243,13 @@ export function buildInformationArchitectureAdvisory(input: {
       message: `Raw data-shaped time strings appear on ${report.rawDataStringRoutes.length} route(s): ${report.rawDataStringRoutes.slice(0, 12).join(", ")}. Render supported facts in ordinary customer-readable language.`
     });
   }
-  return { report, findings };
+  // Artifact QA stores concise messages; the structured report above retains
+  // every route/group. A large advisory must never crash final verification.
+  const suffix = "… Full details are retained in the informationArchitecture report.";
+  return { report, findings: findings.map((finding) => finding.message.length <= 1000 ? finding : {
+    ...finding,
+    message: finding.message.slice(0, 1000 - suffix.length) + suffix
+  }) };
 }
 
 function normalizedWords(value: string) {

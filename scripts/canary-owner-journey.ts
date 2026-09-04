@@ -210,8 +210,15 @@ try {
   await livePage.goto(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { waitUntil: "networkidle" });
   await livePage.getByText(exactEditText, { exact: true }).waitFor();
   await livePage.screenshot({ path: join(evidenceDirectory, "05-published.png"), fullPage: true });
-  await livePage.close();
   step("publication", { status: "passed", publishedVersionId });
+
+  // Exercise the real retained runtime, public endpoint, and inbox. A browser
+  // gate's mocked response cannot prove that a customer's message is stored.
+  evidence.leadDelivery = await verifyPublishedLead(livePage, siteId, publishedVersionId,
+    [...new Set(Object.values(publishedWorkspace.versionRoutes ?? {}).flat()
+      .flatMap((route) => route.path ? [route.path] : []))]);
+  await livePage.close();
+  step("published_lead_delivery", { status: "passed" });
 
   const disposal = await page.evaluate(async (targetSiteId) => {
     const response = await fetch(`/api/sites/${encodeURIComponent(targetSiteId)}`, { method: "DELETE" });
@@ -277,6 +284,90 @@ function required(name: string) {
   const value = process.env[name]?.trim();
   assert(value, `${name} is required.`);
   return value;
+}
+
+async function verifyPublishedLead(targetPage: Page, targetSiteId: string, versionId: string, routes: string[]) {
+  let found = await targetPage.locator("form[data-lodesta-form-id]").count() > 0;
+  for (const route of routes) {
+    if (found) break;
+    await targetPage.goto(new URL(`/sites/${encodeURIComponent(slug!)}${route === "/" ? "" : route}`, origin).toString(),
+      { waitUntil: "networkidle" });
+    found = await targetPage.locator("form[data-lodesta-form-id]").count() > 0;
+  }
+  assert(found, "The published canary must expose a managed lead form.");
+  const form = targetPage.locator("form[data-lodesta-form-id]").first();
+  assert.equal(await form.getAttribute("data-lodesta-form-destination"), "lead_inbox");
+  const formId = await form.getAttribute("data-lodesta-form-id");
+  assert(formId);
+  const { data: retained, error: formError } = await admin.from("form_definitions")
+    .select("definition").eq("id", formId).eq("site_id", targetSiteId).single();
+  if (formError) throw formError;
+  assert.equal(await form.getAttribute("data-lodesta-form-revision"), String(retained.definition.revision));
+  const testEmail = `lodesta-canary-${canaryId}@example.com`;
+  const testMessage = `Synthetic Lodesta delivery test ${canaryId}. No service requested.`;
+  for (const field of await form.locator("input:not([type=hidden]):not([type=submit]),textarea").all()) {
+    if (!await field.isVisible()) continue; // Never fill an anti-spam honeypot.
+    const type = (await field.getAttribute("type") ?? "text").toLowerCase();
+    const role = await field.getAttribute("data-lodesta-field-role");
+    if (type === "checkbox") await field.check();
+    else if (type === "radio") {
+      const name = await field.getAttribute("name");
+      const selected = await form.locator('input[type="radio"]:checked').evaluateAll((elements, group) =>
+        elements.some((element) => (element as HTMLInputElement).name === group), name);
+      if (!selected) await field.check();
+    } else await field.fill(type === "email" || role === "contact_email" ? testEmail
+      : type === "tel" || role === "contact_phone" ? "2025550142"
+        : role === "contact_name" ? `Lodesta Test ${canaryId}` : testMessage);
+  }
+  for (const select of await form.locator("select").all()) {
+    const option = await select.locator("option").evaluateAll((elements) =>
+      elements.map((element) => element as HTMLOptionElement).find((item) => item.value && !item.disabled)?.value);
+    assert(option, "Canary form has no selectable option.");
+    await select.selectOption(option);
+  }
+  assert(await form.evaluate((element) => (element as HTMLFormElement).checkValidity()), "Synthetic lead does not satisfy the configured form.");
+  // Wait for the normal anti-bot minimum age; do not rewrite runtime timestamps.
+  await targetPage.waitForFunction((id) => {
+    const element = [...document.querySelectorAll("form[data-lodesta-form-id]")]
+      .find((item) => item.getAttribute("data-lodesta-form-id") === id);
+    const renderedAt = Number(element?.getAttribute("data-lodesta-rendered-at") || 0);
+    return renderedAt > 0 && Date.now() - renderedAt >= 1000;
+  }, formId);
+  const responsePromise = targetPage.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/forms/submit" && response.request().method() === "POST");
+  await form.locator('button[type="submit"],input[type="submit"]').first().click();
+  const response = await responsePromise;
+  assert.equal(response.status(), 200, "Published form endpoint rejected the synthetic lead.");
+  assert.deepEqual(await response.json(), { accepted: true, status: "received" }, "A silently ignored lead is not successful delivery.");
+  const submitted = response.request().postDataJSON();
+  assert.equal(submitted.siteId, targetSiteId);
+  assert.equal(submitted.versionId, versionId);
+  assert.equal(submitted.formId, formId);
+  await targetPage.waitForFunction((id) => {
+    const element = [...document.querySelectorAll("form[data-lodesta-form-id]")]
+      .find((item) => item.getAttribute("data-lodesta-form-id") === id);
+    return element?.querySelector("[data-lodesta-form-status]")?.textContent
+      === element?.getAttribute("data-lodesta-success-message");
+  }, formId);
+  const { data: events, error: eventError } = await admin.from("inquiry_events")
+    .select("id,inquiry_id,form_id,payload").eq("site_id", targetSiteId).eq("form_id", formId);
+  if (eventError) throw eventError;
+  const matches = events.filter((event) => Object.values(event.payload).some((value) =>
+    typeof value === "string" && value.includes(canaryId)));
+  assert.equal(matches.length, 1, "Expected exactly one persisted synthetic form event.");
+  assert.deepEqual(matches[0].payload, submitted.payload, "The inbox must retain the exact submitted field values.");
+  const { data: inquiry, error: inquiryError } = await admin.from("inquiries")
+    .select("id,status,source_channel").eq("id", matches[0].inquiry_id).eq("site_id", targetSiteId).single();
+  if (inquiryError) throw inquiryError;
+  assert.equal(inquiry.source_channel, "form");
+  await targetPage.screenshot({ path: join(evidenceDirectory, "06-lead-received.png"), fullPage: true });
+  await targetPage.goto(new URL(`/workspace/${encodeURIComponent(slug!)}/leads?inquiry=${encodeURIComponent(inquiry.id)}`, origin).toString(),
+    { waitUntil: "networkidle" });
+  await targetPage.getByRole("heading", { name: "Customer leads", exact: true }).waitFor();
+  await targetPage.locator(".owner-inbox-message").getByText(canaryId, { exact: false }).first().waitFor();
+  await targetPage.screenshot({ path: join(evidenceDirectory, "07-owner-inbox.png"), fullPage: true });
+  return { formId, formRevision: retained.definition.revision, versionId, inquiryId: inquiry.id,
+    eventId: matches[0].id, status: "received", persistedEvents: matches.length, visibleInOwnerInbox: true };
 }
 
 function publicAnonKey() {

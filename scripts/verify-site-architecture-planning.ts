@@ -297,6 +297,43 @@ assert.deepEqual(indexedPullEvidence.map((file) => file.path), ["src/approved-ar
 assert.match(indexedPullEvidence[1].content, /source-site\/.+\/pages\/.+\.md/);
 assert.match(indexedPullEvidence[1].content, /ant-control/i);
 assert.doesNotMatch(indexedPullEvidence[1].content, /evidencePreviews/);
+const legalPage = page(
+  "page_privacy_policy",
+  "/privacy-policy",
+  "Privacy Policy",
+  "Privacy Policy\nWe collect information submitted through the contact form and use it to respond to the request."
+);
+const legalPlan = siteArchitecturePlanSchema.parse({
+  ...plan,
+  routes: [...plan.routes, {
+    path: "/privacy-policy",
+    label: "Privacy Policy",
+    purpose: "Preserve the business's source privacy provisions for website visitors.",
+    pageType: "legal",
+    parentPath: null,
+    navigation: "footer",
+    sourcePaths: ["/privacy-policy"]
+  }],
+  sourceDispositions: [...plan.sourceDispositions, {
+    sourcePath: "/privacy-policy",
+    disposition: "preserved",
+    targetPath: "/privacy-policy"
+  }]
+});
+const legalIndex = createArchitectureEvidenceFiles([...pages, legalPage], legalPlan, {
+  retainedContentMode: "indexed-pull-preview-author-digest"
+})[1]!.content;
+assert.match(legalIndex, /"sourceSensitiveDocuments": \[/);
+assert.match(legalIndex, /"routePath": "\/privacy-policy"[\s\S]*"contentFiles": \[[\s\S]*source-site\/source_test\/pages\/page_privacy_policy\.md/);
+assert.match(legalIndex, /"routeSourceFiles": \[[\s\S]*"routePath": "\/ant-control"[\s\S]*source-site\/source_test\/pages\/page_ant\.md/);
+assert(
+  legalIndex.indexOf('"sourceSensitiveDocuments"') < legalIndex.indexOf('"routes"'),
+  "Exact source-sensitive document paths were buried below the route corpus."
+);
+assert(
+  legalIndex.indexOf('"routeSourceFiles"') < legalIndex.indexOf('"routes"'),
+  "The compact route-to-source-file map was buried below the detailed route corpus."
+);
 const indexedPullPreviewEvidence = createArchitectureEvidenceFiles(pages, plan, { retainedContentMode: "indexed-pull-preview" });
 assert.deepEqual(indexedPullPreviewEvidence.map((file) => file.path), ["src/approved-architecture.ts", "src/approved-source-index.ts"]);
 assert.match(indexedPullPreviewEvidence[1].content, /evidencePreviews/);
@@ -395,6 +432,8 @@ assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-ta
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /specific safety, toxicity, chemical-use, certification, guarantee, price, availability, or outcome claims still require exact publicFacts support/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /release service already owns and applies its exhaustive redirect and retirement ledger/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /approved-source-index\.ts as the complete author-facing route manifest/i);
+assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /sourceSensitiveDocuments gives the exact readable file paths/i);
+assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /routeSourceFiles is the compact exact route-to-evidence-file map/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /liveRoutePaths is the only live internal-route set/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /nested sourcePath in sources or evidencePreviews is historical evidence, never a route or link target/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-message-target"), /readable focused route, content, and shared-shell modules on the first implementation/i);

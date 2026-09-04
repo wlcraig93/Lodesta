@@ -61,6 +61,7 @@ export class FactBindingValidator {
 
     for (const route of routes) {
       const legalSourceText = legalSourceTextByPath.get(normalizedSourcePagePath(route.path));
+      findings.push(...internalAuthoringArtifactFindings(route));
       findings.push(...bodyMarkerFindings(route, input.buildInput, provisionalGoogleRatings, legalSourceText));
       findings.push(...bodySensitiveFindings(route, input.buildInput, legalSourceText));
       findings.push(...metadataFindings(route, "title", route.title, input.buildInput, provisionalGoogleRatings));
@@ -201,6 +202,15 @@ function visibleRoute(
     hasBusinessNameMarker: state.hasBusinessNameMarker,
     businessNameMarkerTexts: state.businessNameMarkerTexts
   };
+}
+
+function internalAuthoringArtifactFindings(route: VisibleRoute) {
+  const matches = [...route.bodyText.matchAll(/\b(?:source details?|evidence details?|first[- ]party evidence)\s*:/gi)];
+  return matches.map((match) => finding(
+    "fact.internal_authoring_artifact",
+    `Customer-facing content exposes the internal provenance label ${JSON.stringify(match[0])}. Preserve the supported customer content without publishing authoring or verification scaffolding.`,
+    route.path
+  ));
 }
 
 function bodyMarkerFindings(

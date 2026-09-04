@@ -373,9 +373,24 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       };
     });
     const diagnosticFiles = files.map(({ lines: _lines, ...file }) => file);
+    const succeededCount = files.filter((file) => file.ok).length;
+    const failedCount = files.length - succeededCount;
+    const complete = failedCount === 0;
     return {
-      modelOutput: JSON.stringify({ ok: files.every((file) => file.ok), files }),
-      diagnosticOutput: { ok: files.every((file) => file.ok), files: diagnosticFiles }
+      modelOutput: JSON.stringify({
+        ok: succeededCount > 0,
+        complete,
+        succeededCount,
+        failedCount,
+        files
+      }),
+      diagnosticOutput: {
+        ok: succeededCount > 0,
+        complete,
+        succeededCount,
+        failedCount,
+        files: diagnosticFiles
+      }
     };
   }
 

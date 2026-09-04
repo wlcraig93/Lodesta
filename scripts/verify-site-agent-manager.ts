@@ -181,6 +181,12 @@ assert.match(taskSkills.initial_build.knowledge.join(" "), /shared catch-all mid
 assert.match(taskSkills.initial_build.knowledge.join(" "), /finish even if the heuristic remains.*do not edit or reinspect merely to make an advisory disappear/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /proof, review, project, gallery, team.*lacks its complete concrete material.*generic proof route.*mapped first-party examples/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /source-sensitive privacy, terms, cookie, legal, or accessibility route.*complete substantive source body.*readable authored source.*Do not replace numerals with words/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /approvedSourceIndex\.sourceSensitiveDocuments.*Never synthesize a source-site path/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /approvedSourceIndex\.routeSourceFiles.*compact exact route-to-evidence-file map.*Batch-read/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /source tables as accessible semantic tables.*responsive wrapper.*flattening their cells/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /Never expose internal provenance labels such as Source details or First-party evidence/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /continuous emergency or on-call availability.*narrower ordinary hours.*scopes visibly distinct/i);
+assert.match(taskSkills.initial_build.knowledge.join(" "), /keyboard-visible skip link.*shared main-content target/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Exact legal provisions.*required authored customer content.*not prohibited raw runtime mapping.*omit shared source header, navigation, and footer boilerplate/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /authored TSX and CSS readable, structurally formatted.*do not collapse components, route data, or long content bodies.*enormous single lines/i);
 assert.match(taskSkills.initial_build.knowledge.join(" "), /Customer quotations visibly published.*exact excerpt.*exact attribution.*never synthesize or paraphrase.*unquoted, unattributed business copy/i);
@@ -249,6 +255,12 @@ const finishTool = websiteManagerTools.find(
 assert(finishTool?.type === "function");
 assert.match(finishTool.description!, /exhaustive deterministic release verification across the approved route set/i);
 assert.match(finishTool.description!, /Lodesta already owns the route, redirect, and retirement ledger/i);
+const readFilesTool = websiteManagerTools.find(
+  (tool) => tool.type === "function" && tool.name === "read_files"
+);
+assert(readFilesTool?.type === "function");
+assert.match(readFilesTool.description!, /exact paths returned by list_files or approvedSourceIndex contentFiles/i);
+assert.match(readFilesTool.description!, /mixed batch retains every successful read.*complete=false/i);
 assert.deepEqual(
   (finishTool.parameters as { required?: string[] }).required,
   ["ownerMessage"],
@@ -279,6 +291,31 @@ const mutationRuntime = new WorkspaceManagerRuntime<string>({
     checkpoint: "unused"
   })
 });
+const partialRead = await mutationRuntime.execute({
+  callId: "partial-read",
+  name: "read_files",
+  arguments: {
+    files: [
+      { path: "src/site.tsx", startLine: 1, endLine: 2 },
+      { path: "src/missing.tsx", startLine: 1, endLine: 2 }
+    ]
+  }
+});
+assert.equal(partialRead.diagnosticOutput.ok, true);
+assert.equal(partialRead.diagnosticOutput.complete, false);
+assert.equal(partialRead.diagnosticOutput.succeededCount, 1);
+assert.equal(partialRead.diagnosticOutput.failedCount, 1);
+assert.equal((partialRead.diagnosticOutput.files as Array<{ ok: boolean }>).filter((file) => file.ok).length, 1);
+const failedRead = await mutationRuntime.execute({
+  callId: "failed-read",
+  name: "read_files",
+  arguments: {
+    files: [{ path: "src/missing.tsx", startLine: 1, endLine: 2 }]
+  }
+});
+assert.equal(failedRead.diagnosticOutput.ok, false);
+assert.equal(failedRead.diagnosticOutput.complete, false);
+assert.equal(failedRead.diagnosticOutput.succeededCount, 0);
 const brokenJsxEdit = await mutationRuntime.execute({
   callId: "broken-jsx",
   name: "edit_file",

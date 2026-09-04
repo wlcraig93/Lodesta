@@ -1917,6 +1917,8 @@ const browserInspectionSource = String.raw`(() => {
       return /\bretained\s+(?:mission|page|faq|source|copy|content|text|language|context|evidence|material|services?|story|positioning)\b/i.test(text)
         || /\bcanonical\s+(?:page|source|copy|content|language|context|evidence|material|services?)\b/i.test(text)
         || /\bowner-authoritative\b/i.test(text)
+        || /\bsource details?\s*:/i.test(text)
+        || /\bfirst[- ]party\s+(?:evidence|feedback|source material)\b/i.test(text)
         || /\bsource\s+(?:page|site|content|copy|language|context|evidence|material|services?|service pages?)\b/i.test(text)
         || /\b(?:service|website|site|page|marketing)\s+language\b/i.test(text)
         || /\b(?:service|treatment)\s+guidance\s+(?:centers?|emphasizes?|focuses?)\b/i.test(text)

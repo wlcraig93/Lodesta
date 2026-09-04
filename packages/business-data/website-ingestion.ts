@@ -682,10 +682,13 @@ function isPlausibleOfferingName(value: string) {
   if (/^(?:\d+\s+)?(?:questions?|advantages?|benefits?|signs?|ways?|tips?|reasons?|things?)\b/.test(normalized)) return false;
   if (/^(?:how|why|when|what|where|can|should|guide to|complete guide|difference between)\b/.test(normalized)) return false;
   if (/\b(?:header|footer|slider?|slide|mega(?:menu)?|builder|off canvas|bootstrap|font awesome|index php|option panel|tab content|portfolio|archive|category|infosurgepest|faq|blog|cost|price|pricing|online|20\d{2})\b/.test(normalized)) return false;
+  if (/^(?:our\s+)?(?:services?|solutions?|offerings?)$/.test(normalized)) return false;
+  if (/\b(?:gallery|specials?|discounts?|coupons?|covid(?:-?19)?|coronavirus)\b/.test(normalized)) return false;
+  if (/^(?:other|additional|more)\b.*\b(?:services?|things?|products?)\b/.test(normalized)) return false;
   if (/^(?:areas?|explore|more frequent|start consultation|get your quote|consultations?|residential|commercial|request(?: service)?|contact(?: us)?|call(?: now)?|email(?: us)?|submit|send|schedule|book|quote|get started|learn more|read more|view more)$/i.test(value)) return false;
   if (/^(?:commercial and residential|residential and commercial)$/.test(normalized)) return false;
   if (/\b(?:family owned|locally owned|local and loved|environmentally friendly|safe for pets?|response times?|treatment around|foundation)\b/.test(normalized)) return false;
-  return !/\b(?:artificial grass|gardening|hardscaping|landscaping|lawn care|lawn fertilization|tree surgery|waste removal|softscaping|mulching|lawn maintenance|plant health|gardens? and ponds|pruning|lawn aeration|hvac)\b/.test(normalized);
+  return true;
 }
 
 function canonicalOfferingName(value: string | undefined, serviceAreaIdentities: string[]) {
@@ -783,6 +786,7 @@ export function sourcePreparationDiagnosticsFor(
           : evidenceClass !== "first_party"
             ? "changed_public_eligibility" as const
             : !isExplicitNamedServiceArea(value)
+              || serviceAreaCandidateIsTrailingOffering(value, supporting?.displayText ?? "")
               || !serviceAreaHasGeographicEvidence(value, page, supporting?.displayText)
               ? "invalid_value_filtering" as const
               : "unexplained_loss" as const;
@@ -882,6 +886,7 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
       const evidenceClass = evidenceClassByUrl.get(page.url) ?? "first_party";
       if (evidenceClass !== "first_party") continue;
       if (!supporting) continue;
+      if (serviceAreaCandidateIsTrailingOffering(label, supporting.displayText)) continue;
       const strongGeographicEvidence = serviceAreaHasGeographicEvidence(
         label,
         page,
@@ -919,6 +924,23 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
         && !isBareUsStateName(candidate.label)))
     .sort((left, right) => right.pageUrls.size - left.pageUrls.size || left.label.localeCompare(right.label))
     .map(({ label, evidence }) => ({ label, evidence }));
+}
+
+function serviceAreaCandidateIsTrailingOffering(label: string, supportingText: string) {
+  const identity = serviceAreaIdentity(label);
+  const text = normalizedText(supportingText);
+  let occurrence = text.indexOf(identity);
+  if (occurrence < 0) return false;
+  let foundOutsideOfferingTail = false;
+  while (occurrence >= 0) {
+    const prefix = text.slice(Math.max(0, occurrence - 240), occurrence);
+    if (!/\b(?:serving|service areas?|areas? we serve|we (?:proudly )?serve)\b[^.;:]{0,220}\b(?:with|including|offering)\b[^.;:]*$/.test(prefix)) {
+      foundOutsideOfferingTail = true;
+      break;
+    }
+    occurrence = text.indexOf(identity, occurrence + identity.length);
+  }
+  return !foundOutsideOfferingTail;
 }
 
 export function isExplicitNamedServiceArea(value: string) {

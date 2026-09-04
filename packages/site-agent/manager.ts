@@ -1312,7 +1312,7 @@ export const websiteManagerTools: Tool[] = [
       caseSensitive: { type: "boolean" }
     }
   }),
-  tool("read_files", "Read one or more authored src/ or read-only source-site/ files, each optionally by line window.", {
+  tool("read_files", "Read one or more authored src/ or read-only source-site/ files, each optionally by line window. Use exact paths returned by list_files or approvedSourceIndex contentFiles; never synthesize a source-site path. A mixed batch retains every successful read and returns ok=true, complete=false with each failed path identified; ok=false means no requested file was readable.", {
     type: "object", additionalProperties: false, required: ["files"],
     properties: {
       files: {

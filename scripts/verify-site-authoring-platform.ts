@@ -746,6 +746,31 @@ assert(
   errors(unsupportedEmergency).some((finding) => finding.id === "fact.sensitive_unsupported"),
   "An unsupported emergency-availability claim passed without canonical evidence."
 );
+for (const text of [
+  "Emergency help is available day and night.",
+  "Storm cleanup is available day or night.",
+  "Around-the-clock response is available."
+]) {
+  const unsupportedAvailabilityParaphrase = prepareSiteArtifact({
+    authoredArtifact: artifact(`<main><h1>Fast help</h1><p>${text}</p></main>`),
+    buildInput: input,
+    runtimeSeriesId: "site-runtime-v4"
+  });
+  assert(
+    errors(unsupportedAvailabilityParaphrase).some((finding) => finding.id === "fact.sensitive_unsupported"),
+    `An unsupported continuous-availability paraphrase escaped the fact gate: ${text}`
+  );
+}
+
+const leakedSourceDetails = prepareSiteArtifact({
+  authoredArtifact: artifact("<main><h1>Privacy</h1><p>Source details: the retained document contains the policy language.</p></main>"),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4"
+});
+assert(
+  errors(leakedSourceDetails).some((finding) => finding.id === "fact.internal_authoring_artifact"),
+  "An explicit internal provenance scaffold shipped as customer content."
+);
 
 const unsupportedSafetyPositioning = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Pest control</h1><p>Eco-friendly products that are safe for people, pets, and the environment.</p></main>"),

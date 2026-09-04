@@ -713,6 +713,93 @@ assert.deepEqual(
   ["Bed Bug Control"],
   "Legacy file extensions or utility-route names leaked into canonical offering authority."
 );
+const treeAuthorityOrigin = "https://tree-authority.example";
+const treeAuthorityHome = {
+  ...summarizeCrawlHtml(
+    pageHtml(
+      "Tree service home",
+      [],
+      "",
+      "We are a Tree Service Company in Austin, TX, Serving Central Texas with Tree Removal, Trimming, Planting, and Emergency Tree Care."
+    ),
+    `${treeAuthorityOrigin}/`
+  ),
+  source: "primary" as const,
+  purposeTags: ["home" as const],
+  extractedFacts: {
+    ...summarizeCrawlHtml(pageHtml("Tree service home"), `${treeAuthorityOrigin}/`).extractedFacts,
+    services: ["Tree Removal", "Tree Trimming and Pruning", "Tree Planting Service", "Emergency Tree Service"],
+    serviceAreas: ["Austin", "Central Texas", "Emergency Tree Care", "Planting", "Trimming"]
+  }
+};
+const treeAuthorityCrawl = {
+  ...authorityCrawl,
+  url: `${treeAuthorityOrigin}/`,
+  finalUrl: `${treeAuthorityOrigin}/`,
+  pageSummaries: [treeAuthorityHome],
+  extractedFacts: {
+    ...authorityCrawl.extractedFacts,
+    services: treeAuthorityHome.extractedFacts.services,
+    serviceAreas: treeAuthorityHome.extractedFacts.serviceAreas
+  }
+};
+const treeAuthorityIngestion = {
+  ...authorityIngestion,
+  sourceUrl: `${treeAuthorityOrigin}/`,
+  pages: [{
+    ...authorityIngestion.pages[0]!,
+    url: treeAuthorityHome.url,
+    finalUrl: treeAuthorityHome.url,
+    summary: treeAuthorityHome,
+    evidenceClass: "first_party" as const
+  }]
+};
+const acceptedTreeAreas = sourcePreparationDiagnosticsFor(treeAuthorityCrawl, treeAuthorityIngestion).facts
+  .filter((fact) => fact.kind === "service_area" && fact.disposition === "accepted")
+  .map((fact) => String(fact.value));
+assert.deepEqual(
+  new Set(acceptedTreeAreas),
+  new Set(["Austin", "Central Texas"]),
+  "A trailing service list inside geographic prose became canonical service-area authority."
+);
+const rejectedTreeAreaDiagnostics = sourcePreparationDiagnosticsFor(treeAuthorityCrawl, treeAuthorityIngestion).facts
+  .filter((fact) => fact.kind === "service_area" && ["Emergency Tree Care", "Planting", "Trimming"].includes(String(fact.value)));
+assert(
+  rejectedTreeAreaDiagnostics.length === 3
+    && rejectedTreeAreaDiagnostics.every((fact) => fact.disposition === "invalid_value_filtering"),
+  "A deterministic trailing-offering exclusion was reported as unexplained source loss."
+);
+
+const treeOfferingPaths = [
+  "/services",
+  "/about-us/tree-service-gallery",
+  "/tree-service-and-covid-19",
+  "/services/other-tree-service-things",
+  "/tree-service-specials",
+  "/services/tree-trimming-and-tree-pruning",
+  "/services/tree-removal"
+];
+const treeOfferingPages = treeOfferingPaths.map((path) => ({
+  ...summarizeCrawlHtml(pageHtml(path.split("/").filter(Boolean).at(-1) ?? "Home"), `${treeAuthorityOrigin}${path}`),
+  source: "sampled_internal" as const,
+  purposeTags: ["service_detail" as const]
+}));
+const treeOfferingCrawl = { ...treeAuthorityCrawl, pageSummaries: treeOfferingPages };
+const treeOfferingIngestion = {
+  ...treeAuthorityIngestion,
+  pages: treeOfferingPages.map((summary) => ({
+    ...treeAuthorityIngestion.pages[0]!,
+    url: summary.url,
+    finalUrl: summary.url,
+    summary,
+    evidenceClass: "first_party" as const
+  }))
+};
+assert.deepEqual(
+  selectSourceOfferingFacts(treeOfferingCrawl, treeOfferingIngestion, []).map((offering) => offering.name),
+  ["Tree Trimming and Tree Pruning", "Tree Removal"],
+  "Content hubs, galleries, promotions, or editorial labels became offerings, or a real pruning service was discarded."
+);
 const bookingDestinations = selectSourceLinksForGeneration(`${authorityOrigin}/`, authorityCrawl)
   .filter((link) => link.kind === "booking")
   .map((link) => link.url);

@@ -355,6 +355,9 @@ const customerProofText = [
 const proofPages = [
   ...pages,
   page("page_reviews", "/reviews", "Customer Reviews", customerProofText),
+  page("page_shared_review_1", "/shared-review-1", "Shared review module", "Repeated testimonial module.\nTed L."),
+  page("page_shared_review_2", "/shared-review-2", "Shared review module", "Repeated testimonial module.\nTed L."),
+  page("page_shared_review_3", "/shared-review-3", "Shared review module", "Repeated testimonial module.\nTed L."),
   page("page_service_with_shared_review_heading", "/service-with-shared-review-heading", "Pest Service", "Useful service-specific guidance for the customer.", ["Pest Service", "Proven Results. Real Reviews."]),
   page("page_site_map", "/site-map", "Site Map", "This oversized utility index lists every archive, category, service, article, and mechanical destination on the legacy website for navigation purposes.")
 ];
@@ -377,6 +380,7 @@ assert.doesNotMatch(proofDigestEvidence[1].content, /service-specific guidance/i
 const proofReadableEvidence = createArchitectureEvidenceFiles(proofPages, proofPlan, { retainedContentMode: "indexed-pull-preview-readable" });
 assert.match(proofReadableEvidence[1].content, /Kevin arrived when expected.*straightforward communication/i);
 assert.match(proofReadableEvidence[1].content, /Ted L\./, "Readable proof previews dropped a short customer attribution.");
+assert.match(proofReadableEvidence[1].content, /\\n— Ted L\./, "Readable proof previews did not bind the customer excerpt to its attribution.");
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-pull"), /retained mirror remains searchable through source-site\/ and the source tools/i);
 assert.match(initialArchitectureAuthoringInstruction("commercial-core-pull"), /never map raw extracted paragraphs into pages, cards, or metadata/i);
 assert.doesNotMatch(initialArchitectureAuthoringInstruction("commercial-core-pull"), /purpose as its compact message and conversion target/i);

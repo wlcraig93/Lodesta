@@ -749,6 +749,13 @@ function retainedEvidencePreview(
     maxLines?: number;
   } = {}
 ) {
+  if (input.includeTestimonials) {
+    const testimonialPreview = retainedTestimonialPairPreview(page, {
+      maxCharacters: input.maxCharacters ?? 700,
+      maxLines: input.maxLines ?? 4
+    });
+    if (testimonialPreview) return testimonialPreview;
+  }
   const candidates: Array<{ index: number; line: string; score: number; shortAttribution: boolean }> = [];
   for (const [lineIndex, rawLine] of lines(page.extractedText).entries()) {
     // Extractors commonly collapse an entire article or testimonial into one
@@ -760,7 +767,10 @@ function retainedEvidencePreview(
       const normalized = normalizeLine(line);
       const shortAttribution = Boolean(input.includeTestimonials && isLikelyTestimonialAttribution(line));
       if (!normalized || (!shortAttribution && line.length < 45) || line.length > 420) continue;
-      if ((lineFrequency.get(normalized) ?? 0) >= 3) continue;
+      // A named reviewer is often repeated by a legitimate testimonial module
+      // across the crawl. On an explicit proof source, retain the attribution
+      // even when the ordinary chrome-frequency filter would discard it.
+      if (!shortAttribution && (lineFrequency.get(normalized) ?? 0) >= 3) continue;
       if (/^(?:https?:\/\/|follow\b|read more\b|navigate\b|home\b|customer login\b|call now\b|contact us\b)/i.test(line)) continue;
       if (/^(?:[A-Z0-9&'’ -]{20,})$/.test(line)) continue;
       if (containsGatedBusinessClaim(line)) continue;
@@ -788,6 +798,34 @@ function retainedEvidencePreview(
     if (selected.length >= maxLines || totalCharacters >= maxCharacters) break;
   }
   return selected.sort((left, right) => left.index - right.index).map((candidate) => candidate.line).join(" ").trim();
+}
+
+function retainedTestimonialPairPreview(
+  page: SourceSnapshotPage,
+  input: { maxCharacters: number; maxLines: number }
+) {
+  const sourceLines = lines(page.extractedText);
+  const pairs: string[] = [];
+  let totalCharacters = 0;
+  const maximumPairs = Math.max(1, Math.min(2, Math.floor(input.maxLines / 2)));
+  for (let index = 1; index < sourceLines.length && pairs.length < maximumPairs; index += 1) {
+    const attribution = sourceLines[index]!;
+    if (!isLikelyTestimonialAttribution(attribution)) continue;
+    const sourceExcerpt = sourceLines[index - 1]!;
+    if (sourceExcerpt.length < 45 || isLikelyTestimonialAttribution(sourceExcerpt)) continue;
+    if (/^(?:https?:\/\/|follow\b|read more\b|navigate\b|home\b|customer login\b|call now\b|contact us\b)/i.test(sourceExcerpt)) continue;
+    if (containsGatedBusinessClaim(sourceExcerpt)) continue;
+    const separator = `\n— ${attribution}`;
+    const remaining = input.maxCharacters - totalCharacters;
+    const excerptBudget = remaining - separator.length;
+    if (excerptBudget < 80) break;
+    const excerpt = truncatePreviewLine(sourceExcerpt, excerptBudget);
+    if (excerpt.length < 45) continue;
+    const pair = `${excerpt}${separator}`;
+    pairs.push(pair);
+    totalCharacters += pair.length + 2;
+  }
+  return pairs.join("\n\n");
 }
 
 function isLikelyTestimonialAttribution(value: string) {

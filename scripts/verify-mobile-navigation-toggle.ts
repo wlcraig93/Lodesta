@@ -52,6 +52,55 @@ try {
   assert.equal(working.toggleCount, 1);
   assert.deepEqual(working.brokenToggles, []);
 
+  // Opening a modal correctly makes a link-rich sitemap inert. The number of
+  // clickable links in the whole document can fall while the menu works.
+  await page.setContent(`
+    <style>body{margin:0}header{height:64px}button{width:48px;height:48px}
+      #scoped-menu{position:fixed;inset:64px 0 0;background:#fff;z-index:2;padding:20px}
+      nav a{display:block;min-height:48px;color:#111}</style>
+    <header><button aria-label="Menu" aria-expanded="false" aria-controls="scoped-menu">Menu</button>
+      <div id="scoped-menu" role="dialog" hidden><nav><a href="#first">First destination</a><a href="#second">Second destination</a></nav></div></header>
+    <main><nav aria-label="Site map">${Array.from({length:10}, (_, index) => `<a href="#item-${index}">Item ${index}</a>`).join('')}</nav></main>
+  `);
+  await page.evaluate(() => {
+    const button = document.querySelector('button')!;
+    const panel = document.querySelector<HTMLElement>('#scoped-menu')!;
+    const main = document.querySelector('main')!;
+    button.addEventListener('click', () => {
+      const open = panel.hidden;
+      button.setAttribute('aria-expanded', String(open));
+      panel.hidden = !open;
+      main.inert = open;
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      button.setAttribute('aria-expanded', 'false');
+      panel.hidden = true;
+      main.inert = false;
+    });
+  });
+  const modalOverSitemap = await inspectNavigationReachability(page);
+  assert.deepEqual(modalOverSitemap.brokenToggles, [], 'An opened modal was rejected because it covered more sitemap links than it revealed.');
+  assert.equal(await page.locator('main').getAttribute('inert'), null);
+
+  // A changed aria-expanded value plus links revealed elsewhere does not prove
+  // that the control's own panel is usable.
+  await page.setContent(`
+    <header><button aria-label="Menu" aria-expanded="false" aria-controls="empty-menu">Menu</button>
+      <div id="empty-menu" hidden></div><nav id="unrelated-menu" hidden><a href="#other">Other destination</a></nav></header>
+  `);
+  await page.evaluate(() => {
+    const button = document.querySelector('button')!;
+    button.addEventListener('click', () => {
+      const open = button.getAttribute('aria-expanded') !== 'true';
+      button.setAttribute('aria-expanded', String(open));
+      document.querySelector<HTMLElement>('#empty-menu')!.hidden = !open;
+      document.querySelector<HTMLElement>('#unrelated-menu')!.hidden = !open;
+    });
+  });
+  const unrelatedReveal = await inspectNavigationReachability(page);
+  assert.equal(unrelatedReveal.brokenToggles.length, 1, 'Links outside the controlled panel made an empty menu pass.');
+
   await page.setContent(`
     <style>
       .desktop-nav{display:flex}.mobile-nav{display:none}

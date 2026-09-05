@@ -2266,12 +2266,17 @@ const browserInspectionSource = String.raw`(() => {
       return rect.width < 43.5 || rect.height < 43.5;
     });
     const hitTestFailures = essentialTargets.filter((element) => {
-      const rect = element.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) return false;
-      const hit = document.elementFromPoint(x, y);
-      return !hit || (hit !== element && !element.contains(hit));
+      // Inline controls can wrap into disjoint line boxes. Their union's
+      // center may be empty line-spacing, not part of the clickable control.
+      // Test the actual fragments; an obscured fragment still fails.
+      return [...element.getClientRects()].some((rect) => {
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) return false;
+        const hit = document.elementFromPoint(x, y);
+        return !hit || (hit !== element && !element.contains(hit));
+      });
     });
     const headerControlHitTestFailures = controls.flatMap((element) => {
       if (!colorTools.visible(element) || !element.closest("header")) return [];

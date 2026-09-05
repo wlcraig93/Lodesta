@@ -220,10 +220,10 @@ async function inspectNavigationToggles(page: Page) {
     if (await navigationTriggerIsOpen(toggle)) await closeNavigationTrigger(page, toggle);
     const beforeState = await navigationTriggerState(toggle);
     const brandBefore = await inspectHeaderBrandGeometry(toggle);
-    const before = await visibleNavigationLinkCount(page);
+    const before = await visibleControlledNavigationLinkCount(toggle);
     const clicked = await toggle.click({ timeout: probeActionTimeoutMs }).then(() => true).catch(() => false);
     await page.waitForTimeout(100);
-    const after = await visibleNavigationLinkCount(page);
+    const after = await visibleControlledNavigationLinkCount(toggle);
     const afterState = await navigationTriggerState(toggle);
     const stateOpened = !beforeState.open && afterState.open;
     const surface = clicked && stateOpened
@@ -231,7 +231,7 @@ async function inspectNavigationToggles(page: Page) {
       : { readable: true };
     const pointerOpened = Boolean(clicked && stateOpened && after > before && surface.readable);
     if (!pointerOpened) {
-      brokenToggles.push(`${label || `toggle ${index + 1}`} (visible navigation links ${before} → ${after}, state ${beforeState.kind}:${beforeState.open ? "open" : "closed"} → ${afterState.kind}:${afterState.open ? "open" : "closed"})`);
+      brokenToggles.push(`${label || `toggle ${index + 1}`} (visible controlled-panel links ${before} → ${after}, state ${beforeState.kind}:${beforeState.open ? "open" : "closed"} → ${afterState.kind}:${afterState.open ? "open" : "closed"})`);
       if (!surface.readable && surface.detail) {
         brokenToggles[brokenToggles.length - 1] += `; ${surface.detail}`;
       }
@@ -768,21 +768,29 @@ async function inspectNavigationSurface(toggle: Locator, brandBefore?: HeaderBra
   }));
 }
 
-async function visibleNavigationLinkCount(page: Page) {
-  return page.locator("header a[href],nav a[href],[role=navigation] a[href]").evaluateAll((links) => links.filter((element) => {
-    if (element.closest("footer")) return false;
-    const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) <= 0 || rect.width <= 0 || rect.height <= 0) return false;
-    const visibleWidth = Math.max(0, Math.min(innerWidth, rect.right) - Math.max(0, rect.left));
-    const visibleHeight = Math.max(0, Math.min(innerHeight, rect.bottom) - Math.max(0, rect.top));
-    if (visibleWidth * visibleHeight / Math.max(1, rect.width * rect.height) < 0.75) return false;
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-    if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) return false;
-    const hit = document.elementFromPoint(x, y);
-    return Boolean(hit && (hit === element || element.contains(hit)));
-  }).length);
+async function visibleControlledNavigationLinkCount(toggle: Locator) {
+  // A modal makes background navigation inert. Only its own controlled panel
+  // must reveal links; document-wide counts can decrease on a working sitemap.
+  return toggle.evaluate((control) => {
+    const targetId = control.getAttribute("popovertarget") ?? control.getAttribute("aria-controls");
+    const panel = targetId ? document.getElementById(targetId)
+      : control.matches("summary") ? control.closest("details") : null;
+    if (!panel) return 0;
+    return [...panel.querySelectorAll("a[href]")].filter((element) => {
+      if (element.closest("footer")) return false;
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) <= 0 || rect.width <= 0 || rect.height <= 0) return false;
+      const visibleWidth = Math.max(0, Math.min(innerWidth, rect.right) - Math.max(0, rect.left));
+      const visibleHeight = Math.max(0, Math.min(innerHeight, rect.bottom) - Math.max(0, rect.top));
+      if (visibleWidth * visibleHeight / Math.max(1, rect.width * rect.height) < 0.75) return false;
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) return false;
+      const hit = document.elementFromPoint(x, y);
+      return Boolean(hit && (hit === element || element.contains(hit)));
+    }).length;
+  });
 }
 
 async function anyMatchingLinkHitTestable(page: Page, href: string) {

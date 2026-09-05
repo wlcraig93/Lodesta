@@ -1,6 +1,7 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
-export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:ef4fcbf767942e58d05e4376543df2c65af1f2b8729960f9f6f8daf3cbf69192";
+// Descriptor: site-authoring-platform:exact-offer-inflection:quota-classification:fragment-aware-control-hit-testing:controlled-panel-navigation:2026-09-05
+export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:a1a4419e15e406ba61caf3c1ac0f7df76d1ebbae60682cc70cbd916b9c34e307";
 export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
@@ -11,7 +12,8 @@ export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:495
 export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:c5c8074fb365995acffa4dd39aa76806beef0a5b7aa88761f25540f5b3dd1217";
 export const websiteManagerPromptIdentity = "website-manager@sha256:e679d32d00100ed66aa44f0077f51a86d7e2f14d7183fd995506c345a179ec6e";
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:04195bbfc48b200176d3e87c7056abdddd466a978b84981a53c30cf08b726115";
-export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:5d7dafabca8122480b44b6b8e23f7fdb62fc0a7ba1df6751c77536d825168008";
+// Descriptor: site-verification-policy:semantic-legal-and-scroll-verification:fragment-aware-control-hit-testing:controlled-panel-navigation:2026-09-05
+export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:e773a6bcce8921d770da45f59877330db9731cdc705de63f72ba19a41e2933b4";
 export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:a9dc99a379ac4ccb9bd4a590bda1b4864ac05827a8d2e560fe06f46706974cab";
 
 export const siteTechnicalReleasePolicy = {

@@ -3325,6 +3325,34 @@ for (const path of ["/hidden", "/not-tabbable", "/ordinary", "/obscured", "/clip
   assert(skipLinkBrowser.findings.some((finding) => finding.route === path && finding.id === "render.clipping_overlap"),
     `An inaccessible offscreen link escaped clipping verification at ${path}.`);
 }
+const fragmentedLinkPrepared = prepareSiteArtifact({
+  buildInput,
+  runtimeSeriesId: "site-runtime-v4",
+  authoredArtifact: {
+    kind: "agent-authored-artifact", compilerManifest: expectedSiteSandboxManifest,
+    siteName: String(name.value),
+    sharedCss: 'body{margin:0;padding:24px;font:18px/1.8 Arial;color:#111;background:#fff}main{position:relative;width:250px}.contact-link{overflow-wrap:anywhere}.cover{position:absolute;left:0;top:110px;width:250px;height:100px;background:#fff;z-index:2}.blocked{position:relative}.blocked .cover{inset:0;height:auto}.button{display:inline-block;padding:16px;background:#135;color:#fff}',
+    routes: [
+      { path: "/", title: "Wrapped contact link", description: "An inline link with two reachable line fragments.", bodyHtml: '<main><h1>Contact our team</h1><a class="contact-link" href="/contact">Contact our team for help<br>with your property</a></main>' },
+      { path: "/obscured-fragments", title: "Obscured contact link", description: "A cover blocks both inline fragments.", bodyHtml: '<main><h1>Contact our team</h1><div class="blocked"><a class="contact-link" href="/contact">Contact our team for help<br>with your property</a><div class="cover"></div></div></main>' },
+      { path: "/obscured-button", title: "Obscured button", description: "A cover blocks a single-box action.", bodyHtml: '<main><h1>Contact our team</h1><div class="blocked"><a class="button" href="/contact">Request help</a><div class="cover"></div></div></main>' },
+      { path: "/contact", title: "Contact", description: "Contact destination.", bodyHtml: '<main><h1>Contact</h1><p>Tell us about your property.</p></main>' }
+    ], capabilityBindings: []
+  }
+});
+const fragmentedLinkBrowser = await runArtifactBrowserGate({
+  prepared: fragmentedLinkPrepared, buildInput, blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-fragmented-link",
+  captureMode: "review",
+  routePaths: ["/", "/obscured-fragments", "/obscured-button"],
+  viewports: [{ name: "tablet", width: 768, height: 1024 }]
+});
+assert(!fragmentedLinkBrowser.findings.some((finding) => finding.route === "/" && finding.id === "render.clipping_overlap"),
+  "A wrapped inline link was hit-tested in the empty space between its line fragments.");
+for (const path of ["/obscured-fragments", "/obscured-button"]) {
+  assert(fragmentedLinkBrowser.findings.some((finding) => finding.route === path && finding.id === "render.clipping_overlap"),
+    `An actually obscured control escaped hit-testing at ${path}.`);
+}
 console.log(JSON.stringify({ ok: true, routes: browser.routesChecked, captures: browser.captures.length, links: browser.linksChecked }));
 
 async function canonicalLogoFixture(

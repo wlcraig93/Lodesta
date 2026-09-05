@@ -1,7 +1,7 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
-// Descriptor: site-authoring-platform:controlled-panel-navigation:advisory-prose-evidence:2026-09-05
-export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:8d117fd7022abccce6e13520d7aad24d07188ab70af0d5005022468ec16d1148";
+// Descriptor: site-authoring-platform:advisory-prose-evidence:continuous-visual-history:2026-09-05
+export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:8cdc3683463bf044158fd75299549d803d52d7db15c1ed522be20d56071fc423";
 export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";

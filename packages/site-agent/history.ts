@@ -35,7 +35,10 @@ export class DeterministicManagerHistory {
   }
 
   activeTailItems(_requestIndex?: number) {
-    return oneTurnVisualEvidenceView(this.tail);
+    // A tool call does not prove that every preview was understood or is no
+    // longer needed. Keep labels and pixels together until provider compaction
+    // replaces their history, exactly as we retain other tool evidence.
+    return [...this.tail];
   }
 
   appendRuntimeState(item: ResponseInputItem) {
@@ -150,59 +153,6 @@ export class DeterministicManagerHistory {
     }
     this.tail.push(...items);
   }
-}
-
-/**
- * Image-bearing tool outputs are useful for exactly one model turn: the author
- * needs the pixels to identify an asset or inspect a render, but replaying the
- * same base64 payload on every later tool turn adds substantial cost without
- * adding evidence. Once a later model output proves the pixels were consumed,
- * retain the labels and textual diagnostics while omitting only the image
- * blocks from subsequent request views. The canonical continuation history is
- * left untouched.
- */
-function oneTurnVisualEvidenceView(items: ResponseInputItem[]) {
-  return items.map((item, index) => {
-    const record = objectValue(item);
-    if (record?.type !== "function_call_output" || !containsInputImage(record.output)) return item;
-    const consumed = items.slice(index + 1).some(isModelOutputItem);
-    if (!consumed) return item;
-    return {
-      ...record,
-      output: omitInputImages(record.output)
-    } as ResponseInputItem;
-  });
-}
-
-function isModelOutputItem(value: ResponseInputItem) {
-  const record = objectValue(value);
-  return record?.type === "reasoning"
-    || record?.type === "function_call"
-    || (record?.type === "message" && record.role === "assistant");
-}
-
-function containsInputImage(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsInputImage);
-  const record = objectValue(value);
-  if (!record) return false;
-  if (record.type === "input_image") return true;
-  return Object.values(record).some(containsInputImage);
-}
-
-function omitInputImages(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    const retained = value.filter((item) => objectValue(item)?.type !== "input_image").map(omitInputImages);
-    if (retained.length !== value.length) {
-      retained.push({
-        type: "input_text",
-        text: "Visual previews were supplied and inspected on the preceding model turn; their labels and metadata remain above."
-      });
-    }
-    return retained;
-  }
-  const record = objectValue(value);
-  if (!record) return value;
-  return Object.fromEntries(Object.entries(record).map(([key, nested]) => [key, omitInputImages(nested)]));
 }
 
 export function managerPromptTelemetry(input: {

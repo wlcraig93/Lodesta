@@ -6,6 +6,16 @@ Date: 2026-09-05
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
+### Completed prose-policy diagnostic; visual-history correction
+
+Coordinated release `61b25526ba1242a9c3cc32ff21551f7171130ba4` passed CI `33969154503` and release `33969452864`. Both Railway controllers reported that SHA; blue sandbox `sandbox_deployment_3ad992ad9f0565bf85b0f977dd3c6e9b` passed required deep health and maintenance was released. Evidence is retained in `.design/v4-production-readiness-2026-09-04/release-61b25526/`.
+
+Fresh private Astra-high diagnostic `run_8d863a10dcf54b5894a0325f6df751db` succeeded in 26.247 minutes at $12.712617 catalog-estimated model cost, with 39 author requests and an independently generated Luna architecture. All 32 routes passed the hard gate. Four applies succeeded on the first submission in one sandbox; there were no failed tools, transport timeouts, replays or recycles. The substantive article prose, including insurer advice, the licensed-electrician reference and negated guarantee, survived the advisory repair loop. This is one successful diagnostic, not comparative reliability, an accepted eight-run screen, or a change to the canonical Luna default.
+
+Private version `version_b093b0161afff9f391451355f6e8f129` is retained unchanged. Its 96 route/viewport capture observations have no browser errors, broken images or horizontal overflow; that is not 96 expert visual approvals. Selected-page review finds stronger source-specific About/gallery content, customer-facing copy and working navigation, while retaining material concerns: a wrong gallery alt description, generic planting CTA copy, and late mobile contact-form placement. No prospect is published.
+
+The image error exposed proven premature context removal: four inspected asset previews were stripped after the first adoption, leaving the next adoption without those pixels. The model confused a climber photograph with a cut-wood photograph; hash-verified preview reconstruction does not indicate wrong blob pairing. The local correction removes the pruning logic and preserves ordinary visual history until existing provider compaction. Its causal benefit and additional cost need a hosted test. See `docs/site-authoring-visual-history.md`; no critic, retry, mandatory sequence or runtime presentation is added.
+
 ### Owner-approved prose-evidence policy
 
 The owner approved proceeding with advisory-only sensitive prose patterns on September 5. The decision and limitations are recorded in `docs/site-prose-evidence-policy.md`. Unmatched body and metadata word-pattern checks now report explicit evidence advisories; exact SDK fact mismatches, existing factual markers, rating/link integrity, forms, security and functional checks remain blocking. The warning asks for source and sentence context rather than deleting keywords. No critic, model stage, retry, schema change, retained artifact rewrite, or authoring-model/default change is introduced.

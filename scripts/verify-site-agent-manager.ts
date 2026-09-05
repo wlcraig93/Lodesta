@@ -588,21 +588,22 @@ assert(!prompts.includes("compositionReferences"));
 assert(!skills.includes("mandatory"));
 
 const visualHistory = new DeterministicManagerHistory([]);
+const visualPreviews = ["yard", "climber", "cut_wood", "crew"].flatMap((subject, index) => [
+  { type: "input_text", text: `Asset preview ${index + 1}: source_resource_${subject}` },
+  { type: "input_image", image_url: `data:image/png;base64,${Buffer.from(subject).toString("base64")}`, detail: "high" }
+]);
 visualHistory.noteTool({
   responseItems: [{ type: "function_call", call_id: "call_visual", name: "inspect_assets", arguments: "{}" }] as never,
   functionOutput: {
     type: "function_call_output",
     call_id: "call_visual",
-    output: [
-      { type: "input_text", text: "Asset preview 1: source_resource_logo" },
-      { type: "input_image", image_url: "data:image/png;base64,AA==", detail: "high" }
-    ]
+    output: visualPreviews
   } as never,
   responseIndex: 1,
   callId: "call_visual",
   toolName: "inspect_assets",
   status: "succeeded",
-  arguments: { assetIds: ["source_resource_logo"] },
+  arguments: { assetIds: ["source_resource_yard", "source_resource_climber", "source_resource_cut_wood", "source_resource_crew"] },
   diagnostic: { ok: true },
   workspaceMutated: false
 });
@@ -614,21 +615,41 @@ visualHistory.appendRuntimeState({
 assert.match(JSON.stringify(visualHistory.activeTailItems(2)), /data:image\/png/,
   "Visual tool evidence was removed before the model received it once.");
 visualHistory.noteTool({
-  responseItems: [{ type: "function_call", call_id: "call_followup", name: "list_files", arguments: "{}" }] as never,
+  responseItems: [{ type: "function_call", call_id: "call_followup", name: "adopt_source_asset", arguments: "{}" }] as never,
   functionOutput: { type: "function_call_output", call_id: "call_followup", output: "{\"ok\":true}" } as never,
   responseIndex: 2,
   callId: "call_followup",
-  toolName: "list_files",
+  toolName: "adopt_source_asset",
   status: "succeeded",
   arguments: {},
   diagnostic: { ok: true },
   workspaceMutated: false
 });
-const visualHistoryAfterConsumption = JSON.stringify(visualHistory.activeTailItems(3));
-assert.doesNotMatch(visualHistoryAfterConsumption, /data:image\/png/,
-  "Consumed base64 visual evidence remained in every later model request.");
-assert.match(visualHistoryAfterConsumption, /source_resource_logo/,
-  "Visual evidence pruning discarded the retained asset label and metadata.");
+const visualHistoryAfterFollowup = JSON.stringify(visualHistory.activeTailItems(3));
+assert.match(visualHistoryAfterFollowup, /data:image\/png/,
+  "A later tool call removed pixels that the author still needs for asset selection or editing.");
+assert.match(visualHistoryAfterFollowup, /source_resource_cut_wood/,
+  "Visual history lost the label paired with the image.");
+for (const preview of visualPreviews) {
+  assert(visualHistoryAfterFollowup.includes(JSON.stringify(preview)),
+    "Every paired preview must survive the first serial adoption, not just the selected asset.");
+}
+assert.doesNotMatch(visualHistoryAfterFollowup, /previews were supplied and inspected/,
+  "The history layer cannot assert that a model correctly inspected an image.");
+const restoredVisualHistory = new DeterministicManagerHistory([], visualHistory.drainContinuationItems());
+assert.deepEqual(restoredVisualHistory.activeTailItems(), visualHistory.activeTailItems(),
+  "Restored and live authoring requests must retain the same visual evidence.");
+const detachedVisualTail = visualHistory.activeTailItems();
+detachedVisualTail.pop();
+assert.deepEqual(restoredVisualHistory.activeTailItems(), visualHistory.activeTailItems(),
+  "Request views must not mutate canonical continuation history.");
+visualHistory.noteNoToolResponse({
+  responseItems: [{ type: "compaction", encrypted_content: "opaque-visual-history" }] as never,
+  responseIndex: 3
+});
+assert.doesNotMatch(JSON.stringify(visualHistory.activeTailItems()), /data:image\/png|source_resource_cut_wood/,
+  "Provider compaction remains the canonical boundary for older visual evidence.");
+assert.equal(visualHistory.compactionCount(), 1);
 
 const openAiCapabilities = providerAuthoringCapabilities("openai", "gpt-5.6-sol", 1_050_000);
 assert.equal(openAiCapabilities.requestFields.context_management, "accepted");

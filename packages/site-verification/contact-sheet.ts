@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import sharp from "sharp";
+import { sha256 } from "@/packages/business-data";
 import type { BrowserGateCapture } from "./browser-gate";
 
 export type ArtifactContactSheet = {
@@ -71,42 +72,36 @@ export async function createArtifactContactSheet(
   }).composite(inputs).png().toBuffer();
 }
 
-/**
- * Produces a complete, labeled route-family review without shrinking every
- * representative page type into one unreadable image. The ordinary artifact
- * contact sheet deliberately remains capped at three routes.
- */
-export async function createArtifactRouteFamilyContactSheets(
+/** Model evidence preserves captured pixels; artifact overview sheets remain separate. */
+export async function createArtifactVisualFrames(
   captures: BrowserGateCapture[],
-  selectedRoutes: readonly string[],
-  routesPerSheet = 3
+  selectedRoutes: readonly string[]
 ) {
-  const routeGroups = routeFamilyContactSheetRouteGroups(captures, selectedRoutes, routesPerSheet);
-  const sheets: Array<{ routes: string[]; bytes: Buffer }> = [];
-  for (const chunk of routeGroups) {
-    sheets.push({
-      routes: chunk,
-      bytes: await createArtifactContactSheet(captures, chunk)
-    });
-  }
-  return sheets;
-}
-
-export function routeFamilyContactSheetRouteGroups(
-  captures: Pick<BrowserGateCapture, "route">[],
-  selectedRoutes: readonly string[],
-  routesPerSheet = 3
-) {
-  if (!Number.isInteger(routesPerSheet) || routesPerSheet < 1) {
-    throw new Error("Route-family contact sheets require a positive routes-per-sheet value.");
-  }
-  const available = new Set(captures.map((capture) => capture.route));
-  const routes = [...new Set(selectedRoutes)].filter((route) => available.has(route));
-  const groups: string[][] = [];
-  for (let index = 0; index < routes.length; index += routesPerSheet) {
-    groups.push(routes.slice(index, index + routesPerSheet));
-  }
-  return groups;
+  const selected = [...new Set(selectedRoutes)].flatMap((route) => captures.filter((capture) =>
+    capture.route === route && capture.stage === "settled"
+  ));
+  if (!selected.length) throw new Error("Visual inspection requires settled browser frames.");
+  return Promise.all(selected.map(async (capture, index) => {
+    const metadata = await sharp(capture.bytes, { limitInputPixels: 80_000_000 }).metadata();
+    if (!capture.frame || metadata.format !== "png" || !metadata.width || !metadata.height) {
+      throw new Error(`Malformed visual inspection frame for ${capture.route}: expected a labeled PNG.`);
+    }
+    return {
+      bytes: capture.bytes,
+      evidence: {
+        imageIndex: index + 1,
+        route: capture.route,
+        viewport: capture.viewport,
+        frame: capture.frame,
+        focusSelector: capture.focusSelector,
+        pageState: capture.pageState,
+        width: metadata.width,
+        height: metadata.height,
+        contentHash: sha256(capture.bytes),
+        byteLength: capture.bytes.byteLength
+      }
+    };
+  }));
 }
 
 async function assertNativeViewportFrames(

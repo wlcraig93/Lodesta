@@ -6,7 +6,23 @@ Date: 2026-09-05
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Latest completed diagnostic and next correction
+### Latest editorial diagnostic and native-frame experiment
+
+Coordinated release `d47cd58754c135f05879820876b33cf73032e5b6` succeeded (CI `33934192467`, release `33934485716`). Web and worker independently reported that SHA, sandbox `sandbox_deployment_0ebb4d8ae5dda5b89b8ef7f4f10d52cf` was promoted, required deep health passed, and maintenance was released. The availability and legal-context corrections below are now deployed.
+
+The ordinary private editorial diagnostic `run_72816b580379483ba11bbe102dfd18fc` produced `version_cada28a3c8fc10dbda1d6c5be071c1fa` in 820,155 ms at $6.25750450 catalog-estimated model cost. Its 42 requests and three first-submission applies stayed on one sandbox without replay, recycle, or transport failure. The hard gate passed; 90 retained-artifact route/viewport captures recorded no browser errors or horizontal overflow. The edit improved the emergency call-first opening, about-page voice and crew crop, planting composition, and gallery coverage. Route set, form definitions, and unrelated body text/links remain unchanged in the source comparison. Actual lead delivery is still untested by this visual harness.
+
+This result remains rejected for delivery: a generic poolside photograph is presented as a specific red-oak pruning job; the gallery crop obscures the side-house trees in a valid removal/pruning before-and-after pair; and one earlier terms wording change remains outside the first editorial request's scope. The original photographs were inspected before drawing that conclusion: front trees remaining in the AFTER image does not invalidate removal of the marked trees beside the house. Detailed evidence and coverage limits are in `.design/v4-production-readiness-2026-09-04/candidate-reviews/version_cada28a3c8fc10dbda1d6c5be071c1fa/DESIGN_REVIEW.md`. This is a manual engineering edit, not an automatic critic or a fresh-build reliability result.
+
+The next isolated tool treatment replaces model-facing contact sheets with indexed native viewport frames, preserving captured bytes, route/state labels, focus/open-menu evidence, and tablet frames. Existing artifact overview sheets remain available; source/asset evidence presentation, route selection, mechanical findings, authoring skill, models, limits, final verification, and runtime behavior remain unchanged. This removes a Chromium compositing step from inspection rather than adding an orchestration layer. The model receives high-detail images with explicit dimensions and hashes; the API may still resize them. Official OpenAI guidance identifies small text and image resizing as vision limitations ([Images and vision](https://developers.openai.com/api/docs/guides/images-vision#limitations)).
+
+The existing three-column sheets reduce 1280px desktop frames to approximately 504px before model preprocessing and omit tablet. The local payload diagnostic preserves fifteen native opening frames across five routes at 2,550,781 binary bytes / 3,402,205 serialized image-input bytes. This is not the full inspection payload: middle, bottom, focus, and menu frames add images. API token cost and quality benefit remain unproven and must be measured in the next diagnostic; no model superiority or savings claim follows from clearer pixels alone.
+
+The authoring profile now records `visualInspectionPresentation: native-viewport-frames`. Platform descriptor: `site-authoring-platform:single-availability-check:retained-legal-case-boundaries:native-inspection-frames:2026-09-05`. This treatment is local pending full verification and its own coordinated release. It does not rewrite retained sources or count toward the frozen eight-run acceptance screen.
+
+Local typecheck, native-byte/ordering/tablet/focus fixtures, the model-facing feedback preservation regression, the standalone browser-rendering suite, full preflight, and standalone launch-flow smoke pass. The first restricted preflight failed to launch Chromium because macOS denied Mach-port registration; the permitted rerun passed without an application change. Coordinated release remains a separate check.
+
+### Earlier completed diagnostic and verifier correction
 
 Coordinated release `ae883ce60265ca9d3d0e583585a13240cdf65ce8` succeeded (CI `33930630517`, release `33930933172`). Both Railway services reported that exact SHA; green sandbox `sandbox_deployment_54c643be8f7c79c178edebe1e5ee2c92` was promoted, required deep health passed, and maintenance was released. This release includes the dependency, quotation, and image-geometry corrections described chronologically below; their earlier "not deployed" notes are historical.
 

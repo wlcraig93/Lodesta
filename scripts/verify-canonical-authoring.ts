@@ -153,17 +153,19 @@ assert(managerRuntime.includes("const inspectionToolTimeoutMs = 8 * 60_000")
   && managerRuntime.includes("recoverable: true")
   && managerRuntime.includes("mechanicalAnalysisMs")
   && managerRuntime.includes("browserNavigationCaptureMs")
-  && managerRuntime.includes("contactSheetGenerationMs")
+  && managerRuntime.includes("visualEvidencePreparationMs")
   && managerRuntime.includes("persistenceMs"), "Inspection must retain mechanical feedback and surface the eight-minute ceiling as a recoverable tool failure with phase telemetry.");
 assert.match(managerRuntime, /Readability, contrast, form text, essential target size/i);
 assert.match(managerRuntime, /Follow the task skill for design and content judgment/i);
 assert(workflow.includes("preferredRouteLimit: 5")
   && workflow.includes("defaultRoutes: input.releasePlan?.visualReviewRoutePaths")
-  && workflow.includes("createArtifactRouteFamilyContactSheets")
+  && workflow.includes("createArtifactVisualFrames")
+  && workflow.includes("visualEvidenceFrames: visualFrames.map")
+  && !workflow.includes("createArtifactRouteFamilyContactSheets")
   && workflow.includes("browserRoutePaths: input.releasePlan?.browserRoutePaths")
   && !workflow.includes("all-representative-routes")
   && !authoringProfile.includes("all-representative-routes"),
-"The authoring loop must retain its all-route mechanical pass while splitting five architecture-selected review routes into readable family sheets.");
+"The authoring loop must retain its all-route mechanical pass while returning labeled native frames for the architecture-selected review routes.");
 assert.match(worker, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*unsupported_authoring_runtime_series/);
 assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-canonical\.tsx"/);
 assert.doesNotMatch(worker, /"#lodesta-sdk"[\s\S]{0,300}sdk-native\.tsx/);

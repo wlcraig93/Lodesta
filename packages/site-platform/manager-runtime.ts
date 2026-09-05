@@ -54,7 +54,7 @@ export type RuntimeVisualInspection = {
   images?: Array<{ type: "input_image"; image_url: string; detail: "high" | "low" }>;
 };
 
-type RuntimeInspectionPhase = "browser_navigation_capture" | "contact_sheet_generation" | "persistence";
+type RuntimeInspectionPhase = "browser_navigation_capture" | "visual_evidence_preparation" | "persistence";
 
 export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
   schemaVersion: 1;
@@ -654,7 +654,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         setPhase(phase);
         if (durationMs === undefined) return;
         if (phase === "browser_navigation_capture") phaseTimings.browserNavigationCaptureMs = durationMs;
-        if (phase === "contact_sheet_generation") phaseTimings.contactSheetGenerationMs = durationMs;
+        if (phase === "visual_evidence_preparation") phaseTimings.visualEvidencePreparationMs = durationMs;
         if (phase === "persistence") phaseTimings.persistenceMs = durationMs;
       });
       phaseTimings.visualInspectionMs = Date.now() - phaseStartedAt;
@@ -1162,7 +1162,7 @@ function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "
   const scopeGuidance = builtRoutes.length > inspectedRoutes.length
     ? `Fresh browser evidence in this pass covers only ${inspectedRoutes.join(", ")} (${inspectedRoutes.length} of ${builtRoutes.length} built routes). Do not treat it as current evidence for the other ${builtRoutes.length - inspectedRoutes.length} routes.`
     : visualEvidenceRoutes.length > 0 && inspectedRoutes.length > visualEvidenceRoutes.length
-      ? `Fresh deterministic browser findings cover ${inspectedRoutes.length} routes, while the supplied pixel sheets cover ${visualEvidenceRoutes.length}: ${visualEvidenceRoutes.join(", ")}. Do not infer visual review for routes absent from those sheets.`
+      ? `Fresh deterministic browser findings cover ${inspectedRoutes.length} routes, while the supplied native frames cover ${visualEvidenceRoutes.length}: ${visualEvidenceRoutes.join(", ")}. Match images to the one-based visualEvidenceFrames index. Do not infer visual review for routes or states absent from those frames.`
       : "";
   const feedbackGuidance = [scopeGuidance, baseFeedbackGuidance].filter(Boolean).join(" ");
   return {

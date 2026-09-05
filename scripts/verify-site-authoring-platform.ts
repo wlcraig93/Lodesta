@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import sharp from "sharp";
 import { isContinuousAvailabilityValue as controllerAvailability } from "../packages/business-data/availability";
 import {
   googleAggregateRatingObservationFromSnapshot,
@@ -9,7 +10,7 @@ import { continuousAvailabilityConformanceVectors } from "../packages/site-contr
 import {
   agentAuthoredArtifactSchema,
   buildInformationArchitectureAdvisory,
-  routeFamilyContactSheetRouteGroups,
+  createArtifactVisualFrames,
   finalizePreparedArtifact,
   FactBindingValidator,
   normalizeAgentAuthoredArtifact,
@@ -44,14 +45,25 @@ assert.deepEqual(
   ["/services", "/"],
   "A bounded route-family inspection did not preserve its requested available route scope."
 );
-assert.deepEqual(
-  routeFamilyContactSheetRouteGroups(
-    ["/", "/services", "/services/ants", "/services/rodents", "/contact"].map((route) => ({ route })),
-    ["/", "/services", "/services/ants", "/services/rodents", "/contact"]
-  ),
-  [["/", "/services", "/services/ants"], ["/services/rodents", "/contact"]],
-  "A five-route family comparison did not remain readable across two sheets."
-);
+const frameBytes = await sharp({ create: { width: 768, height: 1024, channels: 3, background: "#123456" } }).png().toBuffer();
+const nativeFrames = await createArtifactVisualFrames([
+  { route: "/outside", key: "excluded", viewport: "tablet", stage: "settled", frame: "top", bytes: frameBytes },
+  { route: "/", key: "natural", viewport: "desktop", stage: "natural", frame: "top", bytes: frameBytes },
+  { route: "/", key: "tablet", viewport: "tablet", stage: "settled", frame: "top", bytes: frameBytes },
+  { route: "/contact", key: "focus", viewport: "mobile", stage: "settled", frame: "focus", focusSelector: "form", bytes: frameBytes },
+  { route: "/", key: "menu", viewport: "mobile", stage: "settled", frame: "navigation", pageState: { scrollX: 0, scrollY: 120 }, bytes: frameBytes }
+], ["/contact", "/", "/"]);
+assert.deepEqual(nativeFrames.map((item) => [item.evidence.imageIndex, item.evidence.route, item.evidence.frame]), [
+  [1, "/contact", "focus"], [2, "/", "top"], [3, "/", "navigation"]
+]);
+assert(nativeFrames.every((item) => item.bytes === frameBytes && item.evidence.width === 768 && item.evidence.height === 1024),
+  "Author inspection must preserve exact original bytes and dimensions, including tablet frames.");
+assert.equal(nativeFrames[0].evidence.focusSelector, "form");
+assert.equal(nativeFrames[2].evidence.pageState?.scrollY, 120);
+await assert.rejects(createArtifactVisualFrames([], ["/"]), /settled browser frames/);
+await assert.rejects(createArtifactVisualFrames([
+  { route: "/", key: "unlabeled", viewport: "desktop", stage: "settled", bytes: frameBytes }
+], ["/"]), /labeled PNG/);
 assert.deepEqual(
   retainedVisualInspectionRoutePaths([{ path: "/" }]),
   [],

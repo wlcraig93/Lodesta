@@ -129,7 +129,7 @@ import {
   finalizePreparedArtifact,
   createArtifactContactSheet,
   createArtifactContactSheets,
-  createArtifactRouteFamilyContactSheets,
+  createArtifactVisualFrames,
   createMediaContactSheet,
   createSourceMediaContactSheet,
   createArtifactThumbnail,
@@ -3349,7 +3349,7 @@ export class SiteAuthoringWorkflow {
     selector?: string;
     selectionLabel?: string;
     signal?: AbortSignal;
-    onPhase?: (phase: "browser_navigation_capture" | "contact_sheet_generation" | "persistence", durationMs?: number) => void;
+    onPhase?: (phase: "browser_navigation_capture" | "visual_evidence_preparation" | "persistence", durationMs?: number) => void;
   }) {
     input.onPhase?.("browser_navigation_capture");
     const hardChecksStartedAt = Date.now();
@@ -3389,9 +3389,8 @@ export class SiteAuthoringWorkflow {
       requestedRoute: input.route,
       inspectAllBuiltRoutes: input.inspectAllBuiltRoutes,
       preferredRoutePaths: preferredRoutes,
-      // Five routes fit into two readable sheets: home, a material hub, two
-      // sibling details, and conversion. The broader gate still verifies all
-      // architecture-derived routes.
+      // Preserve the representative route scope; return native frames for each.
+      // The broader gate still verifies all architecture-derived routes.
       preferredRouteLimit: 5
     });
     const selectedRoutes = (retainedScope.length
@@ -3416,14 +3415,14 @@ export class SiteAuthoringWorkflow {
     const inspectionFindings = [...prepared.findings, ...browserGate.findings];
     const browserCaptureMs = Date.now() - browserStartedAt;
     input.onPhase?.("browser_navigation_capture", browserCaptureMs);
-    const contactSheetStartedAt = Date.now();
-    input.onPhase?.("contact_sheet_generation");
-    const contactSheets = await createArtifactRouteFamilyContactSheets(
+    const visualEvidenceStartedAt = Date.now();
+    input.onPhase?.("visual_evidence_preparation");
+    const visualFrames = await createArtifactVisualFrames(
       browserGate.captures,
       selectedRoutes
     );
-    const contactSheetMs = Date.now() - contactSheetStartedAt;
-    input.onPhase?.("contact_sheet_generation", contactSheetMs);
+    const visualEvidencePreparationMs = Date.now() - visualEvidenceStartedAt;
+    input.onPhase?.("visual_evidence_preparation", visualEvidencePreparationMs);
     input.onPhase?.("persistence");
     const inspectionHash = createInspectionIdentity({
       context: {
@@ -3450,8 +3449,9 @@ export class SiteAuthoringWorkflow {
         staticFindingCount: prepared.findings.length,
         browserFindingCount: browserGate.findings.length,
         screenshotCount: browserGate.captures.length,
-        visualEvidenceRoutes: contactSheets.flatMap((sheet) => sheet.routes),
-        visualEvidenceSheetCount: contactSheets.length,
+        visualEvidenceRoutes: [...new Set(visualFrames.map((frame) => frame.evidence.route))],
+        visualEvidenceFrames: visualFrames.map((frame) => frame.evidence),
+        visualEvidenceFrameCount: visualFrames.length,
         focusedScreenshotCount: browserGate.captures.filter((capture) => capture.frame === "focus").length
       },
       diagnosticSummary: {
@@ -3460,6 +3460,8 @@ export class SiteAuthoringWorkflow {
         requestedRoute: input.route,
         requestedSelector: input.selector,
         inspectedRoutes: selectedRoutes,
+        visualEvidenceFrames: visualFrames.map((frame) => frame.evidence),
+        visualEvidenceBytes: visualFrames.reduce((sum, frame) => sum + frame.bytes.byteLength, 0),
         findings: inspectionFindings,
         staticFindingCount: prepared.findings.length,
         browserFindingCount: browserGate.findings.length,
@@ -3467,15 +3469,15 @@ export class SiteAuthoringWorkflow {
           compilationMs: 0,
           hardChecksMs,
           browserCaptureMs,
-          contactSheetMs,
+          visualEvidencePreparationMs,
           persistenceMs: 0,
           advisoryEvaluationMs: 0
         }
       },
-      images: contactSheets.map((sheet) => ({
+      images: visualFrames.map((frame) => ({
         type: "input_image" as const,
-        image_url: `data:image/png;base64,${sheet.bytes.toString("base64")}`,
-        detail: input.selector || input.imageDetail === "high" ? "high" as const : "low" as const
+        image_url: `data:image/png;base64,${frame.bytes.toString("base64")}`,
+        detail: "high" as const
       }))
     };
   }

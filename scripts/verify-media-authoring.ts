@@ -163,6 +163,7 @@ let visualReleaseVerifications = 0;
 let inspectedTarget: { route?: string; selector?: string; label?: string } | undefined;
 const visualRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
+  visualInspectionFeedback: "component-diagnostic-route-family-quality-led",
   publicBuildInputId: "input_visual",
   toolchainVersion: "toolchain-test",
   sandboxImageDigest: `sha256:${"a".repeat(64)}`,
@@ -182,9 +183,19 @@ const visualRuntime = new WorkspaceManagerRuntime<string>({
     inspectedTarget = target;
     return {
       inspectionHash: `sha256:${"c".repeat(64)}`,
-      modelSummary: { requestedRoute: target.route, requestedSelector: target.selector, routes: ["/", "/services"] },
+      modelSummary: {
+        requestedRoute: target.route, requestedSelector: target.selector, routes: ["/", "/services"],
+        visualEvidenceRoutes: ["/"],
+        visualEvidenceFrames: [
+          { imageIndex: 1, route: "/", viewport: "tablet", frame: "focus", width: 768, height: 1024 },
+          { imageIndex: 2, route: "/", viewport: "mobile", frame: "navigation", width: 390, height: 844 }
+        ]
+      },
       diagnosticSummary: {},
-      images: [{ type: "input_image", image_url: "data:image/png;base64,AA==", detail: "high" }]
+      images: [
+        { type: "input_image", image_url: "data:image/png;base64,AA==", detail: "high" },
+        { type: "input_image", image_url: "data:image/png;base64,AQ==", detail: "high" }
+      ]
     };
   },
   inspect: async () => {
@@ -218,6 +229,14 @@ const selectedInspection = await visualRuntime.execute({
   arguments: { route: null }
 });
 assert.equal(selectedInspection.diagnosticOutput.ok, true);
+assert(Array.isArray(selectedInspection.modelOutput));
+const nativeOutput = selectedInspection.modelOutput as Array<Record<string, unknown>>;
+const nativeSummary = JSON.parse(String(nativeOutput[0].text));
+assert.equal(nativeSummary.visualEvidenceFrames[0].viewport, "tablet");
+assert.equal(nativeSummary.visualEvidenceFrames[1].imageIndex, 2);
+assert.deepEqual(nativeOutput.slice(1).map((item) => [item.image_url, item.detail]), [
+  ["data:image/png;base64,AA==", "high"], ["data:image/png;base64,AQ==", "high"]
+], "Quality-led feedback must preserve indexed native frames and their original ordering.");
 assert.equal(selectedInspection.diagnosticOutput.buildPerformed, true);
 assert.deepEqual(inspectedTarget, {
   route: "/",

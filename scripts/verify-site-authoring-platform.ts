@@ -778,6 +778,31 @@ assert(
   "A genuine unsupported best-company claim escaped the fact gate."
 );
 
+const availabilityInput = sitePublicBuildInputSchema.parse({
+  ...input,
+  publicFacts: [...input.publicFacts, { ...offering, id: "fact_availability_description", kind: "description", value: "We offer 24/7 emergency collision assistance. Call for an estimate." }]
+});
+const checkAvailability = (buildInput: SitePublicBuildInput) => new FactBindingValidator().validate({
+  buildInput,
+  routes: [{ path: "/", html: "<main><h1>Collision assistance</h1><p>24/7 emergency collision assistance</p></main>", description: "24/7 emergency collision assistance" }]
+});
+assert.equal(checkAvailability(availabilityInput).status, "pass", "The numeric scanner contradicted the canonical availability check for the same 24/7 claim.");
+assert.equal(checkAvailability(input).status, "fail", "Removing a duplicate numeric check authorized availability without canonical evidence.");
+
+const joinedLegalSource = sourcePage("source_page_joined_legal", "/terms", "Terms", 25,
+  "Free EstimatesWe offer free estimates as a courtesy to our clients. Insurance by ContractorOur contractor is fully insured for the agreed work.");
+const checkJoinedLegal = (html: string, path = "/terms") => new FactBindingValidator().validate({
+  buildInput: input, sourcePages: [joinedLegalSource], routes: [{ path, html }]
+});
+const separatedLegalHtml = "<main><h1>Terms</h1><h2>Free Estimates</h2><p>We offer free estimates as a courtesy to our clients.</p><h2>Insurance by Contractor</h2><p>Our contractor is fully insured for the agreed work.</p></main>";
+assert.equal(checkJoinedLegal(separatedLegalHtml).status, "pass", "A retained heading/body extraction boundary rejected exact legal provisions.");
+assert.equal(checkJoinedLegal(separatedLegalHtml, "/services").status, "fail", "Legal source context authorized claims on a different route.");
+assert.equal(checkJoinedLegal(`${separatedLegalHtml}<p>We guarantee free lifetime replacement.</p>`).status, "fail", "A source text boundary correction authorized an invented legal promise.");
+const mixedCaseLegalSource = { ...joinedLegalSource, extractedText: "Our iPhone repairs include a written warranty for qualifying parts." };
+assert.equal(new FactBindingValidator().validate({ buildInput: input, sourcePages: [mixedCaseLegalSource], routes: [
+  { path: "/terms", html: `<main><p>${mixedCaseLegalSource.extractedText}</p></main>` }
+]}).status, "pass", "Extraction-boundary handling broke legitimate mixed-case words in exact source context.");
+
 const quotationText = "A storm damaged the tree beside our house. The crew removed it the same day and carefully cleared the driveway before leaving.";
 const quotationPage = sourcePage("source_page_quotation", "/services/storm-cleanup", "Storm cleanup", 32,
   `Storm cleanup\n${quotationText}\nEH\nContact our team`);

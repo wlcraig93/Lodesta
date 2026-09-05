@@ -331,14 +331,18 @@ function legalSourceContextSupports(
   let last = first;
   while (last + 1 < renderedTokens.length && renderedTokens[last + 1]!.start < match.end) last += 1;
 
-  const sourceTokens = canonicalSourceTokens(sourceText).map((token) => token.value);
+  // Older retained extraction joined adjacent labels and paragraphs (for
+  // example, "EstimatesWe"). Preserve that visible case boundary before
+  // lowercasing; do not rewrite retained source or loosen the context match.
+  const sourceTokens = [sourceText, sourceText.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")]
+    .map((text) => canonicalSourceTokens(text).map((token) => token.value));
   const claimLength = last - first + 1;
   const contextSize = Math.max(5, claimLength);
   const earliest = Math.max(0, last - contextSize + 1);
   const latest = Math.min(first, renderedTokens.length - contextSize);
   for (let start = earliest; start <= latest; start += 1) {
     const candidate = renderedTokens.slice(start, start + contextSize).map((token) => token.value);
-    if (containsTokenSequence(sourceTokens, candidate)) return true;
+    if (sourceTokens.some((tokens) => containsTokenSequence(tokens, candidate))) return true;
   }
   return false;
 }
@@ -582,12 +586,13 @@ function flattenDisplayValues(value: unknown): string[] {
 }
 
 function factualMarkers(text: string) {
+  // Availability, including 24/7, is checked once by the sensitive-claim
+  // scanner against canonical evidence, in both body text and metadata.
   const markers: Array<{ text: string; start: number; end: number }> = [];
   for (const pattern of [
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
     /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/g,
     /\$\s?\d+(?:[,.]\d{2})?/g,
-    /\b24\s*\/\s*7\b/gi,
     /\b\d+(?:\.\d+)?\s*(?:stars?|years? in business|year warranty)\b/gi,
     /\b(?:main shop|headquarters|flagship location|only location)\b/gi,
     /\b\d{1,3}(?:\.\d+)?\s*°(?:\s*\d{1,2}(?:\.\d+)?\s*[′']?)?(?:\s*\d{1,2}(?:\.\d+)?\s*[″"]?)?\s*[NSEW]\b/gi

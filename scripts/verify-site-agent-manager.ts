@@ -179,7 +179,9 @@ for (const contract of [
   /inspect_site with route: null.*route: '\/' inspects only home/i,
   /critical or serious accessibility failures/i,
   /Advisory IA similarity is evidence, not a score/i,
-  /Reinspect affected routes.*not as a site tour.*force warnings to zero/i
+  /default sample is a starting point, not whole-site approval/i,
+  /Choose additional routes.*distinct content or composition.*material uncertainty/i,
+  /Reinspect affected routes when changed pixels remain uncertain/i
 ]) assert.match(initialGuidance, contract);
 assert.doesNotMatch(taskSkills.edit.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
 assert.doesNotMatch(taskSkills.rebase.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
@@ -211,8 +213,8 @@ const inspectionTool = websiteManagerTools.find(
   (tool) => tool.type === "function" && tool.name === "inspect_site"
 );
 assert(inspectionTool?.type === "function");
-assert.match(inspectionTool.description!, /initial build, pass null.*representative route set.*passing '\/' inspects only the homepage/i);
-assert.match(inspectionTool.description!, /route-local finding or change.*pass that exact route.*instead of repeating the representative set/i);
+assert.match(inspectionTool.description!, /initial build, pass null.*starting sample.*passing '\/' inspects only the homepage/i);
+assert.match(inspectionTool.description!, /exact route.*distinct content and composition not represented/i);
 const finishTool = websiteManagerTools.find(
   (tool) => tool.type === "function" && tool.name === "finish"
 );

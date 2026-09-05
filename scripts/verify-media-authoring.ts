@@ -232,6 +232,8 @@ assert.equal(selectedInspection.diagnosticOutput.ok, true);
 assert(Array.isArray(selectedInspection.modelOutput));
 const nativeOutput = selectedInspection.modelOutput as Array<Record<string, unknown>>;
 const nativeSummary = JSON.parse(String(nativeOutput[0].text));
+assert.match(nativeSummary.feedbackGuidance, /For an initial build, choose additional routes.*not whole-site approval/);
+assert.match(nativeSummary.feedbackGuidance, /For an owner edit, keep review within the requested change/);
 assert.equal(nativeSummary.visualEvidenceFrames[0].viewport, "tablet");
 assert.equal(nativeSummary.visualEvidenceFrames[1].imageIndex, 2);
 assert.deepEqual(nativeOutput.slice(1).map((item) => [item.image_url, item.detail]), [

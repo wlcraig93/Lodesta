@@ -275,6 +275,40 @@ assert.deepEqual(
   "The author-facing review did not preserve a hub and two sibling detail routes."
 );
 
+const archiveHeavyPlan = siteArchitecturePlanSchema.parse({
+  ...siblingReviewPlan,
+  primaryNavigation: [
+    { label: "Home", path: "/" },
+    { label: "Services", path: "/services" },
+    { label: "Articles", path: "/articles" },
+    { label: "Contact", path: "/contact" }
+  ],
+  routes: [...siblingReviewPlan.routes, {
+    path: "/articles", label: "Articles", pageType: "article-hub",
+    purpose: "Help customers explore practical pest identification guides.",
+    parentPath: "/", navigation: "primary", sourcePaths: ["/articles"]
+  }, ...["one", "two", "three", "four", "five"].map((slug) => ({
+    path: `/articles/${slug}`, label: `Guide ${slug}`, pageType: "article",
+    purpose: "Answer a specific customer question about identifying pests.",
+    parentPath: "/articles", navigation: "contextual", sourcePaths: [`/articles/${slug}`]
+  }))]
+});
+const archiveReleasePlan = createArchitectureReleasePlan(archiveHeavyPlan);
+assert.deepEqual(archiveReleasePlan.visualReviewRoutePaths,
+  ["/", "/services", "/services/ants", "/services/rodents", "/contact"],
+  "A larger article archive displaced the architect's higher-priority navigation family.");
+assert.deepEqual(archiveReleasePlan.routePaths, archiveHeavyPlan.routes.map((route) => route.path),
+  "Visual sample selection must not change the approved route ledger.");
+assert.deepEqual(createArchitectureReleasePlan({
+  ...archiveHeavyPlan,
+  primaryNavigation: [archiveHeavyPlan.primaryNavigation[0]!, archiveHeavyPlan.primaryNavigation[2]!, archiveHeavyPlan.primaryNavigation[1]!]
+}).visualReviewRoutePaths,
+["/", "/articles", "/articles/one", "/articles/two", "/contact"],
+"Explicit navigation priority must win even when the architect prioritizes an editorial family.");
+assert.deepEqual(createArchitectureReleasePlan({ ...archiveHeavyPlan, primaryNavigation: [] }).visualReviewRoutePaths,
+  ["/", "/articles", "/articles/one", "/articles/two", "/contact"],
+  "Unranked families should retain deterministic size/order selection.");
+
 const evidence = createArchitectureEvidenceFiles(pages, plan);
 assert(evidence.some((file) => file.path === "src/approved-architecture.ts" && file.content.includes("ant-control")));
 const architectureModule = evidence.find((file) => file.path === "src/approved-architecture.ts");

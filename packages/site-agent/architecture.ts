@@ -484,7 +484,7 @@ export function createArchitectureReleasePlan(
   return {
     routePaths: plan.routes.map((route) => route.path),
     browserRoutePaths: selectArchitectureBrowserRoutes(plan.routes, input.browserCoverage),
-    visualReviewRoutePaths: selectArchitectureVisualReviewRoutes(plan.routes),
+    visualReviewRoutePaths: selectArchitectureVisualReviewRoutes(plan),
     redirects: redirectableDispositions.flatMap((item) =>
       !unsafeRedirectSources.has(item.sourcePath)
         ? [{
@@ -510,12 +510,13 @@ export function createArchitectureReleasePlan(
  * so retain that judgment instead of trying to reconstruct families from
  * finalized titles or URL words later.
  */
-function selectArchitectureVisualReviewRoutes(routes: SiteArchitectureRoute[]) {
+function selectArchitectureVisualReviewRoutes({ routes, primaryNavigation }: SiteArchitecturePlan) {
   const selected = new Set<string>();
   const add = (route: SiteArchitectureRoute | undefined) => {
     if (route) selected.add(route.path);
   };
   const routeIndex = new Map(routes.map((route, index) => [route.path, index]));
+  const navigationIndex = new Map(primaryNavigation.map((item, index) => [item.path, index]));
   const home = routes.find((route) => route.path === "/")
     ?? routes.find((route) => normalizeArchitecturePageType(route.pageType) === "home")
     ?? routes[0];
@@ -534,7 +535,10 @@ function selectArchitectureVisualReviewRoutes(routes: SiteArchitectureRoute[]) {
   const siblingFamily = [...childrenByParent.entries()]
     .filter(([, children]) => children.length >= 2)
     .sort(([leftParent, left], [rightParent, right]) =>
-      right.length - left.length
+      // The architect's customer-facing priority outranks archive size. A
+      // large article archive must not displace the primary service family.
+      (navigationIndex.get(leftParent) ?? Number.MAX_SAFE_INTEGER) - (navigationIndex.get(rightParent) ?? Number.MAX_SAFE_INTEGER)
+      || right.length - left.length
       || (routeIndex.get(leftParent) ?? Number.MAX_SAFE_INTEGER) - (routeIndex.get(rightParent) ?? Number.MAX_SAFE_INTEGER)
       || leftParent.localeCompare(rightParent)
     )[0];

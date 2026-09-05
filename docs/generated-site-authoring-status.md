@@ -6,7 +6,21 @@ Date: 2026-09-05
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Latest editorial diagnostic and native-frame experiment
+### Completed native-frame diagnostic and review-coverage correction
+
+Coordinated release `aafe10da07bdf8c89940d855ceb7ec8866e6bde5` succeeded (CI `33937384133`, release `33937658916`). Both Railway services independently reported the exact SHA, sandbox `sandbox_deployment_893196fcf96fd05a414e269ce69debc1` became active, required deep health passed, and maintenance was released.
+
+Fresh Sol-high run `run_d623f38ff10e4b1a8e826e66c599a6b0` produced `version_cee2e46d2bfd89f1f4c70cee3c43898d`: 35 routes, 1,204,898 ms, $4.14265950 catalog-estimated model cost, 24 requests, and three first-submission applies on one sandbox without recorded transport timeout, replay, or recycle. The hard gate passed after a real inner-page contrast repair. The retained-artifact harness captured 105 route/viewport observations without browser errors or horizontal overflow. Native inspection delivered 40 frames / 4,241,155 bytes in its first pass and eight frames / 2,533,656 bytes in the second, including tablet and opened-menu evidence.
+
+This candidate is **not accepted for delivery**. Detailed review finds internal research language on several pages, a gallery of two crew photos instead of available project evidence, and a shared planting body framed around diagnosing a changed tree. The oversized homepage opening, about-photo crop, emergency closing action, and inaccurate visible required-field instruction need improvement too. Exact Google 4.7 and its supplied reviews link, 24/7 availability, and the original free-estimates terms are preserved. The detailed review and its explicit coverage limits are in `.design/v4-production-readiness-2026-09-04/candidate-reviews/version_cee2e46d2bfd89f1f4c70cee3c43898d/DESIGN_REVIEW.md`. Sharper images alone did not establish customer-ready judgment or comparative cost/quality superiority; architecture also varied independently from the earlier 30-route baseline.
+
+The next bounded correction addresses review coverage: default selection now ranks the architect's existing primary-navigation order before family size, so a large article archive does not displace a higher-priority service family. Initial-build guidance calls the default set a starting sample and allows further inspection where distinct content or composition leaves uncertainty. This replaces the earlier discouragement of a site tour; it adds no critic, mandatory sequence, route classifier, retry, or aesthetic gate. The five-route default size, exact route ledger, inspection tool schema, owner-edit scope, model, source authority, runtime, and full verification remain unchanged. Fixtures cover larger archives, explicit editorial-first priority, and deterministic unranked selection. Descriptor: `site-authoring-platform:native-inspection-frames:navigation-priority-review:author-directed-coverage:2026-09-05`. This correction is under local verification, not yet released or demonstrated by a fresh treatment.
+
+Local typecheck, focused architecture/manager/native-media fixtures, full preflight (including rendering and sandbox verification), and the standalone launch-flow smoke test pass for the coverage correction. Hosted release and fresh-generation evidence remain pending.
+
+The broader fixed eight-run screen has not started. Private generation quality and the separate published owner-edit/lead-inbox journey remain distinct outstanding acceptance requirements.
+
+### Earlier editorial diagnostic and native-frame implementation
 
 Coordinated release `d47cd58754c135f05879820876b33cf73032e5b6` succeeded (CI `33934192467`, release `33934485716`). Web and worker independently reported that SHA, sandbox `sandbox_deployment_0ebb4d8ae5dda5b89b8ef7f4f10d52cf` was promoted, required deep health passed, and maintenance was released. The availability and legal-context corrections below are now deployed.
 
@@ -18,9 +32,9 @@ The next isolated tool treatment replaces model-facing contact sheets with index
 
 The existing three-column sheets reduce 1280px desktop frames to approximately 504px before model preprocessing and omit tablet. The local payload diagnostic preserves fifteen native opening frames across five routes at 2,550,781 binary bytes / 3,402,205 serialized image-input bytes. This is not the full inspection payload: middle, bottom, focus, and menu frames add images. API token cost and quality benefit remain unproven and must be measured in the next diagnostic; no model superiority or savings claim follows from clearer pixels alone.
 
-The authoring profile now records `visualInspectionPresentation: native-viewport-frames`. Platform descriptor: `site-authoring-platform:single-availability-check:retained-legal-case-boundaries:native-inspection-frames:2026-09-05`. This treatment is local pending full verification and its own coordinated release. It does not rewrite retained sources or count toward the frozen eight-run acceptance screen.
+The authoring profile records `visualInspectionPresentation: native-viewport-frames`. Platform descriptor at introduction: `site-authoring-platform:single-availability-check:retained-legal-case-boundaries:native-inspection-frames:2026-09-05`. Its subsequent coordinated release and fresh diagnostic are recorded above. It does not rewrite retained sources or count toward the frozen eight-run acceptance screen.
 
-Local typecheck, native-byte/ordering/tablet/focus fixtures, the model-facing feedback preservation regression, the standalone browser-rendering suite, full preflight, and standalone launch-flow smoke pass. The first restricted preflight failed to launch Chromium because macOS denied Mach-port registration; the permitted rerun passed without an application change. Coordinated release remains a separate check.
+Local typecheck, native-byte/ordering/tablet/focus fixtures, the model-facing feedback preservation regression, the standalone browser-rendering suite, full preflight, and standalone launch-flow smoke passed. The first restricted preflight failed to launch Chromium because macOS denied Mach-port registration; the permitted rerun passed without an application change. The coordinated release subsequently passed as recorded above.
 
 ### Earlier completed diagnostic and verifier correction
 

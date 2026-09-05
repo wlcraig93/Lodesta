@@ -1157,7 +1157,7 @@ function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "
     qualityLed
       ? "Compare the supplied routes, their copy, and relevant source material. Check customer-purpose hierarchy, concrete route-specific answers, accurate proof and imagery, responsive composition, opened phone navigation, and the complete form. Remove internal research language from customer copy. Follow the task skill for design and content judgment."
       : "Judge the supplied screenshots for material content, identity, accessibility, or functional defects.",
-    "Reinspect affected routes only when changed pixels remain uncertain. Finish when no concrete material problem remains; full release verification still checks the complete approved site."
+    "For an initial build, choose additional routes when their distinct content or composition leaves a material uncertainty; this sample is not whole-site approval. For an owner edit, keep review within the requested change. Reinspect affected routes when changed pixels remain uncertain. Finish when no concrete material problem remains; full release verification still checks the complete approved site."
   ].join(" ");
   const scopeGuidance = builtRoutes.length > inspectedRoutes.length
     ? `Fresh browser evidence in this pass covers only ${inspectedRoutes.join(", ")} (${inspectedRoutes.length} of ${builtRoutes.length} built routes). Do not treat it as current evidence for the other ${builtRoutes.length - inspectedRoutes.length} routes.`

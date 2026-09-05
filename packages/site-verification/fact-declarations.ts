@@ -253,9 +253,10 @@ function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildI
       && match.end <= binding.span.end
       && sensitiveBindingMatches(match, binding, buildInput));
     return supported ? [] : [finding(
-      "fact.sensitive_unsupported",
-      `${match.label} ${JSON.stringify(match.matchedText)} has neither matching canonical source evidence nor a compatible fact binding.`,
-      route.path
+      "advisory.claim_evidence",
+      `Check ${match.label} wording ${JSON.stringify(match.matchedText)} in its source and sentence context. This word-pattern match does not establish an unsupported business claim: it may be advice, a negation, or a differently worded supported statement. Preserve accurate useful content; correct an actual unsupported promise rather than deleting words to clear this advisory.`,
+      route.path,
+      "warning"
     )];
   });
 }
@@ -400,7 +401,15 @@ function metadataFindings(
       }
       return bindingSupportsText(binding, match.matchedText, buildInput);
     });
-    return supported ? [] : [finding(
+    if (supported) return [];
+    // Prose patterns identify review topics, not semantic contradictions.
+    // Exact markers and SDK value mismatches remain blocking independently.
+    return [match.category ? finding(
+      "advisory.metadata_claim_evidence",
+      `Check ${surface} ${match.label} wording ${JSON.stringify(match.matchedText)} against the source and its context. This word-pattern match is advisory, not proof of an invented claim; preserve supported meaning rather than optimizing for missing keywords.`,
+      route.path,
+      "warning"
+    ) : finding(
       "fact.metadata_unsupported",
       `${surface} ${match.label} ${JSON.stringify(match.matchedText)} requires the same complete canonical fact to be visibly bound on this route.`,
       route.path

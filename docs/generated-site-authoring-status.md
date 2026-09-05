@@ -6,7 +6,15 @@ Date: 2026-09-05
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Credit-restored diagnostic: verifier-induced repairs, not an infrastructure outage
+### Owner-approved prose-evidence policy
+
+The owner approved proceeding with advisory-only sensitive prose patterns on September 5. The decision and limitations are recorded in `docs/site-prose-evidence-policy.md`. Unmatched body and metadata word-pattern checks now report explicit evidence advisories; exact SDK fact mismatches, existing factual markers, rating/link integrity, forms, security and functional checks remain blocking. The warning asks for source and sentence context rather than deleting keywords. No critic, model stage, retry, schema change, retained artifact rewrite, or authoring-model/default change is introduced.
+
+Read-only replay of the credit-restored first draft returns **zero factual errors and six prose advisories**, preserving its insurer advice, electrician reference and negated guarantee without a source edit. The pre-finish draft returns zero factual errors and zero prose advisories. This is a validator replay, not a new completed generation or proof of every sentence's truth. Focused platform/manager fixtures, typecheck, full preflight (including browser and sandbox verification), and sequential standalone smoke pass; coordinated release is pending. Evidence: `.design/v4-production-readiness-2026-09-04/prose-advisory-policy-replay.json`, `prose-advisory-preflight.log`, and `prose-advisory-smoke.log`.
+
+The independent browser-verifier release `9c6450b7762bf2c7f6a1a55c1f71803bd6f960d2` passed CI `33956216490` and coordinated release `33956481336`. Both controllers reported that exact SHA; green sandbox `sandbox_deployment_8dfe721e6dbac705eb3b0373732e57e7` was promoted, required deep health passed, and maintenance was released. Its evidence is retained in `.design/v4-production-readiness-2026-09-04/release-9c6450b7/`. This does not include the subsequent prose-policy change until separately released.
+
+### Earlier credit-restored diagnostic: verifier-induced repairs, not an infrastructure outage
 
 Release `9aa021fb6b7bb4c34396136757bc80320f69a30a` completed CI `33946573880` and coordinated release `33946833859`. Both Railway services reported that SHA, active sandbox `sandbox_deployment_49ecffaccff5d3eab1fd05d71f757de6` passed required deep health, and maintenance was released. This deployed the independent offer-inflection and quota-classification fixes described below. The owner replenished API credits on September 5; successful requests in the following run confirm working API access.
 

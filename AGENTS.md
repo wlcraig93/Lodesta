@@ -29,6 +29,7 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 - Do not add planning phases, mandatory tool sequences, edit-anchor or replacement-count protocols, per-action budgets or counters, automatic critics, automatic repair continuations, or convergence checks. Reintroducing any of these requires an explicit product-owner decision recorded in a plan document.
 - The standing run limits are the overall deadline, metered model-cost fuse, workspace size, and concurrency. Input/output token totals are telemetry, not terminal budgets. The sole approved convergence exception is the exact deterministic release-failure guard recorded in `docs/site-authoring-runaway-guardrails-plan.md`. Prefer deleting a constraint over tuning it.
 - Subjective quality findings (design, copy, SEO/CRO heuristics) are advisory. Only safety, factual, capability, and functional violations block a candidate, and an explicit owner edit is never blocked by unrelated subjective findings.
+- Sensitive prose word-pattern findings are advisory evidence, not semantic proof of a factual violation. Exact fact bindings/markers and capability, security, and functional checks remain blocking. Follow the owner-approved boundary and limitations in `docs/site-prose-evidence-policy.md`; never make the author delete accurate advice or negations merely to clear a keyword warning.
 
 ## Stored Artifact Schema Changes
 

@@ -1071,7 +1071,7 @@ function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "
     const route = typeof finding.route === "string" ? finding.route : "";
     const message = typeof finding.message === "string" ? finding.message : "";
     const key = familyDiagnostic
-      ? id === "fact.sensitive_unsupported" ? `${id}:${message}` : id
+      ? id === "advisory.claim_evidence" || id === "advisory.metadata_claim_evidence" ? `${id}:${message}` : id
       : `${id}:${route}`;
     const viewports = ["desktop", "tablet", "mobile"].filter((viewport) => new RegExp(`\\b${viewport}\\b`, "i").test(message));
     const retained = grouped.get(key);

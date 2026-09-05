@@ -151,6 +151,8 @@ for (const [sourceValue, renderedValue] of [
 ]) {
   assert.equal(freeOfferValidation(sourceValue, renderedValue).status, "pass",
     `A singular/plural-only offer change was rejected: ${sourceValue} -> ${renderedValue}`);
+  assert.equal(freeOfferValidation(sourceValue, renderedValue).findings.some(isClaimAdvisory), false,
+    `A supported singular/plural offer produced an unnecessary advisory: ${sourceValue} -> ${renderedValue}`);
 }
 for (const [sourceValue, renderedValue] of [
   ["Free on-site estimate", "Free estimates"],
@@ -159,8 +161,8 @@ for (const [sourceValue, renderedValue] of [
   ["Paid estimates", "Free estimates"],
   ["Free estimate", "Guaranteed free estimates"]
 ]) {
-  assert.equal(freeOfferValidation(sourceValue, renderedValue).status, "fail",
-    `An offer change beyond number inflection escaped: ${sourceValue} -> ${renderedValue}`);
+  assert.equal(freeOfferValidation(sourceValue, renderedValue).findings.some(isClaimAdvisory), true,
+    `A differently worded offer lost its evidence advisory: ${sourceValue} -> ${renderedValue}`);
 }
 
 const validBody = `<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header>
@@ -286,7 +288,7 @@ assert(
   "A substantively preserved legal source page was rejected."
 );
 assert(
-  !errors(preservedPrivacy).some((finding) => finding.id === "fact.undeclared_marker" || finding.id === "fact.sensitive_unsupported"),
+  !preservedPrivacy.findings.some((finding) => finding.id === "fact.undeclared_marker" || isClaimAdvisory(finding)),
   "An exact context-matched legal provision was rejected by the generic fact gate."
 );
 
@@ -446,7 +448,7 @@ assert(
   "A branded source-sensitive terms route was not recognized for preservation."
 );
 assert(
-  !errors(preservedBrandedTerms).some((finding) => finding.id === "fact.undeclared_marker" || finding.id === "fact.sensitive_unsupported"),
+  !preservedBrandedTerms.findings.some((finding) => finding.id === "fact.undeclared_marker" || isClaimAdvisory(finding)),
   "Exact owner-published provisions on a branded legal route were rejected by the generic fact gate."
 );
 
@@ -475,7 +477,7 @@ assert(
   "An invented legal-route email escaped the context-matched source exception."
 );
 assert(
-  errors(inventedLegalClaim).some((finding) => finding.id === "fact.sensitive_unsupported" && finding.route === "/privacy"),
+  claimAdvisories(inventedLegalClaim).some((finding) => finding.id === "advisory.claim_evidence" && finding.route === "/privacy"),
   "An invented legal-route insurance claim escaped the context-matched source exception."
 );
 
@@ -485,7 +487,7 @@ const ordinaryCookieDuration = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  !errors(ordinaryCookieDuration).some((finding) => finding.id === "fact.sensitive_unsupported"),
+  !claimAdvisories(ordinaryCookieDuration).some((finding) => finding.id === "advisory.claim_evidence"),
   "An ordinary cookie duration was misclassified as business longevity."
 );
 const unsupportedLongevity = prepareSiteArtifact({
@@ -494,8 +496,8 @@ const unsupportedLongevity = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unsupportedLongevity).some((finding) => finding.id === "fact.sensitive_unsupported"),
-  "A genuine unsupported business-longevity claim escaped the fact gate."
+  claimAdvisories(unsupportedLongevity).some((finding) => finding.id === "advisory.claim_evidence"),
+  "An unsupported longevity pattern was not surfaced for source/context review."
 );
 
 const serviceAreaFact = {
@@ -779,6 +781,37 @@ assert(
   "An exact canonical address-role fact was rejected."
 );
 
+// The prose scanner cannot determine the subject, negation, or whether a
+// different offer wording is semantically equivalent. Preserve the signal
+// without making the author delete accurate copy to complete a build.
+for (const text of [
+  "The plan describes proposed care, not a guaranteed outcome.",
+  "For electrical repairs, contact a licensed electrician.",
+  "Contact your insurer about damage to your property.",
+  "Insurance questions before you schedule repairs.",
+  "Request a free collision repair estimate.",
+  "We are fully licensed and guarantee every result."
+]) {
+  const result = new FactBindingValidator().validate({
+    buildInput: input,
+    routes: [{ path: "/", html: `<main><p>${text}</p></main>`, title: text, description: text }]
+  });
+  assert.equal(result.status, "pass", `A prose-only pattern blocked authoring: ${text}`);
+  assert(result.findings.some((finding) => finding.id === "advisory.claim_evidence" && finding.severity === "warning"));
+  assert(result.findings.some((finding) => finding.id === "advisory.metadata_claim_evidence" && finding.severity === "warning"));
+}
+for (const html of [
+  `<p data-lodesta-fact-id="${phone.id}">999-555-0100</p>`,
+  '<p data-lodesta-fact-id="fact_invented">Licensed electrician</p>',
+  '<p>Call 999-555-0100. Contact your insurer.</p>',
+  '<p>Contact invented@northstarcollision.com. No guaranteed outcome.</p>'
+]) {
+  const result = new FactBindingValidator().validate({ buildInput: input, routes: [{ path: "/", html }] });
+  assert.equal(result.status, "fail", "An exact mismatch was downgraded with prose advice.");
+  assert(result.findings.some((finding) => finding.severity === "error"
+    && ["fact.sdk_value_mismatch", "fact.sdk_fact_missing", "fact.undeclared_marker"].includes(finding.id)));
+}
+
 const sensitiveName = "#1 Coby's Tentless Termite and Pest Control";
 const sensitiveNameInput = sitePublicBuildInputSchema.parse({
   ...input,
@@ -794,7 +827,7 @@ const supportedSensitiveName = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  !errors(supportedSensitiveName).some((finding) => finding.id === "fact.sensitive_unsupported" || finding.id === "fact.metadata_unsupported"),
+  !claimAdvisories(supportedSensitiveName).some((finding) => finding.id === "advisory.claim_evidence" || finding.id === "advisory.metadata_claim_evidence"),
   `An exact compiler-bound canonical business name was misclassified as an invented #1 claim: ${JSON.stringify(errors(supportedSensitiveName))}`
 );
 const unboundSensitiveName = prepareSiteArtifact({
@@ -803,7 +836,7 @@ const unboundSensitiveName = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unboundSensitiveName).some((finding) => finding.id === "fact.sensitive_unsupported"),
+  claimAdvisories(unboundSensitiveName).some((finding) => finding.id === "advisory.claim_evidence"),
   "An unbound #1 claim received the canonical business-name exemption."
 );
 
@@ -813,7 +846,7 @@ const ordinaryBestFitCopy = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  !errors(ordinaryBestFitCopy).some((finding) => finding.id === "fact.sensitive_unsupported"),
+  !claimAdvisories(ordinaryBestFitCopy).some((finding) => finding.id === "advisory.claim_evidence"),
   "Ordinary best-fit guidance was misclassified as an unsupported superiority claim."
 );
 const unsupportedBestCompanyCopy = prepareSiteArtifact({
@@ -822,8 +855,8 @@ const unsupportedBestCompanyCopy = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unsupportedBestCompanyCopy).some((finding) => finding.id === "fact.sensitive_unsupported"),
-  "A genuine unsupported best-company claim escaped the fact gate."
+  claimAdvisories(unsupportedBestCompanyCopy).some((finding) => finding.id === "advisory.claim_evidence"),
+  "An unsupported superiority pattern was not surfaced for source/context review."
 );
 
 const availabilityInput = sitePublicBuildInputSchema.parse({
@@ -835,7 +868,8 @@ const checkAvailability = (buildInput: SitePublicBuildInput) => new FactBindingV
   routes: [{ path: "/", html: "<main><h1>Collision assistance</h1><p>24/7 emergency collision assistance</p></main>", description: "24/7 emergency collision assistance" }]
 });
 assert.equal(checkAvailability(availabilityInput).status, "pass", "The numeric scanner contradicted the canonical availability check for the same 24/7 claim.");
-assert.equal(checkAvailability(input).status, "fail", "Removing a duplicate numeric check authorized availability without canonical evidence.");
+assert.equal(checkAvailability(availabilityInput).findings.some(isClaimAdvisory), false, "Exact supported availability produced an unnecessary advisory.");
+assert.equal(checkAvailability(input).findings.some(isClaimAdvisory), true, "Unmatched availability wording lost its evidence advisory.");
 
 const joinedLegalSource = sourcePage("source_page_joined_legal", "/terms", "Terms", 25,
   "Free EstimatesWe offer free estimates as a courtesy to our clients. Insurance by ContractorOur contractor is fully insured for the agreed work.");
@@ -844,8 +878,9 @@ const checkJoinedLegal = (html: string, path = "/terms") => new FactBindingValid
 });
 const separatedLegalHtml = "<main><h1>Terms</h1><h2>Free Estimates</h2><p>We offer free estimates as a courtesy to our clients.</p><h2>Insurance by Contractor</h2><p>Our contractor is fully insured for the agreed work.</p></main>";
 assert.equal(checkJoinedLegal(separatedLegalHtml).status, "pass", "A retained heading/body extraction boundary rejected exact legal provisions.");
-assert.equal(checkJoinedLegal(separatedLegalHtml, "/services").status, "fail", "Legal source context authorized claims on a different route.");
-assert.equal(checkJoinedLegal(`${separatedLegalHtml}<p>We guarantee free lifetime replacement.</p>`).status, "fail", "A source text boundary correction authorized an invented legal promise.");
+assert.equal(checkJoinedLegal(separatedLegalHtml).findings.some(isClaimAdvisory), false, "Exact retained legal provisions produced an unnecessary advisory.");
+assert.equal(checkJoinedLegal(separatedLegalHtml, "/services").findings.some(isClaimAdvisory), true, "Legal source context authorized claims on a different route.");
+assert.equal(checkJoinedLegal(`${separatedLegalHtml}<p>We guarantee free lifetime replacement.</p>`).findings.some(isClaimAdvisory), true, "A source text boundary correction authorized an invented legal promise.");
 const mixedCaseLegalSource = { ...joinedLegalSource, extractedText: "Our iPhone repairs include a written warranty for qualifying parts." };
 assert.equal(new FactBindingValidator().validate({ buildInput: input, sourcePages: [mixedCaseLegalSource], routes: [
   { path: "/terms", html: `<main><p>${mixedCaseLegalSource.extractedText}</p></main>` }
@@ -870,6 +905,7 @@ const checkQuotation = (html: string, options: {
   sourcePages: options.pages ?? [quotationPage]
 });
 assert.equal(checkQuotation(quotationHtml).status, "pass", "An exact retained attributed customer experience was classified as a new company promise.");
+assert.equal(checkQuotation(quotationHtml).findings.some(isClaimAdvisory), false, "An exact retained attributed quotation produced an unnecessary advisory.");
 for (const [label, html] of [
   ["invented attribution", quotationHtml.replace("E.H.", "Jane Doe")],
   ["missing attribution", quotationHtml.replace("<cite>E.H.</cite>", "")],
@@ -878,18 +914,18 @@ for (const [label, html] of [
   ["unquoted company promise", `${quotationHtml}<p>We provide same day removal.</p>`],
   ["ordinary company copy", `<p>${quotationText}</p><cite>EH</cite>`]
 ]) {
-  assert.equal(checkQuotation(html!).status, "fail", `Quotation evidence authorized ${label}.`);
+  assert.equal(checkQuotation(html!).findings.some(isClaimAdvisory), true, `Quotation evidence authorized ${label}.`);
 }
-assert.equal(checkQuotation(quotationHtml, { description: "Same day removal" }).status, "fail", "A customer quote authorized an unqualified metadata promise.");
-assert.equal(checkQuotation(quotationHtml, { buildInput: input }).status, "fail", "An unretained source authorized a quote.");
-assert.equal(checkQuotation(quotationHtml, { snapshots: [{ ...quotationSnapshot, sourceType: "web_research" }] }).status, "fail", "Third-party research authorized testimonial prose.");
-assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, finalUrl: "https://third-party.example/reviews" }] }).status, "fail", "An off-site redirect authorized a first-party quote.");
-assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, outcome: "excluded" }] }).status, "fail", "An excluded page authorized a quote.");
-assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, extractedText: `They could not promise this. ${quotationText}\nEH` }] }).status, "fail", "A truncated source qualifier authorized a quotation.");
-assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, extractedText: `${quotationText}\nJane Doe\nAnother testimonial\nEH` }] }).status, "fail", "A disconnected attribution authorized a quotation.");
+assert.equal(checkQuotation(quotationHtml, { description: "Same day removal" }).findings.some(isClaimAdvisory), true, "A customer quote authorized an unqualified metadata promise.");
+assert.equal(checkQuotation(quotationHtml, { buildInput: input }).findings.some(isClaimAdvisory), true, "An unretained source authorized a quote.");
+assert.equal(checkQuotation(quotationHtml, { snapshots: [{ ...quotationSnapshot, sourceType: "web_research" }] }).findings.some(isClaimAdvisory), true, "Third-party research authorized testimonial prose.");
+assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, finalUrl: "https://third-party.example/reviews" }] }).findings.some(isClaimAdvisory), true, "An off-site redirect authorized a first-party quote.");
+assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, outcome: "excluded" }] }).findings.some(isClaimAdvisory), true, "An excluded page authorized a quote.");
+assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, extractedText: `They could not promise this. ${quotationText}\nEH` }] }).findings.some(isClaimAdvisory), true, "A truncated source qualifier authorized a quotation.");
+assert.equal(checkQuotation(quotationHtml, { pages: [{ ...quotationPage, extractedText: `${quotationText}\nJane Doe\nAnother testimonial\nEH` }] }).findings.some(isClaimAdvisory), true, "A disconnected attribution authorized a quotation.");
 assert.equal(checkQuotation(`<blockquote><p>They quoted 500% for same day removal.</p><cite>EH</cite></blockquote>`, {
   pages: [{ ...quotationPage, extractedText: "They quoted $500 for same day removal.\nEH" }]
-}).status, "fail", "Token-only matching lost semantic punctuation in a quotation.");
+}).findings.some(isClaimAdvisory), true, "Token-only matching lost semantic punctuation in a quotation.");
 const numberQuotation = "I reached their 24/7 phone line during a storm and described the fallen tree near my driveway.";
 assert.equal(checkQuotation(`<blockquote><p>${numberQuotation}</p><cite>EH</cite></blockquote>`, {
   pages: [{ ...quotationPage, extractedText: `${numberQuotation}\nEH` }]
@@ -919,7 +955,7 @@ const naturallySupportedEmergency = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  !errors(naturallySupportedEmergency).some((finding) => finding.id === "fact.sensitive_unsupported"),
+  !claimAdvisories(naturallySupportedEmergency).some((finding) => finding.id === "advisory.claim_evidence"),
   "An exact low-risk claim retained in canonical first-party description evidence required JSX fact-binding ceremony."
 );
 const unsupportedEmergency = prepareSiteArtifact({
@@ -928,8 +964,8 @@ const unsupportedEmergency = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unsupportedEmergency).some((finding) => finding.id === "fact.sensitive_unsupported"),
-  "An unsupported emergency-availability claim passed without canonical evidence."
+  claimAdvisories(unsupportedEmergency).some((finding) => finding.id === "advisory.claim_evidence"),
+  "An unsupported emergency-availability claim was not surfaced for source/context review."
 );
 for (const text of [
   "Emergency help is available day and night.",
@@ -942,8 +978,8 @@ for (const text of [
     runtimeSeriesId: "site-runtime-v4"
   });
   assert(
-    errors(unsupportedAvailabilityParaphrase).some((finding) => finding.id === "fact.sensitive_unsupported"),
-    `An unsupported continuous-availability paraphrase escaped the fact gate: ${text}`
+    claimAdvisories(unsupportedAvailabilityParaphrase).some((finding) => finding.id === "advisory.claim_evidence"),
+    `An unsupported availability pattern was not surfaced for source/context review: ${text}`
   );
 }
 
@@ -963,8 +999,8 @@ const unsupportedSafetyPositioning = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unsupportedSafetyPositioning).some((finding) => finding.id === "fact.sensitive_unsupported"),
-  "An unsupported safety and environmental promise passed without canonical evidence."
+  claimAdvisories(unsupportedSafetyPositioning).some((finding) => finding.id === "advisory.claim_evidence"),
+  "An unsupported safety and environmental promise was not surfaced for source/context review."
 );
 const unsupportedSafeRemoval = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Bee removal</h1><p>We locate the hive and remove or relocate it safely.</p></main>"),
@@ -972,8 +1008,8 @@ const unsupportedSafeRemoval = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unsupportedSafeRemoval).some((finding) => finding.id === "fact.sensitive_unsupported"),
-  "An unsupported safe service-performance claim passed without canonical evidence."
+  claimAdvisories(unsupportedSafeRemoval).some((finding) => finding.id === "advisory.claim_evidence"),
+  "An unsupported safe service-performance claim was not surfaced for source/context review."
 );
 const unsupportedSafeHandling = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Wildlife control</h1><p>The team helps residents safely address nuisance pests and wildlife.</p></main>"),
@@ -981,8 +1017,8 @@ const unsupportedSafeHandling = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unsupportedSafeHandling).some((finding) => finding.id === "fact.sensitive_unsupported"),
-  "An unsupported safely-address service claim escaped the factual gate."
+  claimAdvisories(unsupportedSafeHandling).some((finding) => finding.id === "advisory.claim_evidence"),
+  "An unsupported safely-address service claim was not surfaced for source/context review."
 );
 const unsupportedSaferFeelingOutcome = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Pest control</h1><p>Clearer rooms, safer-feeling yards, fewer unwanted insects.</p></main>"),
@@ -990,8 +1026,8 @@ const unsupportedSaferFeelingOutcome = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unsupportedSaferFeelingOutcome).some((finding) => finding.id === "fact.sensitive_unsupported"),
-  "An unsupported safer-feeling outcome claim escaped the factual gate."
+  claimAdvisories(unsupportedSaferFeelingOutcome).some((finding) => finding.id === "advisory.claim_evidence"),
+  "An unsupported safer-feeling outcome claim was not surfaced for source/context review."
 );
 const unsupportedServiceCadence = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Pest control</h1><p>Routine service visits are offered every 2 months.</p></main>"),
@@ -999,8 +1035,8 @@ const unsupportedServiceCadence = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unsupportedServiceCadence).some((finding) => finding.id === "fact.sensitive_unsupported"),
-  "An unsupported recurring-service cadence passed without canonical evidence."
+  claimAdvisories(unsupportedServiceCadence).some((finding) => finding.id === "advisory.claim_evidence"),
+  "An unsupported recurring-service cadence was not surfaced for source/context review."
 );
 const ordinaryCalendarGuidance = prepareSiteArtifact({
   authoredArtifact: artifact("<main><h1>Seasonal pest guide</h1><p>Inspect stored decorations every two months for signs of activity.</p></main>"),
@@ -1008,7 +1044,7 @@ const ordinaryCalendarGuidance = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  !errors(ordinaryCalendarGuidance).some((finding) => finding.id === "fact.sensitive_unsupported"),
+  !claimAdvisories(ordinaryCalendarGuidance).some((finding) => finding.id === "advisory.claim_evidence"),
   "Ordinary homeowner inspection guidance was misclassified as a business service cadence."
 );
 
@@ -1051,19 +1087,19 @@ const supportedProof = prepareSiteArtifact({
   buildInput: proofInput,
   runtimeSeriesId: "site-runtime-v4"
 });
-assert(!errors(supportedProof).some((finding) => finding.id === "fact.sensitive_unsupported" || finding.id === "fact.metadata_unsupported"));
+assert(!claimAdvisories(supportedProof).some((finding) => finding.id === "advisory.claim_evidence" || finding.id === "advisory.metadata_claim_evidence"));
 
 const duplicateProof = prepareSiteArtifact({
   authoredArtifact: artifact(`<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header><main><p data-lodesta-fact-id="${proofFact.id}">10-year warranty</p><p>10-year warranty</p></main>`),
   buildInput: proofInput,
   runtimeSeriesId: "site-runtime-v4"
 });
-assert(errors(duplicateProof).some((finding) => finding.id === "fact.sensitive_unsupported"), "an unbound duplicate occurrence was authorized by text search");
-const blockedFactArtifact = finalizeForTest(duplicateProof, proofInput);
-assert.equal(blockedFactArtifact.qa.hardGate, "failed", "an unsupported factual claim did not block the candidate");
+assert(claimAdvisories(duplicateProof).some((finding) => finding.id === "advisory.claim_evidence"), "An unbound duplicate occurrence lost its source/context advisory.");
+const advisoryProofArtifact = finalizeForTest(duplicateProof, proofInput);
+assert.equal(advisoryProofArtifact.qa.hardGate, "passed", "A prose-pattern advisory was promoted into a hard failure.");
 assert(
-  blockedFactArtifact.qa.findings.some((finding) => finding.id === "fact.sensitive_unsupported" && finding.severity === "error"),
-  "the unsupported factual claim was downgraded instead of remaining a blocker"
+  advisoryProofArtifact.qa.findings.some((finding) => finding.id === "advisory.claim_evidence" && finding.severity === "warning"),
+  "An unmatched prose pattern disappeared instead of remaining visible as an advisory."
 );
 const aggregateRatingSnapshot = sourceSnapshotSchema.parse({
   schemaVersion: 1,
@@ -1184,8 +1220,8 @@ const unboundReturnServicePromise = prepareSiteArtifact({
   runtimeSeriesId: "site-runtime-v4"
 });
 assert(
-  errors(unboundReturnServicePromise).some((finding) => finding.id === "fact.sensitive_unsupported"),
-  "An unbound return-service promise escaped proof enforcement by omitting the word guarantee."
+  claimAdvisories(unboundReturnServicePromise).some((finding) => finding.id === "advisory.claim_evidence"),
+  "A return-service promise was not surfaced for source/context review."
 );
 const unreadableVisualArtifact = finalizeForTest(supportedProof, proofInput, [{
   id: "render.contrast",
@@ -1208,7 +1244,12 @@ const metadataOnly = prepareSiteArtifact({
   buildInput: proofInput,
   runtimeSeriesId: "site-runtime-v4"
 });
-assert(errors(metadataOnly).some((finding) => finding.id === "fact.metadata_unsupported"), "metadata-only sensitive copy passed");
+assert(claimAdvisories(metadataOnly).some((finding) => finding.id === "advisory.metadata_claim_evidence"), "Metadata-only prose lost its evidence advisory.");
+const mismatchedMetadata = new FactBindingValidator().validate({ buildInput: input, routes: [{
+  path: "/", html: validBody, title: "Contact invented@northstarcollision.com", description: "Rated 4.9 stars"
+}] });
+assert.equal(mismatchedMetadata.status, "fail", "Exact metadata markers were downgraded with prose patterns.");
+assert(mismatchedMetadata.findings.filter((finding) => finding.id === "fact.metadata_unsupported" && finding.severity === "error").length >= 2);
 
 const mismatchedContact = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>${input.business.name}</h1><a href="tel:+1-555-555-5555">Call us</a></main>`),
@@ -1659,6 +1700,15 @@ function artifact(bodyHtml: string, metadata?: { title?: string; description?: s
       bodyHtml
     }]
   }));
+}
+
+function isClaimAdvisory(finding: { id: string; severity: string }) {
+  return finding.severity === "warning"
+    && (finding.id === "advisory.claim_evidence" || finding.id === "advisory.metadata_claim_evidence");
+}
+
+function claimAdvisories(preparedArtifact: ReturnType<typeof prepareSiteArtifact>) {
+  return preparedArtifact.findings.filter(isClaimAdvisory);
 }
 
 function errors(preparedArtifact: ReturnType<typeof prepareSiteArtifact>) {

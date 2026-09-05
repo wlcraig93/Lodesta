@@ -346,6 +346,20 @@ assert.match(String(qualityLedFeedback.feedbackGuidance), /Preserve the approved
 assert.match(String(qualityLedFeedback.feedbackGuidance), /Remove internal research language.*task skill/i);
 assert.deepEqual(qualityLedFeedback.findings.map((item) => item.id).sort(), ["render.form_text", "render.internal_provenance_copy"]);
 assert.equal(qualityLedFeedback.findingsTruncated, false, "Concise feedback must not discard mechanical evidence.");
+const proseEvidenceFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
+  findings: [
+    { id: "advisory.claim_evidence", severity: "warning", area: "claim", message: "Check insurer advice in source context.", route: "/guide" },
+    { id: "advisory.claim_evidence", severity: "warning", area: "claim", message: "Check a negated guarantee in source context.", route: "/case-study" },
+    { id: "advisory.metadata_claim_evidence", severity: "warning", area: "claim", message: "Check the offer wording in its context.", route: "/" },
+    { id: "fact.sdk_value_mismatch", severity: "error", area: "claim", message: "Phone differs from the exact bound fact.", route: "/contact" }
+  ],
+  routes: ["/", "/guide", "/case-study", "/contact"],
+  inspectedRoutes: ["/", "/guide", "/case-study", "/contact"]
+});
+assert.equal(proseEvidenceFeedback.findings.filter((finding) => finding.severity === "warning").length, 3,
+  "Prose advisories were dropped, merged across different evidence topics, or promoted to errors.");
+assert.equal(proseEvidenceFeedback.findings.filter((finding) => finding.severity === "error").length, 1,
+  "An exact fact mismatch was downgraded with prose advisories.");
 const iaHeuristicOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
   findings: [
     { id: "advisory.ia_repetition", severity: "warning", area: "content", message: "Service routes share structural signals.", route: "/services" }

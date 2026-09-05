@@ -1,7 +1,7 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
-// Descriptor: site-authoring-platform:exact-offer-inflection:quota-classification:fragment-aware-control-hit-testing:controlled-panel-navigation:2026-09-05
-export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:a1a4419e15e406ba61caf3c1ac0f7df76d1ebbae60682cc70cbd916b9c34e307";
+// Descriptor: site-authoring-platform:controlled-panel-navigation:advisory-prose-evidence:2026-09-05
+export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:8d117fd7022abccce6e13520d7aad24d07188ab70af0d5005022468ec16d1148";
 export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
@@ -11,9 +11,10 @@ export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:495
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
 export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:c5c8074fb365995acffa4dd39aa76806beef0a5b7aa88761f25540f5b3dd1217";
 export const websiteManagerPromptIdentity = "website-manager@sha256:e679d32d00100ed66aa44f0077f51a86d7e2f14d7183fd995506c345a179ec6e";
-export const factBindingPolicyIdentity = "fact-binding-validator@sha256:04195bbfc48b200176d3e87c7056abdddd466a978b84981a53c30cf08b726115";
-// Descriptor: site-verification-policy:semantic-legal-and-scroll-verification:fragment-aware-control-hit-testing:controlled-panel-navigation:2026-09-05
-export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:e773a6bcce8921d770da45f59877330db9731cdc705de63f72ba19a41e2933b4";
+// Descriptor: fact-binding-validator:exact-markers-and-bindings:advisory-prose-evidence:2026-09-05
+export const factBindingPolicyIdentity = "fact-binding-validator@sha256:e560da37c4418c025b62803388a62cf34a50358b0a6c7ec64436ef6552e71eaa";
+// Descriptor: site-verification-policy:controlled-panel-navigation:advisory-prose-evidence:2026-09-05
+export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:7c846340466f695f0a690de2123f2c8429c36f1af3c2e3e39e31987923629bbb";
 export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:a9dc99a379ac4ccb9bd4a590bda1b4864ac05827a8d2e560fe06f46706974cab";
 
 export const siteTechnicalReleasePolicy = {

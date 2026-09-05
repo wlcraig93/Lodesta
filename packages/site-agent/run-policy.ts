@@ -1,11 +1,19 @@
 import type { ManagerModelUsage, ManagerRunGuardrails } from "./contracts";
 import { SiteAuthoringTerminalError } from "./failures";
 
+// Standard direct-OpenAI rates, checked September 5, 2026:
+// https://developers.openai.com/api/docs/pricing
+// Retained usage is historical evidence; never recompute stored run costs.
 export const siteAgentModelPricing = {
+  "gpt-6-astra": {
+    inputUsdPerMillion: 10,
+    cachedInputUsdPerMillion: 1,
+    outputUsdPerMillion: 50
+  },
   "gpt-5.6-sol": {
-    inputUsdPerMillion: 5,
-    cachedInputUsdPerMillion: 0.5,
-    outputUsdPerMillion: 30
+    inputUsdPerMillion: 4,
+    cachedInputUsdPerMillion: 0.4,
+    outputUsdPerMillion: 20
   },
   "gpt-5.6-terra": {
     inputUsdPerMillion: 2,
@@ -121,12 +129,16 @@ export function usageForModel(
   const outputTokens = value?.output_tokens ?? 0;
   const pricing = modelPricing(modelId);
   const uncachedInputTokens = inputTokens - cachedInputTokens;
+  // The long-context rate applies to the whole request, including cache hits,
+  // once total prompt input (not uncached input) exceeds 272K tokens.
+  const inputRateMultiplier = inputTokens > 272_000 ? 2 : 1;
+  const outputRateMultiplier = inputTokens > 272_000 ? 1.5 : 1;
   const catalogEstimateUsd = pricing
     ? (
-        uncachedInputTokens * pricing.inputUsdPerMillion
-        + cacheWriteTokens * pricing.inputUsdPerMillion * 0.25
-        + cachedInputTokens * pricing.cachedInputUsdPerMillion
-        + outputTokens * pricing.outputUsdPerMillion
+        (uncachedInputTokens * pricing.inputUsdPerMillion
+          + cacheWriteTokens * pricing.inputUsdPerMillion * 0.25
+          + cachedInputTokens * pricing.cachedInputUsdPerMillion) * inputRateMultiplier
+        + outputTokens * pricing.outputUsdPerMillion * outputRateMultiplier
       ) / 1_000_000
     : undefined;
   const providerCostUsd = nonnegativeFinite(value?.cost);

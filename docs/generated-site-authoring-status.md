@@ -6,7 +6,17 @@ Date: 2026-09-05
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Completed native-frame diagnostic and review-coverage correction
+### Completed review-coverage diagnostic; model comparison next
+
+Coordinated release `fa55df3be6d3f68e2f25ea6780904c562fb93ba5` passed CI `33940238113` and release `33940501272`. Web and worker independently reported that SHA; sandbox `sandbox_deployment_37c6d675e3af4c92aa3e00f68b78c5fb` became active; required deep health and maintenance release passed.
+
+Fresh Sol-high run `run_fbb1f32284b04a5dbe5526b9493709b6` produced `version_8b6c8b2083445be69ebb2d9ae64b433c`: 31 routes, 1,349,975 ms, $6.23855625 recorded catalog estimate and 37 authoring requests. Six successful first-submission applies and one compilation rejection stayed on one sandbox without recorded transport timeout, replay or recycle. Broader author-directed inspection occurred, including the gallery, an article, cookie policy and contact. A genuine article-hub contrast failure at finish was repaired, and the hard gate passed. All 93 retained-artifact route/viewport captures completed without browser errors or horizontal overflow.
+
+**Not accepted for delivery.** Detailed render/source review still finds a crew-photo gallery instead of available project work, research voice in public copy, and an oversized homepage opening with a crop that loses the people in the photo. Planting decision support and emergency call-first actions are better, but these wins do not establish overall superiority. The independently generated 31-route architecture would also have selected services under the old sampling rule; only the fixture/replay isolates that selection change. Review: `.design/v4-production-readiness-2026-09-04/candidate-reviews/version_8b6c8b2083445be69ebb2d9ae64b433c/DESIGN_REVIEW.md`.
+
+The next scoped implementation adds GPT-6 Astra to the existing operator-selectable OpenAI models for a model-only quality experiment, without changing the Luna default, authoring guidance, tools, runtime, inspection or cost fuse. It also refreshes future Sol cost estimates and accounts for the documented whole-request long-context surcharge; retained run costs are untouched. Compatibility probes establish schema acceptance and valid serial tool replay, not website quality. Local typecheck, focused model/cost contracts, full preflight and launch-flow smoke pass. Coordinated deployment is required before a fresh hosted Astra generation. The fixed eight-run screen and actual publish/inbox journey remain outstanding.
+
+### Earlier native-frame diagnostic and review-coverage correction
 
 Coordinated release `aafe10da07bdf8c89940d855ceb7ec8866e6bde5` succeeded (CI `33937384133`, release `33937658916`). Both Railway services independently reported the exact SHA, sandbox `sandbox_deployment_893196fcf96fd05a414e269ce69debc1` became active, required deep health passed, and maintenance was released.
 

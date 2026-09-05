@@ -35,6 +35,7 @@ import {
   WorkspaceManagerRuntime
 } from "../packages/site-platform/manager-runtime";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
+import { normalizeOpenAiModelCatalog } from "../lib/model-catalog";
 
 const buildInput = buildSyntheticSiteInput();
 const source = sourceSnapshotSchema.parse({
@@ -603,20 +604,58 @@ const openAiCapabilities = providerAuthoringCapabilities("openai", "gpt-5.6-sol"
 assert.equal(openAiCapabilities.requestFields.context_management, "accepted");
 assert.equal(openAiCapabilities.contextCompaction.mechanism, "request_parameter");
 assert.match(openAiCapabilities.reasoningControls.detail, /all_turns/);
+const astraCapabilities = providerAuthoringCapabilities("openai", "gpt-6-astra", 1_050_000);
+assert.equal(astraCapabilities.transport, "openai_responses");
+assert.deepEqual(astraCapabilities.requestFields, openAiCapabilities.requestFields);
+assert.notEqual(astraCapabilities.descriptorIdentity, openAiCapabilities.descriptorIdentity);
+const comparisonModels = normalizeOpenAiModelCatalog({ data: [
+  { id: "gpt-6-astra" }, { id: "unprobed-model" }
+] });
+assert.equal(comparisonModels.find((model) => model.id === "gpt-6-astra")?.siteAgentAvailability, "selectable");
+assert.equal(comparisonModels.find((model) => model.id === "unprobed-model")?.siteAgentAvailability, "pricing_unconfigured");
+assert.equal(usageForModel("gpt-6-astra", {
+  input_tokens: 100_000,
+  input_tokens_details: { cached_tokens: 50_000, cache_write_tokens: 20_000 },
+  output_tokens: 10_000
+}, 0).costUsd, 1.1);
+assert.equal(usageForModel("gpt-6-astra", {
+  input_tokens: 272_000,
+  input_tokens_details: { cached_tokens: 272_000 },
+  output_tokens: 1_000
+}, 0).costUsd, 0.322);
+assert.equal(usageForModel("gpt-6-astra", {
+  input_tokens: 272_001,
+  input_tokens_details: { cached_tokens: 272_001 },
+  output_tokens: 1_000
+}, 0).costUsd, 0.619002);
+assert.equal(usageForModel("gpt-6-astra", {
+  input_tokens: 300_000,
+  input_tokens_details: { cached_tokens: 200_000, cache_write_tokens: 50_000 },
+  output_tokens: 10_000
+}, 0).costUsd, 3.4);
+assert.equal(usageForModel("openai/gpt-6-astra", {
+  input_tokens: 100_000, output_tokens: 10_000, cost: 0.123
+}, 0).costUsd, 0.123, "Provider-reported billing must take precedence over estimates.");
+assert.equal(usageForModel("openai/gpt-6-astra", {
+  input_tokens: 100_000, output_tokens: 10_000
+}, 0).costUsd, 1.5);
+assert.equal(usageForModel("gpt-5.6-sol", {
+  input_tokens: 100_000, output_tokens: 10_000
+}, 0).costUsd, 0.6);
 
 assert.equal(usageForModel("gpt-5.6-terra", {
   input_tokens: 1_000_000,
   output_tokens: 1_000_000
-}, 0).costUsd, 14);
+}, 0).costUsd, 22);
 assert.equal(usageForModel("gpt-5.6-luna", {
   input_tokens: 1_000_000,
   output_tokens: 1_000_000
-}, 0).costUsd, 1.4);
+}, 0).costUsd, 2.2);
 assert.equal(usageForModel("gpt-5.6-luna", {
   input_tokens: 1_000_000,
   input_tokens_details: { cached_tokens: 1_000_000 },
   output_tokens: 0
-}, 0).costUsd, 0.02);
+}, 0).costUsd, 0.04);
 
 const openRouterCapabilities = providerAuthoringCapabilities("openrouter", "moonshotai/kimi-k3", 1_048_576);
 assert.equal(openRouterCapabilities.requestFields.context_management, "stripped");

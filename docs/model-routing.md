@@ -13,14 +13,21 @@ configured website manager without another architecture request. The approved
 decision and canary evidence are recorded in
 `docs/decisions/2026-08-03-luna-architecture-authoring-workflow.md`.
 
-The direct OpenAI website-manager picker intentionally exposes the canonical GPT-5.6 family plus GPT-5.5 as a prior-generation baseline, all with locally verified pricing:
+The direct OpenAI website-manager picker exposes the GPT-5.6 family, GPT-5.5 as a prior-generation baseline, and GPT-6 Astra for an operator-controlled quality experiment. Adding an option does not change the canonical default. Standard short-context pricing was checked against the official API table on September 5, 2026:
 
 | Model | Intended use | Input / cached input / output per 1M tokens |
 | --- | --- | --- |
-| `gpt-5.6-sol` | Operator comparison or focused high-capability work | $5.00 / $0.50 / $30.00 |
+| `gpt-6-astra` | Unpromoted operator quality comparison | $10.00 / $1.00 / $50.00 |
+| `gpt-5.6-sol` | Operator comparison or focused high-capability work | $4.00 / $0.40 / $20.00 |
 | `gpt-5.6-terra` | Balance of intelligence and cost | $2.00 / $0.20 / $12.00 |
 | `gpt-5.6-luna` | Canonical architecture and website authoring | $0.20 / $0.02 / $1.20 |
 | `gpt-5.5` | Prior-generation comparison or fallback | $5.00 / $0.50 / $30.00 |
+
+For these models, more than 272,000 total input tokens applies 2× input/cache and 1.5× output pricing to the whole request. Cache writes reported by the API add 25% of the uncached input rate for those tokens. Provider-reported cost takes precedence. These are standard-rate estimates, not invoices; historical run usage is never recomputed after catalog updates. Sol's current price is promotional, available at least through November 21, 2026.
+
+Astra uses the existing stateless, serial Responses authoring path, with the same high reasoning, low verbosity, tools, native inspection images, 200K compaction threshold and normal run fuse. Production-schema and bounded request probes accepted all 21 schemas and returned a valid `inspect_site` call; no tool was executed by those probes. They establish parameter compatibility, not site quality, actual compaction or warm-cache performance. Fresh hosted evaluation and the fixed multi-business screen are required before any canonical model change. No critic, async tools, multi-agent runtime, special Astra prompt, or additional retry is introduced.
+
+A subsequent synthetic two-request probe accepted complete stateless function-output replay and reported cached input on both requests at service tier `default`. Because the same cached-token count was already present on the first request, this does not isolate new explicit-prefix reuse or prove long-run cache efficiency. No reasoning item was emitted by that trivial fixture. Probe evidence and limits are retained in `.design/v4-production-readiness-2026-09-04/ASTRA_MODEL_EXPERIMENT.md`.
 
 The `gpt-5.6` alias is not separately listed because it routes to `gpt-5.6-sol`; Lodesta stores the canonical model ID.
 
@@ -45,7 +52,7 @@ The direct OpenAI authoring loop manually replays every response output, includi
 
 OpenRouter routes do not receive the OpenAI-only `context_management` field. They continue to use their established provider-specific reasoning replay and caching behavior. Programmatic Tool Calling and GPT-5.6 multi-agent mode are not enabled.
 
-Business imagery is not attached to the manager's initial context. The context carries an asset index, and the manager opens only the specific asset previews it is considering through `inspect_assets`.
+The initial context includes bounded labeled contact sheets of retained source media and canonical assets, plus the asset index. The manager can inspect additional promising assets through `inspect_assets` and retained source-resource tools. Website inspection supplies native viewport frames; source-media sheets and rendered-site frames serve different purposes.
 
 For a targeted edit, the manager proceeds directly to `finish` after the source change unless concrete visual uncertainty warrants `inspect_site`. `inspect_site` builds dirty source itself and automatically focuses the supplied owner selection when inspecting that route; `finish` independently builds and performs hard release verification. Neither `build_preview` nor visual inspection is a routine pre-finish ceremony.
 
@@ -97,6 +104,9 @@ GPT Image 2 uses the Image API's returned token breakdown and the local standard
 
 ## References
 
+- [OpenAI GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)
+- [OpenAI GPT-6 Astra migration guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra)
+- [OpenAI current API pricing](https://developers.openai.com/api/docs/pricing)
 - [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/model-guidance?model=gpt-5.6-sol)
 - [OpenAI Responses compaction](https://developers.openai.com/api/docs/guides/compaction)
 - [OpenAI GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol)

@@ -310,6 +310,10 @@ function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSu
   const signals = extractCrawlPageSignals(html, sourcePage.href);
   summary.jsonLdTypes = signals.jsonLdTypes;
   summary.extractedFacts = extractBusinessFacts(html, { url: sourcePage.href, finalUrl: sourcePage.href, title }, sourcePage);
+  summary.extractedFacts.serviceAreas = unique([
+    ...summary.extractedFacts.serviceAreas,
+    ...explicitServiceAreaListEvidence(summary.url, summary.sourceTextBlocks).map(({ label }) => label)
+  ]).slice(0, 50);
   summary.formReferences = signals.formReferences.slice(0, 12);
   summary.linkReferences = signals.linkReferences.slice(0, 40);
   summary.assetReferences = capAssetReferences(signals.assetReferences);
@@ -857,7 +861,7 @@ function extractBusinessFacts(
   facts.categories = unique(facts.categories).slice(0, 8);
   facts.services = unique(facts.services).slice(0, 12);
   facts.serviceHighlights = unique(facts.serviceHighlights).slice(0, 8);
-  facts.serviceAreas = unique(facts.serviceAreas).slice(0, 12);
+  facts.serviceAreas = unique(facts.serviceAreas).slice(0, 50);
   facts.socialLinks = unique(facts.socialLinks).slice(0, 10);
   facts.orderingLinks = unique(facts.orderingLinks).slice(0, 6);
   facts.bookingLinks = unique(facts.bookingLinks).slice(0, 6);
@@ -1373,6 +1377,48 @@ function extractAreas(node: Record<string, unknown>) {
     .filter((area): area is string => Boolean(area));
 }
 
+/** Explicit directory lists retain the exact source block that names each place.
+ * A list is evidence of declared coverage, not permission to infer adjacent towns.
+ * Narrative and location-directory heuristics remain separate and unchanged.
+ */
+export function explicitServiceAreaListEvidence(sourceUrl: string, blocks: SourceTextBlock[]) {
+  if (!/^\/(?:service-areas?|areas-we-serve)\/?$/i.test(new URL(sourceUrl).pathname)) return [];
+  const evidence: { label: string; block: SourceTextBlock }[] = [];
+  let heading: { block: SourceTextBlock; parent: string; label?: string } | undefined;
+  for (const block of blocks) {
+    const segments = block.containerId.split(" > ");
+    const tag = segments.at(-1)?.match(/^[a-z0-9]+/)?.[0];
+    const parent = segments.slice(0, -1).join(" > ");
+    if (tag && /^h[1-6]$/.test(tag)) {
+      const label = block.displayText.match(/^(.+?)\s+(?:&|and)\s+Surrounding Areas\s*:?$/i)?.[1]?.trim();
+      heading = /^(?:our\s+)?(?:service areas?|areas we serve)\s*:?$/i.test(block.displayText)
+        || (label && plausibleVisibleServiceArea(label))
+        ? { block, parent, label } : undefined;
+      continue;
+    }
+    if (!heading) continue;
+    const siblingListItem = tag === "li" && segments.slice(0, -2).join(" > ") === heading.parent
+      && /^(?:ul|ol)(?:\W|$)/.test(segments.at(-2) ?? "");
+    const siblingParagraph = tag === "p" && parent === heading.parent && /[,;]/.test(block.displayText);
+    const labels = block.displayText
+      .replace(/([\p{L}][\p{L} .’'-]+),\s*([A-Z]{2})(?=$|[,;])/gu, "$1 $2")
+      .split(/\s*[,;]\s*/).map((value) => value.trim());
+    if ((!siblingListItem && !siblingParagraph)
+      || block.sourceUrl !== sourceUrl || block.sourcePageHash !== heading.block.sourcePageHash
+      || !labels.every((label) => plausibleVisibleServiceArea(label) && !/^[A-Z]{2}$/.test(label)
+        && /^\p{Lu}[\p{L}’'.-]*(?:\s+(?:(?:de|del|la|of|the)|\p{Lu}[\p{L}’'.-]*))*$/u.test(label))) {
+      heading = undefined;
+      continue;
+    }
+    if (heading.label) {
+      evidence.push({ label: heading.label, block: heading.block });
+      heading.label = undefined;
+    }
+    evidence.push(...labels.map((label) => ({ label, block })));
+  }
+  return evidence;
+}
+
 function extractVisibleServiceAreas(html: string) {
   const values: string[] = [];
   for (const line of htmlToTextLines(html)) {
@@ -1400,7 +1446,7 @@ function extractVisibleServiceAreas(html: string) {
       values.push(area);
     }
   }
-  return unique(values).slice(0, 20);
+  return unique(values).slice(0, 50);
 }
 
 function plausibleVisibleServiceArea(value: string) {
@@ -1676,7 +1722,7 @@ function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: Extrac
     categories: unique([...left.categories, ...right.categories]).slice(0, 8),
     services: unique([...left.services, ...right.services]).slice(0, 12),
     serviceHighlights: unique([...(left.serviceHighlights ?? []), ...(right.serviceHighlights ?? [])]).slice(0, 8),
-    serviceAreas: unique([...left.serviceAreas, ...right.serviceAreas]).slice(0, 12),
+    serviceAreas: unique([...left.serviceAreas, ...right.serviceAreas]).slice(0, 50),
     socialLinks: unique([...left.socialLinks, ...right.socialLinks]).slice(0, 10),
     bookingLinks: unique([...left.bookingLinks, ...right.bookingLinks]).slice(0, 6),
     orderingLinks: unique([...left.orderingLinks, ...right.orderingLinks]).slice(0, 6),

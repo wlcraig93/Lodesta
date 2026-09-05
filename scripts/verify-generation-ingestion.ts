@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { gzipSync } from "node:zlib";
-import { summarizeCrawlHtml, type CrawlAssessment } from "../lib/crawler";
+import { explicitServiceAreaListEvidence, summarizeCrawlHtml, type CrawlAssessment } from "../lib/crawler";
 import {
   crawlWebsiteForGeneration,
   generationIngestionLimits,
@@ -516,6 +516,68 @@ assert.deepEqual(
   ["Clayton"],
   "A service phrase on a locations index was admitted as a place without a matching child-location link."
 );
+
+// A first-party service-area directory need not have a separate URL per town.
+// Preserve explicit heading/list evidence without promoting nearby prose,
+// service lists, unrelated containers or off-site copies into geography.
+const directoryTowns = [
+  "Austin", "Bartlett", "Bee Cave", "Briarcliff", "Cedar Park", "Florence",
+  "Georgetown", "Granger", "Hutto", "Jonestown", "Lago Vista", "Lakeway",
+  "Leander", "Liberty Hill", "Lost Creek", "Manchaca", "Manor", "Pflugerville",
+  "Rollingwood", "Round Rock", "Taylor", "West Lake Hills"
+];
+const explicitAreaHtml = `<!doctype html><main>
+  <h1>Service area</h1>
+  <p>Ask us about properties outside the listed areas.</p>
+  <h2>Austin &amp; Surrounding Areas</h2><p>${directoryTowns.join(", ")}</p>
+  <h2>Burnet &amp; Surrounding Areas</h2><ul><li>Bertram</li><li>Marble Falls</li></ul>
+  <h2>Areas We Serve</h2><p>St. Louis, MO; Paris, TX</p>
+  <h2>Services</h2><p>Planting, Trimming, Well Drilling</p>
+  <section><h2>Service Areas</h2></section><aside><p>Seattle, Portland</p></aside>
+  <h2>Areas we do not serve</h2><p>Dallas, Houston</p>
+  <h2>Service Areas</h2><p>Call us to discuss your property.</p><p>Boston, Albany</p>
+</main><footer><h2>Service Areas</h2><p>Phoenix, Tucson</p></footer>`;
+const explicitAreaSummary = {
+  ...summarizeCrawlHtml(explicitAreaHtml, `${authorityOrigin}/service-area`),
+  source: "sampled_internal" as const
+};
+const explicitAreaCrawl = {
+  ...authorityCrawl, pageSummaries: [explicitAreaSummary],
+  extractedFacts: { ...authorityCrawl.extractedFacts, serviceAreas: explicitAreaSummary.extractedFacts.serviceAreas }
+};
+const explicitAreaIngestion = {
+  ...authorityIngestion,
+  pages: [{ ...authorityIngestion.pages[0]!, url: explicitAreaSummary.url,
+    finalUrl: explicitAreaSummary.url, summary: explicitAreaSummary,
+    internalLinks: [], evidenceClass: "first_party" as const }]
+};
+const expectedDirectoryTowns = [...directoryTowns, "Burnet", "Bertram", "Marble Falls", "St. Louis MO", "Paris TX"];
+for (const entry of explicitServiceAreaListEvidence(explicitAreaSummary.url, explicitAreaSummary.sourceTextBlocks)) {
+  assert(explicitAreaSummary.sourceTextBlocks.includes(entry.block), "Locality evidence lost its exact retained source block.");
+  assert(entry.block.displayText.replace(/,/g, "").includes(entry.label), "Locality label is not visible in its bound source block.");
+}
+const acceptedDirectoryTowns = sourcePreparationDiagnosticsFor(explicitAreaCrawl, explicitAreaIngestion).facts
+  .filter((fact) => fact.kind === "service_area" && fact.disposition === "accepted")
+  .map((fact) => String(fact.value));
+assert.deepEqual(new Set(acceptedDirectoryTowns), new Set(expectedDirectoryTowns),
+  "Explicit first-party service-area lists were lost, truncated to 12/20, or escaped their heading/container context.");
+const offSiteAreaSummary = { ...explicitAreaSummary, url: "https://directory.example/service-area" };
+assert.equal(sourcePreparationDiagnosticsFor(
+  { ...explicitAreaCrawl, pageSummaries: [offSiteAreaSummary] },
+  { ...explicitAreaIngestion, pages: [{ ...explicitAreaIngestion.pages[0]!,
+    url: offSiteAreaSummary.url, finalUrl: offSiteAreaSummary.url, summary: offSiteAreaSummary }] }
+).facts.filter((fact) => fact.kind === "service_area" && fact.disposition === "accepted").length, 0,
+"An off-site copy of a locality list became first-party authority.");
+const editorialAreaSummary = {
+  ...summarizeCrawlHtml(explicitAreaHtml, `${authorityOrigin}/articles/local-history`),
+  source: "sampled_internal" as const
+};
+assert.equal(sourcePreparationDiagnosticsFor(
+  { ...explicitAreaCrawl, pageSummaries: [editorialAreaSummary] },
+  { ...explicitAreaIngestion, pages: [{ ...explicitAreaIngestion.pages[0]!,
+    url: editorialAreaSummary.url, finalUrl: editorialAreaSummary.url, summary: editorialAreaSummary }] }
+).facts.filter((fact) => fact.kind === "service_area" && fact.disposition === "accepted").length, 0,
+"A locality list on an editorial page became operational service-area authority.");
 
 const repeatedLegacyAreaPages = ["raccoon", "squirrel"].map((animal) => {
   const url = `${authorityOrigin}/${animal}-control-trapping-removal.html`;

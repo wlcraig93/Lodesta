@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
-import { type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
+import { explicitServiceAreaListEvidence, type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
 import { assertPublicFetchUrl } from "@/lib/url-safety";
 import type { SourceTextBlock } from "@/lib/source-text-blocks";
 import {
@@ -880,6 +880,7 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
   for (const page of crawl.pageSummaries) {
     if (!sourceFactPageEligible(page, crawl.url)) continue;
     const ingestionPage = ingestion.pages.find((candidate) => candidate.url === page.url || candidate.finalUrl === page.url);
+    const explicitList = explicitServiceAreaListEvidence(page.url, page.sourceTextBlocks);
     for (const rawLabel of page.extractedFacts.serviceAreas) {
       const label = normalizeServiceAreaCandidate(clean(rawLabel));
       if (!label || !isExplicitNamedServiceArea(label)) continue;
@@ -890,14 +891,15 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
         ])) continue;
       const identity = serviceAreaIdentity(label);
       const matchingBlocks = page.sourceTextBlocks.filter((block) => normalizedText(block.displayText).includes(identity));
-      const supporting = matchingBlocks.find((block) =>
+      const listed = explicitList.find((entry) => serviceAreaIdentity(entry.label) === identity);
+      const supporting = listed?.block ?? matchingBlocks.find((block) =>
         /\b(?:service areas?|areas? we serve|we (?:proudly )?serve|serving|services? in)\b/.test(normalizedText(block.displayText))
       ) ?? matchingBlocks[0];
       const evidenceClass = evidenceClassByUrl.get(page.url) ?? "first_party";
       if (evidenceClass !== "first_party") continue;
       if (!supporting) continue;
       if (serviceAreaCandidateIsTrailingOffering(label, supporting.displayText)) continue;
-      const strongGeographicEvidence = serviceAreaHasGeographicEvidence(
+      const strongGeographicEvidence = Boolean(listed) || serviceAreaHasGeographicEvidence(
         label,
         page,
         supporting.displayText,

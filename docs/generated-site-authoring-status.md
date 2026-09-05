@@ -6,7 +6,19 @@ Date: 2026-09-05
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Completed prose-policy diagnostic; visual-history correction
+### Completed visual-history edit; prospective coverage correction
+
+Release `98f6d85408bc285d9286f118955c0f38f1efc7a1` passed CI `33973142323` and coordinated release `33973412471`. Both Railway services reported the exact SHA before sandbox promotion; required deep health passed and maintenance released. A preceding documentation naming failure was corrected without weakening the naming check.
+
+Normal private owner edit `run_84851a30fb924aabb1b1a95fc35c524c` succeeded in 7.638 minutes at $3.227082 catalog-estimated model cost, 17 author requests, using Astra high and the normal $8 edit fuse. Candidate `version_8d79175e07bcc61639ba43124262a63f` passed the hard gate. One sandbox apply succeeded on its first submission; no failed tools or transport recovery occurred. The final author request retained 35 images (5,181,161 binary bytes), demonstrating that pixels now survive intervening tool turns. This single edit does not prove fresh-build reliability, lower cost or causation of every earlier image mistake.
+
+Exact-source comparison and 19 selected screenshot reviews accept the requested alt-description, mobile-contact-order and task-specific planting/lot-clearing prompt fixes. Seven of ten source files are byte-identical; only pages, service copy props and contact CSS changed. All 96 route/viewport capture observations have no browser errors, visible broken images or overflow. No prospect was published or lead sent; no whole-site or population quality approval follows from that coverage. The design-review and copy-editing skills supplied scoped visual/source review rather than an automatic product critic.
+
+The remaining geographic loss now reproduces upstream. A prospective correction retains explicit first-party service-area heading/list evidence without requiring child URLs for every town. The same function supplies extraction and exact block provenance; unrelated prose, service offerings, third-party pages and editorial routes stay excluded. Read-only retained-page replay yields 49 accepted named places; frozen inputs and retained artifacts are unchanged. See [source service-area evidence](source-service-area-evidence.md). Typecheck, focused ingestion/mirror fixtures, full preflight and sequential standalone smoke pass. A first restricted preflight could not launch Chromium on macOS; the authorized rerun passed. Coordinated release and the fresh-URL diagnostic remain pending.
+
+Outstanding: fresh acquisition and first-pass quality under the selected unchanged configuration, the eight-run multi-business screen, technical-policy applicability, and actual owner publish/inbox acceptance. The canonical Luna default remains unchanged; Astra is still a private diagnostic override.
+
+### Earlier completed prose-policy diagnostic; visual-history correction
 
 Coordinated release `61b25526ba1242a9c3cc32ff21551f7171130ba4` passed CI `33969154503` and release `33969452864`. Both Railway controllers reported that SHA; blue sandbox `sandbox_deployment_3ad992ad9f0565bf85b0f977dd3c6e9b` passed required deep health and maintenance was released. Evidence is retained in `.design/v4-production-readiness-2026-09-04/release-61b25526/`.
 

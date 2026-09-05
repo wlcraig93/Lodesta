@@ -1,6 +1,6 @@
 # Keep visual evidence in authoring history
 
-September 5, 2026. Local correction; deployed status is recorded separately.
+September 5, 2026. Deployed correction; exact release and private edit evidence are recorded in [authoring status](generated-site-authoring-status.md).
 
 ## Evidence
 
@@ -20,4 +20,6 @@ This follows the Responses API's documented manual-state contract: each request 
 
 Retaining evidence increases later request payloads and may increase image tokens, latency and cost. The completed diagnostic produced 96 tool-preview images totaling 12,764,445 binary bytes across asset and page inspections; this is cumulative evidence, not a measured new request or a token estimate. Do not claim savings or that model mistakes are eliminated. Preserve the existing overall deadline, model-cost fuse and provider context handling. Measure the next ordinary run before expanding the acceptance screen; do not quietly raise the fuse.
 
-The regression fails under the old code and passes with the correction. It covers four paired previews surviving a serial adoption, identical live/restored views, detached request arrays, and removal of pre-compaction images only at the provider's canonical compaction boundary. Full local preflight (including manager, typecheck, browser and sandbox checks) and sequential standalone launch-flow smoke pass. The `visual-history-preflight.log` and `visual-history-smoke.log` files are retained in the experiment evidence directory referenced by [authoring status](generated-site-authoring-status.md). Coordinated deployment and a hosted generation/edit remain separate validation steps.
+The regression fails under the old code and passes with the correction. It covers four paired previews surviving a serial adoption, identical live/restored views, detached request arrays, and removal of pre-compaction images only at the provider's canonical compaction boundary. Full local preflight (including manager, typecheck, browser and sandbox checks) and sequential standalone launch-flow smoke pass. The `visual-history-preflight.log` and `visual-history-smoke.log` files are retained in the experiment evidence directory referenced by [authoring status](generated-site-authoring-status.md).
+
+The subsequent normal hosted edit completed in 7.638 minutes at $3.227082 catalog-estimated cost, within its $8 fuse. Its final author request retained 35 images / 5,181,161 binary bytes; four inspections and final verification passed with no failed tools. Source and visual review accepted the requested corrections. This proves evidence continuity and one working edit, not reliable first-pass authorship, comparative economics or elimination of image-association errors. The broader unchanged quality screen remains outstanding.

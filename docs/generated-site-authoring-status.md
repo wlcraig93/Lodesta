@@ -1,12 +1,28 @@
 # Generated-site authoring status
 
-Date: 2026-09-05
+Date: 2026-09-06
 
 ## Current decision: generator still under evaluation
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Completed visual-history edit; prospective coverage correction
+### Fresh acquisition completed; targeted initial-build refinement
+
+Release `cd03e357743e7415eeae48729d00279bba760c4f` passed CI `33995666328` and coordinated release `33995947531`. Railway web and worker reported that exact SHA before sandbox `sandbox_deployment_5c8ffd6f3dc5cd2b144c811278f0461c` was promoted. Required deep health passed and maintenance was released. The prior sandbox remains retained.
+
+Ordinary fresh-URL intake for Good Morning Tree Service produced private run `run_a7a6c557da4411b169a21559cd41c008` and candidate `version_f242aded88278451e73102b4265b7884`: 32 routes, hard-gate success, 28.428 minutes, $12.95349385 catalog-estimated author cost, 38 author requests, seven successful inspections and three first-submission applies in one sandbox. No failed tool, transport timeout, replay or recycle was recorded. Source preparation retained 50 evidenced service areas, including the previously omitted directory communities. This validates this acquisition path once, not population reliability or comparative cost superiority.
+
+The homepage preserves the supplied 4.7-star observation and exact Google reviews link. That observation was reused from August 5 (124 reviews), not refreshed by this run. Independent September browser inspection found 126 reviews with the same rating and business identity. Do not describe this as live Google synchronization.
+
+All 96 route/viewport capture observations are free of browser errors, visible broken images and horizontal overflow. Individual review of 42 captures covers twelve routes at three widths, three homepage openings and three interaction states; it is not whole-site approval. Main planting copy is useful, but shared sidebar/closing copy assumes an existing tree. Phone contact reference details precede the form; some tablet sidebars squeeze actions into three lines. These are authored quality refinements, not infrastructure or managed-form failures.
+
+The next treatment replaces two existing initial-build guidance paragraphs: shared styling need not share task-specific assumptions, and responsive hierarchy must protect the primary action from secondary reference material. The existing context fixtures and behavioral identity follow that replacement. No template, deterministic presentation rule, additional review agent, repair loop, runtime change or model-default change is added. Typecheck, focused context tests, full preflight (including browser/runtime/sandbox checks) and sequential standalone smoke pass. An initial preflight exposed one additional fixture tied to the replaced wording; its updated rerun passed. Coordinated deployment and the hosted treatment remain pending; these local checks do not prove improved authored output.
+
+The treatment skill is `website-authoring@sha256:c778e58d82803ca85d824f4b55854d9e9b741d9418af19bd096e5d176dadbc0f`. The planned private run reuses this diagnostic's retained business/source authority, Astra high and the $15 initial-build fuse. Independent architecture and stochastic authorship remain residual variability. Evidence: `task-led-conversion-preflight.log`, `task-led-conversion-preflight-rerun.log` and `task-led-conversion-smoke.log` under the private readiness directory.
+
+Outstanding: remaining route/source review, the unchanged eight-run multi-business screen, technical-policy applicability, and actual owner publish/inbox acceptance. No prospect was published or lead sent. The canonical Luna default remains unchanged; Astra high is a private diagnostic override. Private evidence: `.design/v4-production-readiness-2026-09-04/fresh-acquisition-result.json`, `fresh-acquisition-final/`, and `candidate-reviews/version_f242aded88278451e73102b4265b7884/`.
+
+### Earlier completed visual-history edit; prospective coverage correction
 
 Release `98f6d85408bc285d9286f118955c0f38f1efc7a1` passed CI `33973142323` and coordinated release `33973412471`. Both Railway services reported the exact SHA before sandbox promotion; required deep health passed and maintenance released. A preceding documentation naming failure was corrected without weakening the naming check.
 

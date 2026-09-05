@@ -168,7 +168,7 @@ for (const contract of [
   /baked-in lettering.*loading="eager".*fetchPriority="high"/i,
   /Share the header, footer, tokens.*customer purpose.*composition/i,
   /first viewport.*useful content or the primary action/i,
-  /Recompose for phone and tablet.*page purpose before its form/i,
+  /Recompose for phone and tablet.*Give a form its purpose and essential safety context first/i,
   /geographic qualifiers.*emergency availability from ordinary hours/i,
   /blank initial build.*NavigationDisclosure behavior="modal".*separate semantic desktop nav/i,
   /three-bar closed trigger.*close state.*aria-expanded/i,

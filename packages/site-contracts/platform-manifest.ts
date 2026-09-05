@@ -1,6 +1,6 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
-export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:7e8a36c4543a9a01561bece17d6bf17e6a149086497f1110c6cc9c98421f8197";
+export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:ef4fcbf767942e58d05e4376543df2c65af1f2b8729960f9f6f8daf3cbf69192";
 export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
@@ -10,8 +10,8 @@ export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:495
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
 export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:c5c8074fb365995acffa4dd39aa76806beef0a5b7aa88761f25540f5b3dd1217";
 export const websiteManagerPromptIdentity = "website-manager@sha256:e679d32d00100ed66aa44f0077f51a86d7e2f14d7183fd995506c345a179ec6e";
-export const factBindingPolicyIdentity = "fact-binding-validator@sha256:022f048f21832f346633792c68a61fecb0cc440df0fb5aed5a9157ee223e5ab1";
-export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:e1add5b6d7048b640dd46a41505b8bc3c1352fcefab46f0b4102c50deab8c948";
+export const factBindingPolicyIdentity = "fact-binding-validator@sha256:04195bbfc48b200176d3e87c7056abdddd466a978b84981a53c30cf08b726115";
+export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:5d7dafabca8122480b44b6b8e23f7fdb62fc0a7ba1df6751c77536d825168008";
 export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:a9dc99a379ac4ccb9bd4a590bda1b4864ac05827a8d2e560fe06f46706974cab";
 
 export const siteTechnicalReleasePolicy = {

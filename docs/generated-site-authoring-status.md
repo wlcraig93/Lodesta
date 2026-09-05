@@ -6,7 +6,23 @@ Date: 2026-09-05
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Completed review-coverage diagnostic; model comparison next
+### Stronger-model diagnostic interrupted by exhausted API credits
+
+Coordinated release `bb6147ebe6f66e907a43eb06e53f4fcda4fd26ea` passed CI `33943107228` and release `33943354837`. Both Railway services independently reported that exact SHA, active sandbox `sandbox_deployment_b6e3b895ad1fa30f56113c59837a3034` passed required deep health, and maintenance was released. The hosted catalog exposes Astra as an operator-selectable model; the canonical Luna setting is unchanged.
+
+Private Astra-high run `run_62c40cd1971548ebaa7997c0634488c6` authored a 30-route first draft but stopped on request 30 with the provider's explicit HTTP 429 message, **"You have no credits remaining."** No finalized version or completed hard-gate result exists. Its $8.3219026 catalog estimate and 890,582 ms metered duration are incomplete-run evidence, not the price or speed of a successful build. The first sandbox apply succeeded on its first submission without replay or recycle. This stop is an API billing issue, not a Railway or container outage.
+
+Retained-source reconstruction and no-model rendering show promising improvements in the homepage composition, meaningful source-backed gallery work, team content and customer-facing voice. The original before/after photographs match the pruning captions, and the exact supported Google 4.7 rating and supplied CID link are present. This unfinished draft is not accepted: the service-area page omits the source's useful regional coverage, the planting sidebar still talks about an existing tree's condition, and small footer typography needs refinement. Broad consistency, completed repair behavior and actual publishing/inbox delivery remain unproven.
+
+The first inspection also exposes a verifier false positive: ordinary advice to contact the homeowner's insurance company is treated as a business insurance claim. The source article contains that advice. The bare topic word in an FAQ and terms metadata is similarly flagged. Preserve these examples and genuine unsupported business-claim controls when correcting the scanner; do not teach the author to delete useful source-grounded advice or add another orchestration layer. The insurance scanner is unchanged at this checkpoint.
+
+A separate local verifier correction accepts singular/plural-only estimate or quote wording against an otherwise identical canonical pricing claim. The retained first draft's metadata used "Free estimates" while the source description says "Free Estimate". The regression failed before the change; replay of the unchanged draft now removes that blocker and retains the three insurance-topic errors. Focused fixtures still reject removed or changed qualifiers, a different offer noun, paid-to-free changes and a new guarantee. This is not generic stemming, fuzzy evidence matching, or permission to alter exact SDK-bound facts or customer quotations. No model call or stored authority mutation was needed.
+
+Local behavioral descriptors are `fact-binding-validator:single-availability:source-legal-context:offer-number-inflection:2026-09-05`, `site-verification-policy:authored-image-geometry:source-legal-context:offer-number-inflection:2026-09-05`, and `site-authoring-platform:native-inspection:author-directed-coverage:offer-number-inflection:2026-09-05`. Runtime bytes, compiler identity, authoring guidance and model defaults are unchanged. These identities are not attributed to the earlier hosted run.
+
+A local, tested error-classification correction maps the provider's no-credits message to the existing non-owner-retryable `provider_quota_exhausted` result instead of temporary unavailability. Typecheck, focused manager and platform fixtures, full preflight (including browser and sandbox verification), architecture checks, and standalone launch-flow smoke pass for these two corrections; their coordinated release is still pending. Retained failed-run rows remain unchanged. API credits must be replenished before more model execution. The fixed eight-build validation and owner publish/inbox journey remain outstanding; the proposed temporary Lodesta-owned publication needs explicit approval before execution.
+
+### Earlier completed review-coverage diagnostic
 
 Coordinated release `fa55df3be6d3f68e2f25ea6780904c562fb93ba5` passed CI `33940238113` and release `33940501272`. Web and worker independently reported that SHA; sandbox `sandbox_deployment_37c6d675e3af4c92aa3e00f68b78c5fb` became active; required deep health and maintenance release passed.
 

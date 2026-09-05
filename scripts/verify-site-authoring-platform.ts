@@ -127,6 +127,42 @@ const address = input.publicFacts.find((fact) => fact.kind === "address")!;
 const hours = input.publicFacts.find((fact) => fact.kind === "hours")!;
 const offering = input.publicFacts.find((fact) => fact.kind === "offering")!;
 
+// Number inflection is not a different offer. Preserve all other words and
+// qualifiers; this is deliberately not stemming or fuzzy fact matching.
+function freeOfferValidation(sourceValue: string, renderedValue: string) {
+  const offerInput = {
+    ...input,
+    publicFacts: [...input.publicFacts, {
+      ...offering, id: "fact_fixture_free_offer", kind: "description" as const,
+      value: sourceValue,
+      source: { ...offering.source, factId: "fact_fixture_free_offer" }
+    }]
+  };
+  return new FactBindingValidator().validate({
+    buildInput: offerInput,
+    routes: [{ path: "/", html: `<main><p>${renderedValue}</p></main>`, description: renderedValue }]
+  });
+}
+for (const [sourceValue, renderedValue] of [
+  ["Call for Free Estimate!", "Free estimates"],
+  ["Free estimates", "Request a free estimate"],
+  ["Free quote", "Free quotes"],
+  ["Free on-site estimates", "Free on-site estimate"]
+]) {
+  assert.equal(freeOfferValidation(sourceValue, renderedValue).status, "pass",
+    `A singular/plural-only offer change was rejected: ${sourceValue} -> ${renderedValue}`);
+}
+for (const [sourceValue, renderedValue] of [
+  ["Free on-site estimate", "Free estimates"],
+  ["Free written estimate", "Free instant estimates"],
+  ["Free estimate", "Free quotes"],
+  ["Paid estimates", "Free estimates"],
+  ["Free estimate", "Guaranteed free estimates"]
+]) {
+  assert.equal(freeOfferValidation(sourceValue, renderedValue).status, "fail",
+    `An offer change beyond number inflection escaped: ${sourceValue} -> ${renderedValue}`);
+}
+
 const validBody = `<header><strong data-lodesta-business-name data-lodesta-identity-status="verified" data-lodesta-fact-id="${name.id}">${name.value}</strong></header>
 <main>
   <h1>Clear collision repair</h1>

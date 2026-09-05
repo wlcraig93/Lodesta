@@ -98,7 +98,7 @@ export function classifyModelProviderError(error: unknown): SiteAuthoringTermina
   ) {
     return new SiteAuthoringTerminalError("model_tool_schema_invalid", "platform", false, message, { cause: error });
   }
-  if (status === 402 || /insufficient_quota|quota_exceeded|billing_hard_limit|insufficient_credits/i.test(`${providerCode} ${message}`)) {
+  if (status === 402 || /insufficient_quota|quota_exceeded|billing_hard_limit|insufficient_credits|\bno credits remaining\b/i.test(providerFailure)) {
     return new SiteAuthoringTerminalError("provider_quota_exhausted", "provider", false, message, { cause: error });
   }
   if (status === 429 || (status !== undefined && status >= 500) || /rate.?limit|timeout|timed out|connection|socket|network/i.test(message)) {

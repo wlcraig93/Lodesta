@@ -429,8 +429,17 @@ function naturallySupportedSensitiveClaim(
     fact.kind === "description" || fact.kind === "offering" || fact.kind === "proof"
   ) && factDisplayValues(fact).some((value) => scanSensitiveClaimText(value).some((candidate) => (
     candidate.category === match.category
-    && sameCompleteValue(candidate.matchedText, match.matchedText)
+    && sameCompleteValue(comparableSensitiveWording(candidate), comparableSensitiveWording(match))
   ))));
+}
+
+function comparableSensitiveWording(match: ReturnType<typeof scanSensitiveClaimText>[number]) {
+  // Only number inflection of the same estimate/quote noun is equivalent.
+  // Keep qualifiers and offer types intact; exact SDK bindings, quoted text,
+  // currencies, credentials and other fact categories are not normalized here.
+  return match.category === "pricing"
+    ? match.matchedText.replace(/\b(?:estimates|quotes)\b/gi, (word) => word.slice(0, -1))
+    : match.matchedText;
 }
 
 function exactTextOccurrenceContains(text: string, value: string, matchStart: number, matchEnd: number) {

@@ -484,6 +484,22 @@ const rejectedToolSchema = classifyModelProviderError(Object.assign(
 assert.equal(rejectedToolSchema.code, "model_tool_schema_invalid");
 assert.equal(rejectedToolSchema.category, "platform");
 assert.equal(rejectedToolSchema.retryableByOwner, false);
+for (const providerError of [
+  Object.assign(new Error("429 You have no credits remaining. Add credits to continue using the API."), { status: 429 }),
+  Object.assign(new Error("Account quota exhausted"), { status: 429, error: { code: "insufficient_quota" } }),
+  Object.assign(new Error("Payment required"), { status: 402 })
+]) {
+  const exhausted = classifyModelProviderError(providerError);
+  assert.equal(exhausted.code, "provider_quota_exhausted");
+  assert.equal(exhausted.category, "provider");
+  assert.equal(exhausted.retryableByOwner, false, "A retry cannot replenish the platform's API credits.");
+  assert.equal(classifySiteAuthoringFailure(exhausted).code, "provider_quota_exhausted");
+}
+for (const status of [429, 503]) {
+  const transient = classifyModelProviderError(Object.assign(new Error("Temporarily unavailable"), { status }));
+  assert.equal(transient.code, "provider_temporarily_unavailable");
+  assert.equal(transient.retryableByOwner, true);
+}
 const transientPlatformFailure = classifySiteAuthoringFailure(new TypeError("fetch failed"));
 assert.equal(transientPlatformFailure.code, "unknown_internal_failure");
 assert.equal(transientPlatformFailure.category, "platform");

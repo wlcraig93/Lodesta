@@ -3576,9 +3576,12 @@ function workspaceFromRow(row: Record<string, unknown>) {
 }
 
 function siteVersionFromRow(row: Record<string, unknown>) {
-  const version = siteVersionSchema.parse(row.version);
+  // Publication columns are the authority for mutable lifecycle metadata.
+  // Compose them before strict validation: historical embedded publishedAt
+  // values may use PostgreSQL's text format, while the typed column is ISO.
+  // All immutable fields and the final public shape are still validated.
   return siteVersionSchema.parse({
-    ...version,
+    ...(row.version as Record<string, unknown>),
     status: row.status,
     publishedAt: row.published_at ?? undefined,
     replacedVersionId: row.replaced_version_id ?? undefined,

@@ -1,5 +1,28 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { isFinalOwnerCanaryPostResponse } from "./owner-canary-response";
+import { devices } from "playwright";
+import { classifyAnalyticsTraffic } from "../lib/analytics";
+
+assert.equal(classifyAnalyticsTraffic(devices["Desktop Chrome"].userAgent), "human");
+assert.equal(classifyAnalyticsTraffic("Mozilla/5.0 HeadlessChrome/140.0.0.0 Safari/537.36"), "known_bot");
+
+for (const path of ["/api/site-agent/sites", "/api/forms/submit"]) {
+  const response = (suffix: string, status: number, method = "POST") => ({
+    url: () => `https://fixture.example${path}${suffix}`,
+    status: () => status,
+    request: () => ({ method: () => method })
+  });
+  const matches = (value: ReturnType<typeof response>) => isFinalOwnerCanaryPostResponse(value, path, "https://fixture.example");
+  assert(!matches(response("", 308)), "Do not mistake a redirect for API completion.");
+  assert(matches(response("/", 200)));
+  assert(matches(response("", 202)));
+  assert(matches(response("/", 422)), "Final API errors must remain observable.");
+  assert(!matches(response("/", 200, "GET")));
+  assert(!matches(response("/other", 200)));
+  assert(!matches({ ...response("/", 202), url: () => `https://unrelated.example${path}/` }),
+    "Only the configured app may provide an owned test site's cleanup target.");
+}
 
 const [source, packageJsonSource, env, gitignore] = await Promise.all([
   readFile("scripts/canary-owner-journey.ts", "utf8"),
@@ -51,6 +74,10 @@ for (const requiredBehavior of [
 }
 assert(source.includes("visitorContext = await browser.newContext") && source.includes("const livePage = await visitorContext.newPage()"),
   "Published lead acceptance must use an anonymous visitor, not the internally classified owner session.");
+assert(source.includes('userAgent: devices["Desktop Chrome"].userAgent'),
+  "Published lead acceptance must explicitly emulate an ordinary browser; HeadlessChrome remains bot traffic.");
+assert(source.includes("publishButton.click({ timeout: 60_000 })") && !source.includes("publishButton.isEnabled()"),
+  "Publication must wait for normal button actionability rather than racing the editor's loading state.");
 assert(source.includes('step("bootstrap_response"') && source.includes('step("browser_navigation"'),
   "The owner canary must retain safe handoff diagnostics and the created site's cleanup target.");
 assert(source.includes("LODESTA_OWNER_CANARY_CONFIRMED_NONPRODUCTION")

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { chromium, type Page } from "playwright";
+import { chromium, devices, type Page } from "playwright";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
+import { isFinalOwnerCanaryPostResponse } from "./owner-canary-response";
 import { readDevelopmentSandboxReceipt } from "../packages/site-sandbox/runtime-config";
 import {
   agentAuthoredArtifactIdentity,
@@ -122,7 +123,7 @@ try {
     step("browser_navigation", { path: url.pathname, queryKeys: [...url.searchParams.keys()] });
   });
   page.on("response", async (response) => {
-    if (new URL(response.url()).pathname !== "/api/site-agent/sites" || response.request().method() !== "POST") return;
+    if (!isFinalOwnerCanaryPostResponse(response, "/api/site-agent/sites", origin.origin)) return;
     const body = await response.json().catch(() => ({}));
     // Capture exact ownership targets before a later navigation failure so
     // cleanup cannot lose a successfully created temporary project.
@@ -219,9 +220,10 @@ try {
   step("exact_edit", { status: "passed", runId: editRun.id });
 
   const publishButton = page.locator(".site-agent-publish-desktop");
-  await publishButton.waitFor();
-  assert.equal(await publishButton.isEnabled(), true, "The exact edit candidate is not ready to publish.");
-  await publishButton.click();
+  // The preview can load before the parent editor finishes its workspace
+  // refresh. Normal click actionability waits for readiness without bypassing
+  // a disabled publish button or any publication requirement.
+  await publishButton.click({ timeout: 60_000 });
   await page.getByText("Published version is live.", { exact: true }).waitFor({ timeout: 60_000 });
   const publishedWorkspace = await waitForWorkspace(page, siteId, (snapshot) =>
     Boolean(snapshot.site?.publishedVersionId),
@@ -233,7 +235,13 @@ try {
   // A customer submits anonymously. The authenticated owner is intentionally
   // classified as internal traffic, so using their browser here is not a
   // valid public form-delivery test.
-  const visitorContext = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
+  const visitorContext = await browser.newContext({
+    viewport: { width: 1440, height: 1100 },
+    // Emulate an ordinary visitor explicitly. Default HeadlessChrome is
+    // correctly rejected as bot traffic by the unchanged production endpoint.
+    userAgent: devices["Desktop Chrome"].userAgent
+  });
+  evidence.visitorProfile = "anonymous_playwright_desktop_chrome";
   const livePage = await visitorContext.newPage();
   await livePage.goto(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { waitUntil: "networkidle" });
   await livePage.getByText(exactEditText, { exact: true }).waitFor();
@@ -371,7 +379,7 @@ async function verifyPublishedLead(targetPage: Page, targetSiteId: string, versi
     return renderedAt > 0 && Date.now() - renderedAt >= 1000;
   }, formId);
   const responsePromise = targetPage.waitForResponse((response) =>
-    new URL(response.url()).pathname === "/api/forms/submit" && response.request().method() === "POST");
+    isFinalOwnerCanaryPostResponse(response, "/api/forms/submit", origin.origin));
   await form.locator('button[type="submit"],input[type="submit"]').first().click();
   const response = await responsePromise;
   assert.equal(response.status(), 200, "Published form endpoint rejected the synthetic lead.");

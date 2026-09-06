@@ -69,7 +69,8 @@ assert.deepEqual(
     "202608080001_shared_retained_source_mirrors.sql",
     "202608140001_immutable_logo_preparation_revisions.sql",
     "202608140002_canonical_source_logo_recapture.sql",
-    "202608230001_canonical_site_quality.sql"
+    "202608230001_canonical_site_quality.sql",
+    "202609060001_site_publication_timestamp.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );

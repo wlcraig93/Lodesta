@@ -6,7 +6,17 @@ Date: 2026-09-06
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current continuation: scoped edit accepted; hosted onboarding defect found
+### Current continuation: onboarding released; publication response defect isolated
+
+Release `4f94a240df02718efe5dfd315451159b9edee4be` passed CI and coordinated release `34032890087`. Both Railway services reported the exact SHA before sandbox promotion; required deep health passed and maintenance was released. The hydration correction now passes the hosted creation handoff.
+
+The Lodesta-owned owner-journey canary exposed a separate publication boundary defect after successful initial generation and an ordinary owner edit. Publication committed `version_88d53f3216fcf37b4fbff2664e831427`, but the response parser rejected the embedded PostgreSQL-text `publishedAt`. The read-only report covers 22 retained versions: one invalid embedded timestamp, zero invalid versions when composed with authoritative typed lifecycle columns. The local correction composes those columns before the same strict schema check; a forward migration changes only timestamp JSON serialization. Existing immutable history is not rewritten. See [publication boundary evidence](site-version-publication-boundary.md). Hosted correction and the complete publish/inquiry journey remain pending.
+
+All temporary canary sites have been disposed through the owner operation (paused and unowned, with history retained). No synthetic inquiry has been submitted. Earlier attempts also exposed an unsuitable apex test-source URL and two test-helper issues: redirect response matching and waiting for the publish control to become actionable. These are distinguished from product failures in the retained evidence. No prospect was published, model default changed, or population-quality acceptance inferred.
+
+The reviewed forward migration is now applied to the audited prelaunch database, with live ledger/schema verification passed. The retained-data report remains unchanged, proving the malformed historical payload was not backfilled. Full local preflight, focused regression tests, TypeScript and standalone smoke pass. The controller reader correction still needs its coordinated release before the owner journey is rerun; this is not yet publication/inbox acceptance.
+
+### Earlier continuation: scoped edit accepted; hosted onboarding defect found
 
 Release `ee56b1223bf4c55cf7fc5b9d87942fb2ff8ea23e` passed CI and coordinated release. Fresh private run `run_92710e79b3d19e435e85ef5a508b9f06` succeeded with 29 routes in 25.902 minutes at $13.6639771 catalog-estimated author cost, 42 requests, seven inspections and four first-submission applies. No failed tool or transport recovery occurred. Responsive contact/tablet corrections worked in this candidate; task-specific shared copy and differentiating About evidence still needed refinement. Do not call the original fresh build a complete acceptance pass.
 

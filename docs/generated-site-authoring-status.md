@@ -6,7 +6,19 @@ Date: 2026-09-06
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Fresh acquisition completed; targeted initial-build refinement
+### Current continuation: scoped edit accepted; hosted onboarding defect found
+
+Release `ee56b1223bf4c55cf7fc5b9d87942fb2ff8ea23e` passed CI and coordinated release. Fresh private run `run_92710e79b3d19e435e85ef5a508b9f06` succeeded with 29 routes in 25.902 minutes at $13.6639771 catalog-estimated author cost, 42 requests, seven inspections and four first-submission applies. No failed tool or transport recovery occurred. Responsive contact/tablet corrections worked in this candidate; task-specific shared copy and differentiating About evidence still needed refinement. Do not call the original fresh build a complete acceptance pass.
+
+Normal private owner edit `run_38ea746f824f46b19b1e9328c8fe8b50` produced `version_1e5f55514afa5174ede371571ba1fd32`, passing the hard gate in 8.59 minutes at $2.8222275, 13 author requests, four inspections and one first-submission apply. Its planting/clearing copy and source-supported Local Loop addition are accepted within scope. Seven of eleven source files remain byte-identical. All 87 route/viewport observations are clean; 168 of 179 screenshot PNGs are byte-identical to the original and all eleven changed views are from the intended three routes. Fifteen images were individually reviewed, including every changed image. This tests editability, not fresh-build consistency or live-model promotion.
+
+The owner approved a clearly labeled Lodesta-owned public canary, one synthetic inbox inquiry and correcting obsolete technology disclosures without rewriting unrelated legal terms or retained history. Two initial owner-journey attempts authenticated but reproduced native GET submission back to onboarding (`sourceUrl` query), before any creation API response. No test site was created or published. The local fix disables onboarding controls until hydration attaches the API handler; the real-component browser fixture covers server-rendered inert controls, hydrated submission, empty validation and server rejection. The canary now captures safe handoff diagnostics and uses an anonymous customer session for public lead delivery, followed by the authenticated owner's inbox. Full preflight/deployment and hosted retest remain pending at this checkpoint.
+
+The storage audit found persistent first-party analytics identifiers in local storage, not a cookie-free/no-tracking implementation. Google rating text/link itself does not load a Google widget. See [storage and disclosure audit](generated-site-storage-and-disclosures.md). Neither an accurate disclosure nor a private form screenshot proves jurisdiction-wide compliance or actual inbox delivery. Analytics behavior and the canonical model default are unchanged. The fixed eight-run/six-business screen has not begun.
+
+Local verification subsequently passed: full `verify:preflight` (static, browser, runtime and sandbox checks), the real-component hydration regression, TypeScript, and sequential `smoke:dev`. The first preflight rejected numbered runtime terminology in the new audit document; the wording was corrected without weakening that check. Deployment and the hosted customer journey remain unverified for this correction.
+
+### Earlier fresh acquisition and proposed initial-build refinement (completed above)
 
 Release `cd03e357743e7415eeae48729d00279bba760c4f` passed CI `33995666328` and coordinated release `33995947531`. Railway web and worker reported that exact SHA before sandbox `sandbox_deployment_5c8ffd6f3dc5cd2b144c811278f0461c` was promoted. Required deep health passed and maintenance was released. The prior sandbox remains retained.
 

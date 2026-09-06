@@ -174,6 +174,8 @@ assert(
   "Owner onboarding exposes model-provider configuration."
 );
 assert(onboarding.includes('type="text"') && onboarding.includes('placeholder="example.com or a public business URL"'), "Owner onboarding does not advertise scheme-optional website URLs.");
+assert(onboarding.includes("disabled={!ready}") && onboarding.includes("disabled={!ready || submitting}"),
+  "Onboarding must not expose native form submission before its client handler is ready.");
 assert(createSiteForm.includes('type="text"') && createSiteForm.includes('placeholder="example.com"'), "Admin site creation still requires a URL scheme in the browser.");
 assert(!account.includes("Initial build ·"), "Website cards expose internal model provenance.");
 assert(thumbnailRoute.includes("site.ownerUserId !== auth.user.id"), "Thumbnail endpoint does not enforce exact owner user-ID equality.");

@@ -109,6 +109,30 @@ try {
     sameSite: cookie.sameSite
   })));
   page = await context.newPage();
+  page.on("pageerror", error => step("browser_error", { diagnostic: safeDiagnostic(error) }));
+  page.on("requestfailed", request => {
+    if (request.resourceType() === "script") step("script_request_failed", {
+      path: new URL(request.url()).pathname,
+      diagnostic: safeDiagnostic(request.failure()?.errorText ?? "Script request failed")
+    });
+  });
+  page.on("framenavigated", (frame) => {
+    if (frame !== page?.mainFrame()) return;
+    const url = new URL(frame.url());
+    step("browser_navigation", { path: url.pathname, queryKeys: [...url.searchParams.keys()] });
+  });
+  page.on("response", async (response) => {
+    if (new URL(response.url()).pathname !== "/api/site-agent/sites" || response.request().method() !== "POST") return;
+    const body = await response.json().catch(() => ({}));
+    // Capture exact ownership targets before a later navigation failure so
+    // cleanup cannot lose a successfully created temporary project.
+    if (typeof body.siteId === "string") { siteId = body.siteId; evidence.siteId = siteId; }
+    if (typeof body.workspacePath === "string") {
+      slug = /^\/workspace\/([^/]+)\/editor\/?$/.exec(body.workspacePath)?.[1];
+      evidence.slug = slug;
+    }
+    step("bootstrap_response", { status: response.status(), siteId, code: body.code });
+  });
   page.setDefaultTimeout(30_000);
   page.setDefaultNavigationTimeout(60_000);
 
@@ -206,9 +230,21 @@ try {
   assert(publishedVersionId, "Publication did not set a published version.");
   evidence.publishedVersionId = publishedVersionId;
 
-  const livePage = await context.newPage();
+  // A customer submits anonymously. The authenticated owner is intentionally
+  // classified as internal traffic, so using their browser here is not a
+  // valid public form-delivery test.
+  const visitorContext = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
+  const livePage = await visitorContext.newPage();
   await livePage.goto(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { waitUntil: "networkidle" });
   await livePage.getByText(exactEditText, { exact: true }).waitFor();
+  evidence.visitorStorage = {
+    cookies: (await visitorContext.cookies()).map(({ name, domain, httpOnly, secure, sameSite }) => ({ name, domain, httpOnly, secure, sameSite })),
+    localStorage: await livePage.evaluate(() => Object.keys(localStorage).map(key => {
+      let value: Record<string, unknown> = {};
+      try { value = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch { /* record the key, never raw content */ }
+      return { key, fields: Object.keys(value), expiresInMs: typeof value.expiresAt === "number" ? value.expiresAt - Date.now() : undefined };
+    }))
+  };
   await livePage.screenshot({ path: join(evidenceDirectory, "05-published.png"), fullPage: true });
   step("publication", { status: "passed", publishedVersionId });
 
@@ -218,6 +254,7 @@ try {
     [...new Set(Object.values(publishedWorkspace.versionRoutes ?? {}).flat()
       .flatMap((route) => route.path ? [route.path] : []))]);
   await livePage.close();
+  await visitorContext.close();
   step("published_lead_delivery", { status: "passed" });
 
   const disposal = await page.evaluate(async (targetSiteId) => {
@@ -361,11 +398,12 @@ async function verifyPublishedLead(targetPage: Page, targetSiteId: string, versi
   if (inquiryError) throw inquiryError;
   assert.equal(inquiry.source_channel, "form");
   await targetPage.screenshot({ path: join(evidenceDirectory, "06-lead-received.png"), fullPage: true });
-  await targetPage.goto(new URL(`/workspace/${encodeURIComponent(slug!)}/leads?inquiry=${encodeURIComponent(inquiry.id)}`, origin).toString(),
+  assert(page, "The authenticated owner page is unavailable.");
+  await page.goto(new URL(`/workspace/${encodeURIComponent(slug!)}/leads?inquiry=${encodeURIComponent(inquiry.id)}`, origin).toString(),
     { waitUntil: "networkidle" });
-  await targetPage.getByRole("heading", { name: "Customer leads", exact: true }).waitFor();
-  await targetPage.locator(".owner-inbox-message").getByText(canaryId, { exact: false }).first().waitFor();
-  await targetPage.screenshot({ path: join(evidenceDirectory, "07-owner-inbox.png"), fullPage: true });
+  await page.getByRole("heading", { name: "Customer leads", exact: true }).waitFor();
+  await page.locator(".owner-inbox-message").getByText(canaryId, { exact: false }).first().waitFor();
+  await page.screenshot({ path: join(evidenceDirectory, "07-owner-inbox.png"), fullPage: true });
   return { formId, formRevision: retained.definition.revision, versionId, inquiryId: inquiry.id,
     eventId: matches[0].id, status: "received", persistedEvents: matches.length, visibleInOwnerInbox: true };
 }
@@ -491,6 +529,7 @@ async function canarySandboxProvenance(targetOrigin: URL, repository: SupabaseCl
 
 function step(name: string, detail: Record<string, unknown>) {
   steps.push({ name, at: new Date().toISOString(), ...detail });
+  process.stdout.write(`${JSON.stringify({ step: name, ...detail })}\n`);
 }
 
 async function screenshot(name: string) {

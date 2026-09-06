@@ -97,9 +97,10 @@
     "verify:product-ui": "node --import tsx scripts/verify-product-ui.ts",
     "verify:product-typography": "node --import tsx scripts/verify-product-typography.ts",
     "verify:owner-journey-canary": "node --import tsx scripts/verify-owner-journey-canary.ts",
+    "verify:onboarding-hydration": "node --import tsx scripts/verify-onboarding-hydration.ts",
     "verify:trusted-runtime": "node --import tsx scripts/verify-trusted-runtime.ts",
     "verify:static": "npm run verify:postcss-security && npm run typecheck && npm run build && npm run verify:architecture && npm run verify:database && npm run verify:authoring && npm run verify:account-setup-domain && npm run verify:acquisition && npm run verify:site-authoring-canary && npm run verify:recovery-watchdog && npm run verify:health && npm run verify:deployment-config && npm run verify:execution-authority && npm run verify:release-evidence && npm run verify:site-agent-manager && npm run verify:site-agent-workspace && npm run verify:product-ui && npm run verify:owner-journey-canary",
-    "verify:browser": "npm run verify:generation-ingestion && npm run verify:render-browser && npm run verify:trusted-runtime && npm run verify:marketing-acquisition",
+    "verify:browser": "npm run verify:generation-ingestion && npm run verify:render-browser && npm run verify:trusted-runtime && npm run verify:marketing-acquisition && npm run verify:onboarding-hydration",
     "verify:sandbox": "npm run verify:site-sandbox-manifest && npm run verify:development-sandbox && npm run verify:site-sandbox-local && node --import tsx scripts/verify-site-sandbox-generations.ts && node --import tsx scripts/verify-site-sandbox-operations.ts && node --import tsx scripts/verify-site-sandbox-recovery.ts",
     "verify:preflight": "npm run verify:static && npm run verify:browser && npm run verify:sandbox",
     "verify:analytics": "node --import tsx scripts/verify-analytics.ts",
@@ -139,6 +140,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "esbuild": "0.28.1",
     "tsx": "^4.19.0",
     "wrangler": "^4.112.0"
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 
 export function WebsiteOnboardingForm({
@@ -15,6 +15,10 @@ export function WebsiteOnboardingForm({
   const [status, setStatus] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sourceError, setSourceError] = useState("");
+  const [ready, setReady] = useState(false);
+  // The server-rendered form has no native submission endpoint. Do not let a
+  // fast click or Enter navigate away before React attaches the API handler.
+  useEffect(() => { setReady(true); }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -73,17 +77,19 @@ export function WebsiteOnboardingForm({
           defaultValue={initialSource}
           placeholder="example.com or a public business URL"
           required
+          disabled={!ready}
           maxLength={2048}
           aria-invalid={sourceError ? true : undefined}
           aria-describedby={sourceError ? sourceErrorId : undefined}
           onChange={() => { if (sourceError) setSourceError(""); }}
         />
-        <button className="button primary" type="submit" disabled={submitting}>
+        <button className="button primary" type="submit" disabled={!ready || submitting}>
           {submitting ? "Creating…" : "Create website"}
         </button>
       </div>
       {sourceError ? <p className="form-error" id={sourceErrorId} role="alert">{sourceError}</p> : null}
       <p className="form-status" role="status" aria-live="polite">{status}</p>
+      <noscript><p className="form-status">Enable JavaScript to create your website.</p></noscript>
     </form>
   );
 }

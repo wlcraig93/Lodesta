@@ -49,6 +49,10 @@ for (const requiredBehavior of [
 ]) {
   assert(source.includes(requiredBehavior), `Owner canary behavior is missing ${requiredBehavior}.`);
 }
+assert(source.includes("visitorContext = await browser.newContext") && source.includes("const livePage = await visitorContext.newPage()"),
+  "Published lead acceptance must use an anonymous visitor, not the internally classified owner session.");
+assert(source.includes('step("bootstrap_response"') && source.includes('step("browser_navigation"'),
+  "The owner canary must retain safe handoff diagnostics and the created site's cleanup target.");
 assert(source.includes("LODESTA_OWNER_CANARY_CONFIRMED_NONPRODUCTION")
   && source.includes('"true"'), "The owner canary must fail closed outside a confirmed non-production environment.");
 assert(!source.includes("signInWithPassword") && !source.includes("auth bypass"), "The owner canary must not add or use an authentication bypass.");

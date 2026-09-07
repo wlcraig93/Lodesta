@@ -12,6 +12,7 @@ import { sha256, stableJson } from "@/packages/business-data";
 import { googleAggregateRatingObservationFromSnapshot } from "@/packages/business-data/web-research";
 import { isLegalSourcePagePath, normalizedSourcePagePath } from "@/packages/business-data/source-page-classification";
 import { canonicalSourceTokens } from "@/lib/source-text-blocks";
+import { resolveApprovedSourceDocuments, type ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
 import { FactBindingValidator } from "./fact-declarations";
 import {
   agentAuthoredArtifactSchema,
@@ -92,7 +93,8 @@ export function prepareSiteArtifact(input: {
 
   findings.push(...validateCapabilityBindings(authored, input.buildInput));
   findings.push(...validateLeadForms(sanitized, input.buildInput));
-  findings.push(...validateSourceSensitiveLegalRoutes(sanitized, input.sourcePages ?? []));
+  const approvedDocuments = resolveApprovedSourceDocuments({ buildInput: input.buildInput, snapshots: input.sourceSnapshots ?? [], pages: input.sourcePages ?? [] });
+  findings.push(...validateSourceSensitiveLegalRoutes(sanitized, input.sourcePages ?? [], approvedDocuments));
   const factBindings = new FactBindingValidator().validate({
     routes: sanitized.map((route) => ({ path: route.path, html: route.bodyHtml, title: route.title, description: route.description })),
     buildInput: input.buildInput,
@@ -368,7 +370,8 @@ function visibleBodyText(html: string) {
 
 function validateSourceSensitiveLegalRoutes(
   routes: Array<{ path: string; bodyHtml: string }>,
-  sourcePages: SourceSnapshotPage[]
+  sourcePages: SourceSnapshotPage[],
+  approvedDocuments: ApprovedSourceDocument[] = []
 ) {
   const findings: ArtifactGateFinding[] = [];
   const authoredByPath = new Map(routes.map((route) => [normalizedSourcePagePath(route.path), route]));
@@ -412,6 +415,9 @@ function validateSourceSensitiveLegalRoutes(
     );
   }
 
+  for (const document of approvedDocuments) {
+    richestLegalSourceByPath.set(document.path, canonicalSourceTokens(document.text).map(token => token.value));
+  }
   for (const [path, sourceTokens] of richestLegalSourceByPath) {
     const authored = authoredByPath.get(path);
     if (!authored) {
@@ -424,10 +430,20 @@ function validateSourceSensitiveLegalRoutes(
       continue;
     }
 
+    const renderedTokens = canonicalSourceTokens(visibleBodyText(authored.bodyHtml)).map((token) => token.value);
+    if (approvedDocuments.some(document => document.path === path)) {
+      // An explicit full-document approval is not a fuzzy migration request.
+      // Preserve its complete word stream, allowing markup and surrounding shell.
+      if (!sourceTokens.length || !(` ${renderedTokens.join(" ")} `).includes(` ${sourceTokens.join(" ")} `)) {
+        findings.push(gateFinding("fact.legal_source_preservation", "claim",
+          `Owner-approved document ${path} must retain its complete approved text. Read ownerAuthority.approvedDocuments rather than the historical source document.`, path));
+      }
+      continue;
+    }
+
     // Very short utility notices do not provide enough evidence for a stable
     // similarity decision. Their exact route is still required above.
     if (sourceTokens.length < 30) continue;
-    const renderedTokens = canonicalSourceTokens(visibleBodyText(authored.bodyHtml)).map((token) => token.value);
     const sourceShingles = tokenShingles(sourceTokens, 5);
     const renderedShingles = tokenShingles(renderedTokens, 5);
     const retained = [...sourceShingles].filter((shingle) => renderedShingles.has(shingle)).length;

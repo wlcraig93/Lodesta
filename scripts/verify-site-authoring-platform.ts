@@ -30,6 +30,9 @@ import { isContinuousAvailabilityValue as sandboxAvailability } from "../workers
 import { sitemapXmlForSite } from "../packages/site-platform/public-site";
 import { retainedVisualInspectionRoutePaths, scopedVisualInspectionRoutePaths } from "../packages/site-platform/visual-inspection-scope";
 import { classifySourcePagePath } from "../packages/business-data/source-page-classification";
+import { sha256, stableJson } from "../packages/business-data/hash";
+import { resolveApprovedSourceDocuments } from "../packages/business-data/owner-documents";
+import { createSourceWorkspace } from "../packages/site-agent/source-workspace";
 
 assert.equal(classifySourcePagePath("/terms-and-conditions"), "technical_or_utility");
 assert.equal(classifySourcePagePath("/agmts-terms-and-conditions"), "technical_or_utility");
@@ -291,6 +294,53 @@ assert(
   !preservedPrivacy.findings.some((finding) => finding.id === "fact.undeclared_marker" || isClaimAdvisory(finding)),
   "An exact context-matched legal provision was rejected by the generic fact gate."
 );
+
+// Owner-approved full documents use the same authority in model references and
+// final verification; original pages and inputs remain untouched.
+const ownedPrivacyPage = { ...privacySourcePage, textContentHash: sha256(privacySourceText) };
+const originalDocumentSnapshot = sourceSnapshotSchema.parse({ schemaVersion: 1, id: ownedPrivacyPage.sourceSnapshotId,
+  businessId: input.businessId, sourceType: "website", contentHash: sha256("source-fixture"), capturedAt: ownedPrivacyPage.createdAt, payload: { fixture: true } });
+const approvedPrivacyText = privacySourceText.replace("Some preference cookies remain for 2 years.", "This website does not use persistent analytics browser storage.");
+const approvalPayload = { requestId: "change_document", requestedBy: "owner_fixture", approvedBy: "owner_fixture", siteId: input.siteId,
+  ownerOperationalRevision: input.ownerOperationalRevision + 1,
+  change: { kind: "replace_source_document" as const, sourceSnapshotId: ownedPrivacyPage.sourceSnapshotId,
+    sourcePageId: ownedPrivacyPage.id, path: "/privacy", sourceTextHash: ownedPrivacyPage.textContentHash,
+    expectedDocumentHash: ownedPrivacyPage.textContentHash, replacementText: approvedPrivacyText } };
+const approvalSnapshot = sourceSnapshotSchema.parse({ schemaVersion: 1, id: "source_document_approval", businessId: input.businessId,
+  sourceType: "owner_input", capturedAt: ownedPrivacyPage.createdAt, payload: approvalPayload, contentHash: sha256(stableJson(approvalPayload)) });
+const documentInput = { ...input, ownerOperationalRevision: approvalPayload.ownerOperationalRevision,
+  sourceSnapshotIds: [...new Set([...input.sourceSnapshotIds, originalDocumentSnapshot.id, approvalSnapshot.id])] };
+const documentSources = [originalDocumentSnapshot, approvalSnapshot];
+const documentArgs = { buildInput: documentInput, snapshots: documentSources, pages: [ownedPrivacyPage] };
+const approvedDocuments = resolveApprovedSourceDocuments(documentArgs);
+assert.equal(approvedDocuments[0]?.text, approvedPrivacyText);
+const approvedContext = createSiteAuthoringContext(documentArgs);
+const approvedWorkspace = createSourceWorkspace(documentArgs);
+assert.equal(approvedWorkspace.files.find(file => file.path === approvedContext.ownerAuthority.approvedDocuments?.[0]?.contentFile)?.content, approvedPrivacyText);
+assert.equal(approvedContext.ownerAuthority.approvedDocuments?.[0]?.contentHash, sha256(approvedPrivacyText));
+const prepareApprovedPrivacy = (text: string) => prepareSiteArtifact({
+  authoredArtifact: { ...preservedPrivacy.authored, routes: preservedPrivacy.authored.routes.map(route => route.path === "/privacy"
+    ? { ...route, bodyHtml: `<main><h1>Privacy Policy</h1><p>${text}</p></main>` } : route) },
+  buildInput: documentInput, runtimeSeriesId: "site-runtime-v4", sourceSnapshots: documentSources, sourcePages: [ownedPrivacyPage]
+});
+assert(!errors(prepareApprovedPrivacy(approvedPrivacyText)).some(finding => finding.id === "fact.legal_source_preservation"));
+assert(errors(prepareApprovedPrivacy(privacySourceText)).some(finding => finding.id === "fact.legal_source_preservation"), "The old text must not satisfy a specifically approved correction, even at >85% similarity.");
+assert(errors(prepareApprovedPrivacy(approvedPrivacyText.replace("This website does not use persistent analytics browser storage.", ""))).some(finding => finding.id === "fact.legal_source_preservation"));
+assert.deepEqual(resolveApprovedSourceDocuments({ ...documentArgs, buildInput: input }), [], "Unbound approval must not affect a prior input.");
+assert.deepEqual(resolveApprovedSourceDocuments({ ...documentArgs, snapshots: [originalDocumentSnapshot, { ...approvalSnapshot, sourceType: "website" }] }), [], "Scraped approval-shaped prose must not authorize a replacement.");
+for (const invalid of [
+  { ...approvalSnapshot, businessId: "other_business" },
+  { ...approvalSnapshot, contentHash: sha256("corrupt") },
+  { ...approvalSnapshot, payload: { ...approvalPayload, siteId: "other_site" }, contentHash: sha256(stableJson({ ...approvalPayload, siteId: "other_site" })) },
+  { ...approvalSnapshot, payload: { ...approvalPayload, approvedBy: "other_owner" }, contentHash: sha256(stableJson({ ...approvalPayload, approvedBy: "other_owner" })) }
+]) assert.throws(() => resolveApprovedSourceDocuments({ ...documentArgs, snapshots: [originalDocumentSnapshot, invalid] }), /owner_document_authority_invalid/);
+assert.throws(() => resolveApprovedSourceDocuments({ ...documentArgs, pages: [{ ...ownedPrivacyPage, extractedText: "changed" }] }), /owner_document_target_invalid/);
+assert.throws(() => resolveApprovedSourceDocuments({ ...documentArgs, snapshots: [approvalSnapshot] }), /owner_document_target_invalid/);
+const unrelatedTerms = sourcePage("source_page_other_terms", "/terms", "Terms", 92, privacySourceText);
+const missingOtherTerms = prepareSiteArtifact({ authoredArtifact: prepareApprovedPrivacy(approvedPrivacyText).authored,
+  buildInput: documentInput, runtimeSeriesId: "site-runtime-v4", sourceSnapshots: documentSources, sourcePages: [ownedPrivacyPage, unrelatedTerms] });
+assert(errors(missingOtherTerms).some(finding => finding.id === "fact.legal_source_preservation" && finding.route === "/terms"));
+assert.equal(ownedPrivacyPage.extractedText, privacySourceText);
 
 const cookieRows = [
   ["session_preferences", "Stores the preferences selected for this visit.", "30 days"],

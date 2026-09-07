@@ -5,6 +5,7 @@ import type {
   SourceSnapshotPage
 } from "@/packages/site-contracts";
 import { sha256 } from "@/packages/business-data/hash";
+import { resolveApprovedSourceDocuments, type ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
 import { googleAggregateRatingObservationFromSnapshot } from "@/packages/business-data/web-research";
 import type { WorkspaceSourceFile } from "./contracts";
 import { trustedAuthoringFonts } from "./font-library";
@@ -18,6 +19,7 @@ export type SiteAuthoringContext = {
     ownerOperationalRevision: number;
     ownerIntentRevision: number;
     ownerConfirmedFacts: SitePublicBuildInput["publicFacts"];
+    approvedDocuments?: Array<Omit<ApprovedSourceDocument, "text">>;
     direction: {
       audience?: string;
       positioning?: string;
@@ -130,6 +132,7 @@ export function createSiteAuthoringContext(input: {
   neutralAssetSemantics?: boolean;
 }): SiteAuthoringContext {
   const { buildInput } = input;
+  const approvedDocuments = resolveApprovedSourceDocuments({ buildInput, snapshots: input.snapshots, pages: input.pages ?? [] });
   const googleAggregateRating = latestGoogleAggregateRating(input.snapshots);
   const assets = input.neutralAssetSemantics
     ? buildInput.business.assets.map(({ alt: _alt, ...asset }) => ({
@@ -144,6 +147,7 @@ export function createSiteAuthoringContext(input: {
       ownerOperationalRevision: buildInput.ownerOperationalRevision,
       ownerIntentRevision: buildInput.ownerIntentRevision,
       ownerConfirmedFacts: buildInput.publicFacts.filter((fact) => fact.source.ownerConfirmed),
+      ...(approvedDocuments.length ? { approvedDocuments: approvedDocuments.map(({ text: _text, ...document }) => document) } : {}),
       direction: {
         audience: buildInput.intent.audience,
         positioning: buildInput.intent.positioning,

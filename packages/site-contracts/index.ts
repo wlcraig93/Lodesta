@@ -1248,7 +1248,18 @@ export const trustedRuntimeSeriesSchema = z.object({
 }).strict();
 export type TrustedRuntimeSeries = z.infer<typeof trustedRuntimeSeriesSchema>;
 
+export const replaceSourceDocumentSchema = z.object({
+  kind: z.literal("replace_source_document"),
+  sourceSnapshotId: identifier,
+  sourcePageId: identifier,
+  path: z.string().startsWith("/").max(2048),
+  sourceTextHash: contentHash,
+  expectedDocumentHash: contentHash,
+  replacementText: z.string().min(1).max(200_000)
+}).strict();
+
 export const controlPlaneChangePayloadSchema = z.discriminatedUnion("kind", [
+  replaceSourceDocumentSchema,
   z.object({ kind: z.literal("confirm_facts"), factIds: z.array(identifier).min(1).max(200) }).strict(),
   z.object({ kind: z.literal("confirm_identity"), name: z.string().min(1).max(200) }).strict(),
   z.object({ kind: z.literal("update_contact"), phone: z.string().max(60).optional(), email: z.string().email().optional() }).strict(),

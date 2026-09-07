@@ -7,7 +7,7 @@ import { LocalSitePlatformRepository } from "../packages/platform-data/repositor
 import { LocalArtifactBlobStore } from "../packages/site-artifacts";
 import { SiteAuthoringWorkflow } from "../packages/site-platform/workflow";
 import { createSiteAuthoringContext, siteAgentRunGuardrailsForKind, type WebsiteManagerAgent } from "../packages/site-agent";
-import { businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, type SitePublicBuildInput } from "../packages/site-contracts";
+import { businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, sourceSnapshotSchema, sourceSnapshotPageSchema, type SitePublicBuildInput } from "../packages/site-contracts";
 import { sha256, stableJson } from "../packages/business-data";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
@@ -17,12 +17,30 @@ const directory = await mkdtemp(join(tmpdir(), "lodesta-form-media-"));
 try {
   const repository = new LocalSitePlatformRepository(join(directory, "repository.json"));
   const store = new LocalArtifactBlobStore(join(directory, "blobs"));
-  const input = buildSyntheticSiteInput();
+  const baseInput = buildSyntheticSiteInput();
   const now = new Date().toISOString();
   const owner = "58c3a17e-6ad5-4e2c-9eb3-90e71527a054";
+  const oldDocument = "Privacy Policy\nThe former site used preference storage.";
+  const approvedDocument = "Privacy Policy\nThe new site does not use persistent analytics browser storage.";
+  const documentPage = sourceSnapshotPageSchema.parse({ schemaVersion: 1, id: "page_owner_privacy", sourceSnapshotId: "source_original_document",
+    resourceId: "resource_owner_privacy", requestedUrl: "https://northstar.example/privacy", path: "/privacy", outcome: "fetched",
+    indexability: "indexable", headings: [], wordCount: 10, internalLinks: [], externalLinks: [], linkProminence: 1,
+    extractedText: oldDocument, textContentHash: sha256(oldDocument), producer: "fixture", inputHash: sha256("fixture"), createdAt: now });
+  const originalSnapshot = sourceSnapshotSchema.parse({ schemaVersion: 1, id: documentPage.sourceSnapshotId, businessId: baseInput.businessId,
+    sourceType: "website", contentHash: sha256("fixture"), capturedAt: now, payload: { fixture: true } });
+  const approvalPayload = { requestId: "change_privacy", requestedBy: owner, approvedBy: owner, siteId: baseInput.siteId, ownerOperationalRevision: 2,
+    change: { kind: "replace_source_document", sourceSnapshotId: originalSnapshot.id, sourcePageId: documentPage.id, path: documentPage.path,
+      sourceTextHash: documentPage.textContentHash, expectedDocumentHash: documentPage.textContentHash, replacementText: approvedDocument } };
+  const approvalSnapshot = sourceSnapshotSchema.parse({ schemaVersion: 1, id: "source_owner_document", businessId: baseInput.businessId,
+    sourceType: "owner_input", contentHash: sha256(stableJson(approvalPayload)), capturedAt: now, payload: approvalPayload });
+  const snapshots = [originalSnapshot, approvalSnapshot];
+  const inputBody = { ...baseInput, ownerOperationalRevision: 2, sourceSnapshotIds: [originalSnapshot.id, approvalSnapshot.id] };
+  const { inputHash: _oldHash, ...inputWithoutHash } = inputBody;
+  const input = { ...inputWithoutHash, inputHash: sha256(stableJson(inputWithoutHash)) };
+  const authoringContext = createSiteAuthoringContext({ buildInput: input, snapshots, pages: [documentPage] });
   const stateBody = {
     schemaVersion: 1, businessId: input.businessId, siteId: input.siteId,
-    revision: 1, ownerOperationalRevision: 1, updatedAt: now,
+    revision: 1, ownerOperationalRevision: input.ownerOperationalRevision, updatedAt: now,
     identity: { name: input.business.name, status: input.business.identityStatus, description: input.business.description, categories: [] },
     contacts: input.business.contacts, locations: input.business.locations, serviceAreas: input.business.serviceAreas,
     offerings: input.business.offerings, proof: input.business.proof, assets: input.business.assets,
@@ -34,6 +52,7 @@ try {
   await repository.saveSiteIntent(input.intent);
   for (const form of input.forms) await repository.saveFormDefinition(form);
   await repository.savePublicBuildInput(input);
+  for (const snapshot of snapshots) await repository.saveSourceSnapshot(snapshot);
   const session = siteAgentSessionSchema.parse({ schemaVersion: "site-agent-session", id: "session_form_media",
     siteId: input.siteId, principal: { kind: "owner", id: owner }, status: "active", publicBuildInputId: input.id,
     sandboxProvider: "cloudflare", sandboxId: "sandbox_form_media", leaseTokenHash: sha256("test-lease"),
@@ -56,6 +75,18 @@ try {
   };
   const complete = new Error("fixture_complete");
   const manager = { run: async ({ runtime }: Parameters<WebsiteManagerAgent["run"]>[0]) => {
+    const documentPath = authoringContext.ownerAuthority.approvedDocuments![0]!.contentFile;
+    const readDocument = async () => {
+      const result = await runtime.execute({ callId: "read_document", name: "read_files",
+        arguments: { files: [{ path: documentPath, startLine: 1, endLine: 100 }] } });
+      assert.equal(typeof result.modelOutput, "string");
+      return JSON.parse(result.modelOutput as string);
+    };
+    const before = await readDocument();
+    assert.equal(before.files[0].lines.map((line: { content: string }) => line.content).join("\n"), approvedDocument);
+    await runtime.execute({ callId: "unrelated_edit", name: "write_file", arguments: { path: "src/styles.css", content: "body{color:#222}" } });
+    assert.equal((await readDocument()).files[0].contentHash, sha256(approvedDocument), "Ordinary edits must preserve read-only document authority.");
+    await assert.rejects(() => runtime.execute({ callId: "forged_authority", name: "write_file", arguments: { path: documentPath, content: "forged" } }));
     const image = await runtime.execute({ callId: "media", name: "create_image", arguments: {
       action: "generate", purpose: "background", prompt: "Synthetic test texture", sourceAssetIds: [], size: "1024x1024", alt: "Test texture"
     } });
@@ -88,11 +119,11 @@ try {
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 1 }
     })) as never);
   await assert.rejects(() => Reflect.get(workflow, "runAuthoring").call(workflow, {
-    run, session, buildInput: input, authoringContext: createSiteAuthoringContext({ buildInput: input, snapshots: [] }),
-    snapshots: [], sourcePages: [], sandboxRevision: "initial", kind: "edit", instruction: "Add a texture and change the form button label.",
+    run, session, buildInput: input, authoringContext,
+    snapshots, sourcePages: [documentPage], sandboxRevision: "initial", kind: "edit", instruction: "Add a texture and change the form button label.",
     currentFiles: [{ path: "src/site.tsx", content: 'export const siteDefinition = { routes: [{path:"/",element:<main><h1>Home</h1></main>}] };' }, { path: "src/styles.css", content: "body{color:#111}" }]
   }), (error: unknown) => error === complete);
-  console.log("Form changes preserve retained authority and provisional media across consecutive builds.");
+  console.log("Owner-approved documents reach the normal runtime read tools and survive unrelated edits. Form changes preserve retained authority and provisional media across consecutive builds.");
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

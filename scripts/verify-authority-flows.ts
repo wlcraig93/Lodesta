@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./verify-owner-document-route";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,10 +14,13 @@ import {
   siteAgentRunSchema,
   siteAgentSessionSchema,
   siteVersionSchema,
-  sourceSnapshotSchema
+  sourceSnapshotSchema,
+  sourceSnapshotPageSchema,
+  sourceSnapshotResourceSchema
 } from "../packages/site-contracts";
 import { deriveSiteCandidateIntegrity } from "../packages/site-platform/candidate-integrity";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
+import { resolveApprovedSourceDocuments } from "../packages/business-data/owner-documents";
 
 const directory = await mkdtemp(join(tmpdir(), "lodesta-authority-"));
 try {
@@ -366,6 +370,57 @@ try {
   assert.equal(intentAfterPolicy.ownerIntentRevision, intentBeforePolicy.ownerIntentRevision);
   assert.equal((await repository.getSiteVersion("version_before_policy_change"))?.status, "candidate");
 
+  const originalText = "Privacy Policy\nWe respond to inquiries using the information customers submit. Our previous website used preference storage. Unrelated commercial provisions remain in force.";
+  const replacementText = "Privacy Policy\nWe respond to inquiries using the information customers submit. This website uses no persistent analytics browser storage. Unrelated commercial provisions remain in force.";
+  const documentPage = sourceSnapshotPageSchema.parse({
+    schemaVersion: 1, id: "source_page_privacy_authority", sourceSnapshotId: websiteSnapshot.id,
+    resourceId: "resource_privacy_authority", requestedUrl: "https://northstar.example/privacy", path: "/privacy",
+    outcome: "fetched", indexability: "indexable", title: "Privacy Policy", headings: ["Privacy Policy"],
+    wordCount: 25, internalLinks: [], externalLinks: [], linkProminence: 1, extractedText: originalText,
+    textContentHash: sha256(originalText), producer: "authority-fixture", inputHash: websiteSnapshot.contentHash, createdAt: capturedAt
+  });
+  await repository.saveSourceSnapshotResources([sourceSnapshotResourceSchema.parse({
+    schemaVersion: 1, id: documentPage.resourceId, sourceSnapshotId: websiteSnapshot.id,
+    requestedUrl: documentPage.requestedUrl, role: "document", outcome: "fetched", status: 200,
+    finalUrl: documentPage.requestedUrl, captureKind: "http_response", contentType: "text/plain", storedEncoding: "identity",
+    rawContentHash: sha256(originalText), blobContentHash: sha256(originalText), storageKey: "fixture/privacy.txt",
+    rawBytes: Buffer.byteLength(originalText), storedBytes: Buffer.byteLength(originalText), headers: {},
+    redirectChain: [], initiatorUrls: [], metadata: {}, capturedAt
+  })]);
+  await repository.saveSourceSnapshotPages([documentPage]);
+  const documentChange = { kind: "replace_source_document" as const, sourceSnapshotId: websiteSnapshot.id,
+    sourcePageId: documentPage.id, path: documentPage.path, sourceTextHash: documentPage.textContentHash,
+    expectedDocumentHash: documentPage.textContentHash, replacementText };
+  await assert.rejects(service.submit({ siteId: site.id, requestedBy: "not-the-owner", payload: documentChange }), /owner_document_owner_required/);
+  const stateBeforeDocument = (await repository.getBusinessState(site.businessId))!;
+  const inputBeforeDocument = (await repository.getPublicBuildInput((await repository.getSite(site.id))!.currentPublicBuildInputId!))!;
+  const queuedBeforeDocument = queuedKinds.length;
+  const proposedDocument = await service.submit({ siteId: site.id, requestedBy: ownerId, payload: documentChange });
+  assert.equal(proposedDocument.applied, false);
+  assert.equal(queuedKinds.length, queuedBeforeDocument, "A proposal must not queue authoring before owner approval.");
+  await assert.rejects(service.decide({ requestId: proposedDocument.request.id, decision: "approve", decidedBy: "authorized_operator" }), /owner_document_owner_required/);
+  const approvedDocument = await service.decide({ requestId: proposedDocument.request.id, decision: "approve", decidedBy: ownerId });
+  assert(approvedDocument.applied && "run" in approvedDocument && approvedDocument.run?.kind === "edit");
+  assert.equal(queuedKinds.length, queuedBeforeDocument + 1);
+  const documentState = (await repository.getBusinessState(site.businessId))!;
+  assert.equal(documentState.ownerOperationalRevision, stateBeforeDocument.ownerOperationalRevision + 1);
+  assert.deepEqual(documentState.facts, stateBeforeDocument.facts, "Approved document prose must not become business facts.");
+  const documentInput = (await repository.getPublicBuildInput((await repository.getSite(site.id))!.currentPublicBuildInputId!))!;
+  const documentSnapshots = (await Promise.all(documentInput.sourceSnapshotIds.map(id => repository.getSourceSnapshot(id)))).filter(item => Boolean(item)) as import("../packages/site-contracts").SourceSnapshot[];
+  assert.equal(resolveApprovedSourceDocuments({ buildInput: documentInput, snapshots: documentSnapshots, pages: [documentPage] })[0]?.text, replacementText);
+  assert.deepEqual(resolveApprovedSourceDocuments({ buildInput: inputBeforeDocument, snapshots: documentSnapshots, pages: [documentPage] }), [], "An old input must not gain new document authority.");
+  assert.equal((await repository.listSourceSnapshotPages(websiteSnapshot.id, documentPage.id))[0]?.extractedText, originalText);
+  assert.deepEqual(await repository.getPublicBuildInput(inputBeforeDocument.id), inputBeforeDocument, "Prior immutable public input changed.");
+  const staleDocument = await service.submit({ siteId: site.id, requestedBy: ownerId, payload: documentChange });
+  await assert.rejects(service.decide({ requestId: staleDocument.request.id, decision: "approve", decidedBy: ownerId }), /owner_document_target_stale/);
+  assert.equal(queuedKinds.length, queuedBeforeDocument + 1);
+  const updatedDocument = await service.submit({ siteId: site.id, requestedBy: ownerId,
+    payload: { ...documentChange, expectedDocumentHash: sha256(replacementText), replacementText: replacementText + " Contact us with questions." } });
+  await service.decide({ requestId: updatedDocument.request.id, decision: "approve", decidedBy: ownerId });
+  const latestDocumentInput = (await repository.getPublicBuildInput((await repository.getSite(site.id))!.currentPublicBuildInputId!))!;
+  const latestDocumentSnapshots = (await Promise.all(latestDocumentInput.sourceSnapshotIds.map(id => repository.getSourceSnapshot(id)))).filter(item => Boolean(item)) as import("../packages/site-contracts").SourceSnapshot[];
+  assert.equal(resolveApprovedSourceDocuments({ buildInput: latestDocumentInput, snapshots: latestDocumentSnapshots.reverse(), pages: [documentPage] })[0]?.text, replacementText + " Contact us with questions.", "Source ID/array order must not decide approval precedence.");
+
   process.stdout.write(`${JSON.stringify({
     ok: true,
     provisionalIdentity: "pass",
@@ -374,7 +429,8 @@ try {
     ownerAuthorityStaleness: "pass",
     agentPolicyAuthorityIsolation: "pass",
     provisionalRefreshNonStaling: "pass",
-    sourceMediaWithoutAttestation: "pass"
+    sourceMediaWithoutAttestation: "pass",
+    ownerDocumentApprovalAndPreservation: "pass"
   })}\n`);
 } finally {
   await rm(directory, { recursive: true, force: true });

@@ -2093,6 +2093,7 @@ export class SiteAuthoringWorkflow {
     let retainedBuildInput = input.buildInput;
     const sourceCatalog = new Map(input.snapshots.map((snapshot) => [snapshot.id, snapshot]));
     const sourceWorkspace = createSourceWorkspace({
+      buildInput: input.buildInput,
       snapshots: input.snapshots,
       pages: input.sourcePages
     });

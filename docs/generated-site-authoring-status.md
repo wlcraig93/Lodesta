@@ -6,7 +6,21 @@ Date: 2026-09-07
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current continuation: privacy-minimal analytics deployed; inbox correction under verification
+### Current continuation: explicit document authority implemented locally
+
+The owner-approved disclosure correction now uses the existing control plane: a complete exact-source/hash-bound document stays pending until the exact site owner approves it. The normal authority transaction retains an immutable owner-input snapshot, advances the operational revision and queues an ordinary edit. Author context and final verification resolve the same complete approved text; old inputs and unrelated legal provisions retain their original authority. No database schema, runtime presentation, automatic critic or publication change is added. See [owner-approved documents](owner-approved-source-documents.md).
+
+Focused authority, real decision-handler, source-workspace and finalizer fixtures pass. Full local preflight passes, including typecheck/build, browser rendering, managed forms, privacy-minimal analytics, inbox, queue durability and sandbox replay. Earlier local attempts found a new-test type error and a prior report's naming violation; both were corrected without weakening checks. Coordinated deployment, a private hosted document edit and the unchanged business-quality screen remain pending. No fresh quality-screen arm has been queued.
+
+### Earlier continuation: owner journey and independent review/edit verified
+
+Commit `6c885c909eec61d10f9a282706b6ae071c6e52d3` passed CI `34100689266` and coordinated release `34101217476`. Both Railway services reported that exact SHA before sandbox promotion. The corrected fresh Lodesta-owned canary passed creation, ordinary editing, publication, one synthetic inquiry, owner Inbox, analytics and disposal. Anonymous cookies/localStorage/sessionStorage were empty, and external notifications were disabled. The temporary site returns 404 with history retained. This closes the previously pending inbox/owner-journey check; earlier failed canaries remain failed historical evidence.
+
+The independent-review experiment is also complete. A fresh-context reviewer inspected the strongest retained tree-service candidate across all 29 route implementations and 42 actual screenshots. One minor contact-form instruction improvement was applied through the ordinary authoring workflow. The new private candidate passes the hard gate; ten of eleven source files and 171 of 179 screenshots are byte-identical, and all eight changed screenshots belong to the intended Contact route. All 87 new route/viewport observations have no capture errors or page overflow. The edit cost approximately $0.92 and took 6.85 minutes, with one first-submission apply and no failed tools. See [independent review and editing evidence](site-authoring-independent-review.md).
+
+No permanent second agent or new orchestration is justified by this single already-refined candidate. The canonical model is unchanged. Remaining website work is explicit authority for replacing obsolete technology disclosures, appropriate source/owner qualification evidence, and the still-unstarted fixed eight-build/six-business screen. Neither this review nor the successful owner workflow establishes consistent fresh-build quality or customer-launch acceptance.
+
+### Earlier continuation: privacy-minimal analytics deployed; inbox correction under verification
 
 The owner selected privacy-minimal analytics: no analytics cookies, local/session storage, persistent visitor identifiers, returning-browser reports or cross-page attribution. The existing runtime and reports now use per-document, in-memory page-load context. Forms remain independently deliverable. No second analytics service, consent platform or authoring orchestration was added.
 

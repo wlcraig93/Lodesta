@@ -1,6 +1,7 @@
 import {
   websiteSourceSnapshotPayloadSchema,
   type SourceSnapshot,
+  type SitePublicBuildInput,
   type SourceSnapshotPage
 } from "@/packages/site-contracts";
 import {
@@ -8,12 +9,14 @@ import {
   type SourceWorkspaceSummary,
   type WorkspaceReferenceFile
 } from "./contracts";
+import { resolveApprovedSourceDocuments } from "@/packages/business-data/owner-documents";
 
 const maximumReferenceFileCharacters = 900_000;
 
 export function createSourceWorkspace(input: {
   snapshots: SourceSnapshot[];
   pages: SourceSnapshotPage[];
+  buildInput?: SitePublicBuildInput;
 }): { files: WorkspaceReferenceFile[]; summary: SourceWorkspaceSummary } {
   const pagesBySource = new Map<string, SourceSnapshotPage[]>();
   for (const page of input.pages) pagesBySource.set(page.sourceSnapshotId, [...(pagesBySource.get(page.sourceSnapshotId) ?? []), page]);
@@ -84,6 +87,14 @@ export function createSourceWorkspace(input: {
     }
   }
 
+  if (input.buildInput) {
+    for (const document of resolveApprovedSourceDocuments({ ...input, buildInput: input.buildInput })) {
+      files.push(workspaceReferenceFileSchema.parse({ path: document.contentFile, content: document.text }));
+    }
+  } else if (input.snapshots.some(snapshot => snapshot.sourceType === "owner_input"
+    && (snapshot.payload.change as { kind?: unknown } | undefined)?.kind === "replace_source_document")) {
+    throw new Error("owner_document_build_input_required");
+  }
   files.sort((left, right) => left.path.localeCompare(right.path));
   return {
     files,

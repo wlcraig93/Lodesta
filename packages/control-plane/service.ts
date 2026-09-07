@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createPublicBuildInput, sha256, stableJson } from "@/packages/business-data";
+import { assertSourceDocumentTarget, resolveApprovedSourceDocuments } from "@/packages/business-data/owner-documents";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
 import { siteAuthoringWorkflow, type SiteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import {
@@ -29,6 +30,7 @@ export class ControlPlaneService {
       this.repository.getSiteIntent(input.siteId)
     ]);
     if (!site || !existingState || !existingIntent) throw new Error("Canonical site authorities were not found.");
+    if (input.payload.kind === "replace_source_document" && site.ownerUserId !== input.requestedBy) throw new Error("owner_document_owner_required");
     const policy = policyFor(input.payload.kind);
     const now = new Date().toISOString();
     let request = controlPlaneChangeRequestSchema.parse({
@@ -47,6 +49,10 @@ export class ControlPlaneService {
   async decide(input: { requestId: string; decision: "approve" | "reject"; decidedBy: string }) {
     const current = await this.repository.getControlPlaneChangeRequest(input.requestId);
     if (!current) throw new Error("Control-plane change request not found.");
+    if (current.payload.kind === "replace_source_document") {
+      const site = await this.repository.getSite(current.siteId);
+      if (!site?.ownerUserId || site.ownerUserId !== input.decidedBy || current.requestedBy !== input.decidedBy) throw new Error("owner_document_owner_required");
+    }
     if (current.status !== "pending") throw new Error("Control-plane change request is no longer pending.");
     const decidedAt = new Date().toISOString();
     if (input.decision === "reject") {
@@ -63,6 +69,10 @@ export class ControlPlaneService {
       this.repository.getSite(request.siteId), this.stateForSite(request.siteId), this.repository.getSiteIntent(request.siteId)
     ]);
     if (!site || !state || !intent) throw new Error("Canonical site authorities were not found.");
+    if (request.payload.kind === "replace_source_document"
+      && (!site.ownerUserId || site.ownerUserId !== actorId || request.requestedBy !== actorId || request.status !== "approved")) {
+      throw new Error("owner_document_approval_required");
+    }
     if (request.expectedBusinessRevision !== state.revision || request.expectedIntentRevision !== intent.revision) {
       const superseded = controlPlaneChangeRequestSchema.parse({ ...request, status: "superseded", failureReason: "Authority revision changed before apply." });
       await this.repository.saveControlPlaneChangeRequest(superseded);
@@ -106,8 +116,20 @@ export class ControlPlaneService {
         return { request: committed.request, applied: true as const, run: committed.run! };
       }
 
+      if (request.payload.kind === "replace_source_document") {
+        const change = request.payload;
+        const buildInput = site.currentPublicBuildInputId ? await this.repository.getPublicBuildInput(site.currentPublicBuildInputId) : undefined;
+        if (!buildInput) throw new Error("Current public build input was not found.");
+        const snapshots = (await Promise.all(buildInput.sourceSnapshotIds.map(id => this.repository.getSourceSnapshot(id)))).filter((item): item is SourceSnapshot => Boolean(item));
+        const pages = (await Promise.all(snapshots.map(snapshot => this.repository.listSourceSnapshotPages(snapshot.id)))).flat();
+        const page = assertSourceDocumentTarget({ buildInput, snapshots, pages, change: request.payload });
+        const previous = resolveApprovedSourceDocuments({ buildInput, snapshots, pages }).find(document => document.path === change.path);
+        if (request.payload.expectedDocumentHash !== (previous?.contentHash ?? page.textContentHash)) throw new Error("owner_document_target_stale");
+      }
       const ownerSnapshot = request.targetAuthority === "business_state"
-        ? await this.ownerInputSnapshot(request)
+        ? await this.ownerInputSnapshot(request, request.payload.kind === "replace_source_document"
+          ? { siteId: site.id, approvedBy: actorId, ownerOperationalRevision: state.ownerOperationalRevision + 1 }
+          : undefined)
         : undefined;
       let nextState = state;
       let nextIntent = intent;
@@ -218,6 +240,7 @@ function policyFor(kind: ControlPlaneChangePayload["kind"]): {
     case "register_asset":
     case "set_asset_active": return { targetAuthority: "business_state", impact: "structural", reviewRequired: false };
     case "set_proof":
+    case "replace_source_document":
     case "update_external_link": return { targetAuthority: "business_state", impact: "reviewable", reviewRequired: true };
     case "update_site_intent": return { targetAuthority: "site_intent", impact: "structural", reviewRequired: false };
     case "update_agent_access_policy": return { targetAuthority: "site_intent", impact: "deterministic", reviewRequired: false };
@@ -304,6 +327,9 @@ function mutateBusinessState(state: BusinessState, payload: ControlPlaneChangePa
     link.url = payload.url;
     link.publicEligible = true;
     upsertFact(next, "link", link.label, payload.url, source, now);
+  } else if (payload.kind === "replace_source_document") {
+    // Document contents remain in the immutable owner-input snapshot, not facts.
+    // The ordinary revision advance below makes older candidates stale.
   } else {
     throw new Error("Change payload does not target business state.");
   }
@@ -354,6 +380,7 @@ function instructionFor(payload: ControlPlaneChangePayload) {
     case "add_offering": return `Reflect the owner-confirmed ${payload.name} service wherever it is useful. Decide whether any route change improves the site; service confirmation alone does not require a page.`;
     case "set_offering": return `${payload.enabled ? "Reflect" : "Remove"} the selected service wherever relevant. Preserve or change routes based on the site's information architecture, not the offering record alone.`;
     case "set_proof": return `${payload.enabled ? "Add" : "Remove"} the selected verified proof item without inventing claims.`;
+    case "replace_source_document": return `Replace the document at ${payload.path} with its complete owner-approved text in ownerAuthority.approvedDocuments. Read the indicated read-only content file; retain the exact route and existing design. Do not change unrelated documents, business claims, routes or functionality. The old scraped document remains historical evidence, not the current text authority for this route.`;
     case "set_asset_active": return `${payload.active ? "Incorporate" : "Remove"} the selected asset while preserving the site's visual quality.`;
     case "register_asset": return "Incorporate the newly uploaded owner asset while preserving the site's visual quality.";
     case "update_external_link": return "Apply the approved external-link update.";

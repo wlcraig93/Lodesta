@@ -251,8 +251,12 @@ try {
       let value: Record<string, unknown> = {};
       try { value = JSON.parse(localStorage.getItem(key) ?? "{}"); } catch { /* record the key, never raw content */ }
       return { key, fields: Object.keys(value), expiresInMs: typeof value.expiresAt === "number" ? value.expiresAt - Date.now() : undefined };
-    }))
+    })),
+    sessionStorage: await livePage.evaluate(() => Object.keys(sessionStorage))
   };
+  assert.deepEqual(await visitorContext.cookies(), [], "Anonymous published-site response set unexpected cookies.");
+  assert.deepEqual(await livePage.evaluate(() => Object.keys(localStorage)), [], "Published runtime retained browser identifiers.");
+  assert.deepEqual(await livePage.evaluate(() => Object.keys(sessionStorage)), [], "Published runtime retained session identifiers.");
   await livePage.screenshot({ path: join(evidenceDirectory, "05-published.png"), fullPage: true });
   step("publication", { status: "passed", publishedVersionId });
 
@@ -388,11 +392,13 @@ async function verifyPublishedLead(targetPage: Page, targetSiteId: string, versi
   assert.equal(submitted.siteId, targetSiteId);
   assert.equal(submitted.versionId, versionId);
   assert.equal(submitted.formId, formId);
+  assert.equal(typeof submitted.pageViewId, "string", "Published form omitted the current page-load context.");
+  assert(!("visitorId" in submitted) && !("visitId" in submitted), "Published form sent persistent analytics identifiers.");
   await targetPage.waitForFunction((id) => {
     const element = [...document.querySelectorAll("form[data-lodesta-form-id]")]
       .find((item) => item.getAttribute("data-lodesta-form-id") === id);
     return element?.querySelector("[data-lodesta-form-status]")?.textContent
-      === element?.getAttribute("data-lodesta-success-message");
+      === (element?.getAttribute("data-lodesta-success-message") || "Thanks. Your message was sent.");
   }, formId);
   const { data: events, error: eventError } = await admin.from("inquiry_events")
     .select("id,inquiry_id,form_id,payload").eq("site_id", targetSiteId).eq("form_id", formId);
@@ -405,6 +411,16 @@ async function verifyPublishedLead(targetPage: Page, targetSiteId: string, versi
     .select("id,status,source_channel").eq("id", matches[0].inquiry_id).eq("site_id", targetSiteId).single();
   if (inquiryError) throw inquiryError;
   assert.equal(inquiry.source_channel, "form");
+  const { data: analyticsEvents, error: analyticsError } = await admin.from("analytics_events")
+    .select("event_id,event_type,page_view_id,site_version_id,page_path").eq("site_id", targetSiteId);
+  if (analyticsError) throw analyticsError;
+  const submissionEvents = analyticsEvents.filter(event => event.event_type === "form_submit");
+  assert.equal(submissionEvents.length, 1, "Expected one atomic analytics event for the retained inquiry.");
+  assert.equal(submissionEvents[0].event_id, submitted.eventId);
+  assert.equal(submissionEvents[0].site_version_id, versionId);
+  assert(analyticsEvents.some(event => event.event_type === "page_view"
+    && event.page_view_id === submissionEvents[0].page_view_id && event.site_version_id === versionId),
+  "Retained inquiry did not match an observed page load.");
   await targetPage.screenshot({ path: join(evidenceDirectory, "06-lead-received.png"), fullPage: true });
   assert(page, "The authenticated owner page is unavailable.");
   await page.goto(new URL(`/workspace/${encodeURIComponent(slug!)}/leads?inquiry=${encodeURIComponent(inquiry.id)}`, origin).toString(),
@@ -412,8 +428,17 @@ async function verifyPublishedLead(targetPage: Page, targetSiteId: string, versi
   await page.getByRole("heading", { name: "Customer leads", exact: true }).waitFor();
   await page.locator(".owner-inbox-message").getByText(canaryId, { exact: false }).first().waitFor();
   await page.screenshot({ path: join(evidenceDirectory, "07-owner-inbox.png"), fullPage: true });
+  await page.goto(new URL(`/workspace/${encodeURIComponent(slug!)}/analytics`, origin).toString(), { waitUntil: "networkidle" });
+  await page.getByRole("heading", { name: "Website analytics", exact: true }).waitFor();
+  await page.getByText("Tracked inquiries", { exact: true }).first().waitFor();
+  assert.equal(await page.getByText("Visitors", { exact: true }).count(), 0, "The dashboard still claims unique visitors.");
+  await page.screenshot({ path: join(evidenceDirectory, "08-owner-analytics-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: join(evidenceDirectory, "09-owner-analytics-mobile.png"), fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1100 });
   return { formId, formRevision: retained.definition.revision, versionId, inquiryId: inquiry.id,
-    eventId: matches[0].id, status: "received", persistedEvents: matches.length, visibleInOwnerInbox: true };
+    eventId: matches[0].id, status: "received", persistedEvents: matches.length, visibleInOwnerInbox: true,
+    analyticsSubmissionEvents: submissionEvents.length, pageLoadMatched: true, analyticsDashboardVisible: true };
 }
 
 function publicAnonKey() {

@@ -113,6 +113,11 @@ assert(privacyMigration.includes("privacy_minimal_analytics_cutover_not_empty"))
 assert(privacyMigration.includes("in access exclusive mode"));
 assert(!/delete from|truncate|drop table/i.test(privacyMigration));
 assert(!privacyMigration.includes("p_visitor_id"));
+const privacyNotice = await readFile("app/(marketing)/privacy/page.tsx", "utf8");
+assert(privacyNotice.includes("does not set analytics cookies"));
+assert(privacyNotice.includes("held in page memory"));
+assert(!privacyNotice.includes("up to 13 months") && !privacyNotice.includes("pseudonymous visitor identifiers"),
+  "The public notice still describes the retired analytics implementation.");
 
 console.log(JSON.stringify({
   ok: true,

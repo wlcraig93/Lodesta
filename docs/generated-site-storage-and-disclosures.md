@@ -23,7 +23,9 @@ The earlier legal references were California's guidance on notices and UK guidan
 - https://oag.ca.gov/sites/all/files/agweb/pdfs/cybersecurity/making_your_privacy_practices_public.pdf
 - https://ico.org.uk/for-organisations/direct-marketing-and-privacy-and-electronic-communications/guidance-on-the-use-of-storage-and-access-technologies/what-are-the-exceptions/
 
-The legal-preservation gate compares retained original documents. A legitimate owner-approved replacement must become the comparison authority through the existing control plane. Do not weaken preservation globally, infer permission from scraped prose, append contradictory technology paragraphs, or add a provider registry or automatically generated legal guarantees. Updating obsolete source technology disclosures is separate remaining work; analytics changes alone do not correct a copied privacy policy.
+Lodesta's own public privacy notice has been updated in this change: the analytics, storage and retention descriptions no longer describe the removed persistent visitor identifiers; unrelated provisions are preserved and the effective date is updated. This is a factual implementation correction, not a new legal-compliance claim.
+
+For prospect/customer source documents, the legal-preservation gate still compares retained originals. A legitimate owner-approved replacement must become the comparison authority through the existing control plane. Do not weaken preservation globally, infer permission from scraped prose, append contradictory technology paragraphs, or add a provider registry or automatically generated legal guarantees. Updating obsolete technology disclosures on those existing source documents remains separate work; analytics changes alone do not correct every copied privacy policy.
 
 ## Stored-data and release evidence
 

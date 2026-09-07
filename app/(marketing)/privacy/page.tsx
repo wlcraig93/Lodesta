@@ -25,11 +25,11 @@ const privacySections = [
   },
   {
     title: "3. Inquiries and visitor information",
-    body: "Lodesta-hosted websites may collect inquiry form submissions, including names, email addresses, phone numbers, messages, and other fields selected by the site owner. Lodesta may also process page views, clicks, form activity, performance measurements, referral information, device and browser details, pseudonymous visitor identifiers, user agents, and IP-derived hashes for first-party analytics, security, attribution, fraud prevention, and service improvement."
+    body: "Lodesta-hosted websites may collect inquiry form submissions, including names, email addresses, phone numbers, messages, and other fields selected by the site owner. First-party website analytics records page views, clicks, form activity, limited performance measurements, page paths, referrer hosts, campaign fields, and broad device categories. A random identifier held in page memory connects activity only within that page load; it does not identify returning visitors or connect activity across pages. Inquiry handling and platform security may separately process user agents and IP-derived hashes for abuse prevention."
   },
   {
     title: "4. Cookies and local storage",
-    body: "Lodesta uses authentication cookies required to keep users signed in. Lodesta product interfaces and hosted websites may use local storage for interface preferences and pseudonymous visitor identifiers. These technologies support account security, product operation, first-party analytics, and user preferences rather than third-party behavioral advertising."
+    body: "Lodesta uses authentication cookies required to keep account users signed in, and product interfaces may use local storage for preferences. The default analytics on Lodesta-hosted websites does not set analytics cookies, use local or session storage, or create persistent visitor identifiers. Account authentication, protected-preview access, interface preferences, and security controls are separate from anonymous website analytics. Lodesta does not use these technologies for third-party behavioral advertising."
   },
   {
     title: "5. How we use information",
@@ -45,7 +45,7 @@ const privacySections = [
   },
   {
     title: "8. Retention",
-    body: "Raw first-party website analytics events are retained for 14 months so site owners can make year-over-year comparisons. A site-scoped pseudonymous visitor identifier may remain in a visitor’s browser for up to 13 months and is not used to identify a person across Lodesta websites. We retain other information for as long as needed to provide the service, keep owned websites and retained published versions functional, meet security, audit, legal, and dispute-resolution obligations, and maintain reliable records. When information is no longer required, we delete or de-identify it where reasonably practical."
+    body: "Our retention policy for raw first-party website analytics events uses a 14-month cutoff so site owners can make year-over-year comparisons. Analytics identifiers are not saved in the visitor’s browser between page loads. We retain other information for as long as needed to provide the service, keep owned websites and retained published versions functional, meet security, audit, legal, and dispute-resolution obligations, and maintain reliable records. When information is no longer required, we delete or de-identify it where reasonably practical."
   },
   {
     title: "9. Security",
@@ -66,7 +66,7 @@ export default function PrivacyPage() {
     <main className="admin-page">
       <header className="admin-header">
         <div>
-          <span className="badge">Effective July 23, 2026</span>
+          <span className="badge">Effective September 7, 2026</span>
           <h1>Privacy Policy</h1>
           <p>
             This policy explains how Lodesta collects, uses, shares, and protects information when people use the

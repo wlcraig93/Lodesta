@@ -68,7 +68,11 @@ for (const requiredBehavior of [
   "verifyPublishedLead",
   '"inquiry_events"',
   '"A silently ignored lead is not successful delivery."',
-  "matches.length, 1"
+  "matches.length, 1",
+  "submissionEvents.length, 1",
+  "pageLoadMatched: true",
+  "sessionStorage",
+  '"08-owner-analytics-desktop.png"'
 ]) {
   assert(source.includes(requiredBehavior), `Owner canary behavior is missing ${requiredBehavior}.`);
 }

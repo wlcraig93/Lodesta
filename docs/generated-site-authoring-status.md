@@ -6,11 +6,13 @@ Date: 2026-09-07
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current continuation: explicit document authority implemented locally
+### Current continuation: deployed document authority; context-boundary correction under verification
 
 The owner-approved disclosure correction now uses the existing control plane: a complete exact-source/hash-bound document stays pending until the exact site owner approves it. The normal authority transaction retains an immutable owner-input snapshot, advances the operational revision and queues an ordinary edit. Author context and final verification resolve the same complete approved text; old inputs and unrelated legal provisions retain their original authority. No database schema, runtime presentation, automatic critic or publication change is added. See [owner-approved documents](owner-approved-source-documents.md).
 
-Focused authority, real decision-handler, source-workspace and finalizer fixtures pass. Full local preflight passes, including typecheck/build, browser rendering, managed forms, privacy-minimal analytics, inbox, queue durability and sandbox replay. Earlier local attempts found a new-test type error and a prior report's naming violation; both were corrected without weakening checks. Coordinated deployment, a private hosted document edit and the unchanged business-quality screen remain pending. No fresh quality-screen arm has been queued.
+Release `3cfd1ce21f864509c12df12cf628abe1b2f7266e` passed CI `34138117186` and coordinated release `34138618388`. Web and worker reported the exact SHA, sandbox `sandbox_deployment_662c3c20e87ceade67ff4005cb2c6445` was promoted, deep health had no errors, and maintenance was released. Email notifications remained disabled.
+
+The first private cookie-policy proposal created no run before approval. Approval retained the exact document and queued `run_a271a96b12474d00a7e1c88acc6c806d`, which failed before any model call with `owner_document_target_invalid` and zero model cost. The worker mistakenly used its 24-page compact customer-content inventory for authority resolution; the approved document was among 73 full retained source pages but outside that inventory. The exact retained-input replay reproduces the mismatch. The correction separates complete source authority from the bounded model inventory, with no larger prompt, relaxed gate or retry machinery. Focused regression, typecheck and full local preflight pass; corrective deployment and hosted retest are pending. A restricted local Chromium launch failed before its fixture ran; the complete suite passed with the required local process permission. The failure remains evidence, and no fresh eight-build quality-screen arm has been queued.
 
 ### Earlier continuation: owner journey and independent review/edit verified
 

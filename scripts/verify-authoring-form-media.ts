@@ -5,7 +5,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { LocalSitePlatformRepository } from "../packages/platform-data/repository";
 import { LocalArtifactBlobStore } from "../packages/site-artifacts";
-import { SiteAuthoringWorkflow } from "../packages/site-platform/workflow";
+import { SiteAuthoringWorkflow, operatorHomepageContextPages } from "../packages/site-platform/workflow";
 import { createSiteAuthoringContext, siteAgentRunGuardrailsForKind, type WebsiteManagerAgent } from "../packages/site-agent";
 import { businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, sourceSnapshotSchema, sourceSnapshotPageSchema, type SitePublicBuildInput } from "../packages/site-contracts";
 import { sha256, stableJson } from "../packages/business-data";
@@ -37,7 +37,15 @@ try {
   const inputBody = { ...baseInput, ownerOperationalRevision: 2, sourceSnapshotIds: [originalSnapshot.id, approvalSnapshot.id] };
   const { inputHash: _oldHash, ...inputWithoutHash } = inputBody;
   const input = { ...inputWithoutHash, inputHash: sha256(stableJson(inputWithoutHash)) };
-  const authoringContext = createSiteAuthoringContext({ buildInput: input, snapshots, pages: [documentPage] });
+  const homepageText = "Northstar home services";
+  const homepage = { ...documentPage, id: "page_owner_home", path: "/", requestedUrl: "https://northstar.example/",
+    extractedText: homepageText, textContentHash: sha256(homepageText), wordCount: 3 };
+  const sourcePages = [homepage, documentPage];
+  const sourceInventoryPages = operatorHomepageContextPages(sourcePages, "representative-customer-index");
+  assert.deepEqual(sourceInventoryPages.map(page => page.id), [homepage.id], "Fixture must omit the legal target from the prompt inventory.");
+  assert.throws(() => createSiteAuthoringContext({ buildInput: input, snapshots, pages: sourceInventoryPages }), /owner_document_target_invalid/,
+    "Reproduce the hosted failure: a compact inventory is not complete document authority.");
+  const authoringContext = createSiteAuthoringContext({ buildInput: input, snapshots, pages: sourcePages, sourceInventoryPages });
   const stateBody = {
     schemaVersion: 1, businessId: input.businessId, siteId: input.siteId,
     revision: 1, ownerOperationalRevision: input.ownerOperationalRevision, updatedAt: now,
@@ -120,7 +128,7 @@ try {
     })) as never);
   await assert.rejects(() => Reflect.get(workflow, "runAuthoring").call(workflow, {
     run, session, buildInput: input, authoringContext,
-    snapshots, sourcePages: [documentPage], sandboxRevision: "initial", kind: "edit", instruction: "Add a texture and change the form button label.",
+    snapshots, sourcePages, sandboxRevision: "initial", kind: "edit", instruction: "Add a texture and change the form button label.",
     currentFiles: [{ path: "src/site.tsx", content: 'export const siteDefinition = { routes: [{path:"/",element:<main><h1>Home</h1></main>}] };' }, { path: "src/styles.css", content: "body{color:#111}" }]
   }), (error: unknown) => error === complete);
   console.log("Owner-approved documents reach the normal runtime read tools and survive unrelated edits. Form changes preserve retained authority and provisional media across consecutive builds.");

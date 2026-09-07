@@ -318,6 +318,9 @@ const approvedContext = createSiteAuthoringContext(documentArgs);
 const approvedWorkspace = createSourceWorkspace(documentArgs);
 assert.equal(approvedWorkspace.files.find(file => file.path === approvedContext.ownerAuthority.approvedDocuments?.[0]?.contentFile)?.content, approvedPrivacyText);
 assert.equal(approvedContext.ownerAuthority.approvedDocuments?.[0]?.contentHash, sha256(approvedPrivacyText));
+const compactApprovedContext = createSiteAuthoringContext({ ...documentArgs, sourceInventoryPages: [] });
+assert.deepEqual(compactApprovedContext.ownerAuthority.approvedDocuments, approvedContext.ownerAuthority.approvedDocuments,
+  "Compacting the provisional source inventory must not remove owner document authority.");
 const prepareApprovedPrivacy = (text: string) => prepareSiteArtifact({
   authoredArtifact: { ...preservedPrivacy.authored, routes: preservedPrivacy.authored.routes.map(route => route.path === "/privacy"
     ? { ...route, bodyHtml: `<main><h1>Privacy Policy</h1><p>${text}</p></main>` } : route) },

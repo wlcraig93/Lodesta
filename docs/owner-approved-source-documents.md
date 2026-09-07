@@ -1,6 +1,6 @@
 # Owner-approved source documents
 
-Status: September 7, 2026. Implemented locally; full preflight passed, coordinated deployment and private hosted edit verification pending. This closes an authority-path gap, not a universal legal-compliance claim.
+Status: September 7, 2026. The first implementation passed full preflight and coordinated deployment. Its first private hosted edit exposed a pre-model context-boundary defect; the correction below is under verification. Hosted document-edit acceptance and the fresh quality screen remain pending. This is not a universal legal-compliance claim.
 
 ## Why
 
@@ -26,6 +26,8 @@ The read-only September 7 stored-data inventory found zero ready owner-input sna
 ## Author and verifier use the same text
 
 The canonical context exposes `ownerAuthority.approvedDocuments` with provenance and a read-only content-file path. The existing source workspace supplies the full replacement through normal read tools, without truncating it to a prompt excerpt or pretending it was scraped from the business website. Source content is not a tool instruction. Ordinary writes cannot mutate these authority files.
+
+Authority resolution receives the complete retained source pages, independently of the bounded `sourceInventoryPages` shown to the model. The first hosted test on release `3cfd1ce2` failed with `owner_document_target_invalid` before any model call because the worker supplied its 24-page customer-content index rather than all 73 retained pages. The approved legal target was correctly absent from that compact index but incorrectly absent from authority resolution. A local replay reproduces this with the exact retained input. Regression fixtures now omit a policy from the prompt index while proving its complete approved text still reaches normal read tools and survives unrelated edits. This does not expand the prompt inventory or loosen source validation.
 
 For an approved document, verification requires the complete approved word stream in rendered content, allowing markup and the surrounding site shell. The existing 85% migration comparison is insufficient for a targeted correction: an old document could be almost identical while retaining the one obsolete statement. Original unapproved documents keep the existing preservation behavior. Missing approved routes/text and missing unrelated legal routes remain hard failures. Unrelated safety, factual, destination and capability checks are unchanged.
 

@@ -1062,7 +1062,8 @@ export class SiteAuthoringWorkflow {
       const authoringContext = createSiteAuthoringContext({
         buildInput,
         snapshots,
-        pages: authoringContextPages,
+        pages: sourcePages,
+        sourceInventoryPages: authoringContextPages,
         neutralAssetSemantics: Boolean(run.authoringProfileId)
       });
       const requestMessages = (await this.repository.listAgentMessages(session.id)).filter((message) => message.runId === run.id && (message.role === "owner" || message.role === "operator"));

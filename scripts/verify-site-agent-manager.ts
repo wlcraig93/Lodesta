@@ -556,8 +556,8 @@ assert.match(workflow, /const authoringProfileId = canonicalAuthoringProfileId/,
   "Initial builds are not pinned to the canonical authoring profile.");
 assert.match(workflow, /liveAuthoringProfile\(run\.authoringProfileId, run\.kind\)/,
   "Retired authoring profiles can bypass the live profile gate.");
-assert.match(workflow, /pages: authoringContextPages/,
-  "The canonical authoring context is not using its bounded source index.");
+assert.match(workflow, /pages: sourcePages,\s*sourceInventoryPages: authoringContextPages/,
+  "Full retained authority must remain separate from the bounded prompt inventory.");
 assert.match(workflow, /const authoringContextPages = authoringProfile\s*\? operatorHomepageContextPages\(sourcePages, authoringProfile\.sourceInventoryMode\)/,
   "Canonical initial builds still inject the full retained source corpus instead of using pull-based source access.");
 assert.match(workflow, /operatorHomepageContextPages[\s\S]*?slice\(0, 3\)/,

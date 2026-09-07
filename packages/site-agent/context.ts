@@ -128,7 +128,10 @@ export type ManagerDiscussionContext = {
 export function createSiteAuthoringContext(input: {
   buildInput: SitePublicBuildInput;
   snapshots: SourceSnapshot[];
+  /** Complete retained pages for authority resolution; never a prompt-sized subset. */
   pages?: SourceSnapshotPage[];
+  /** Optional presentation subset for the model's pull-based source index only. */
+  sourceInventoryPages?: SourceSnapshotPage[];
   neutralAssetSemantics?: boolean;
 }): SiteAuthoringContext {
   const { buildInput } = input;
@@ -192,7 +195,7 @@ export function createSiteAuthoringContext(input: {
       meaningfulExcerpt: meaningfulSourceExcerpt(snapshot.payload),
       media: sourceMediaMetadata(snapshot.payload),
       untrusted: true,
-      websiteInventory: websiteInventory(snapshot, (input.pages ?? []).filter((page) => page.sourceSnapshotId === snapshot.id))
+      websiteInventory: websiteInventory(snapshot, (input.sourceInventoryPages ?? input.pages ?? []).filter((page) => page.sourceSnapshotId === snapshot.id))
     })),
     managedCapabilities: {
       assets,

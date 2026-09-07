@@ -32,7 +32,10 @@ export const siteAgentModelPricing = {
   }
 } as const;
 
-export type SupportedSiteAgentModel = keyof typeof siteAgentModelPricing;
+type PricedSiteAgentModel = keyof typeof siteAgentModelPricing;
+// Owner-approved production choices. Pricing for historical experiments remains
+// available for audit; a pricing entry alone no longer enables new authoring.
+export type SupportedSiteAgentModel = "gpt-5.6-luna" | "gpt-5.6-terra" | "gpt-5.6-sol";
 
 export const siteAgentReasoningEffort = "high" as const;
 export const siteAgentReasoningContext = "all_turns" as const;
@@ -58,7 +61,7 @@ export const siteAgentRunGuardrailDefaults = {
 } as const;
 
 export function isSupportedSiteAgentModel(modelId: string): modelId is SupportedSiteAgentModel {
-  return Object.hasOwn(siteAgentModelPricing, modelId);
+  return modelId === "gpt-5.6-luna" || modelId === "gpt-5.6-terra" || modelId === "gpt-5.6-sol";
 }
 
 export function managerGuardrailsForKind(kind: "initial_build" | "edit" | "rebase"): ManagerRunGuardrails {
@@ -155,10 +158,10 @@ export function usageForModel(
   };
 }
 
-function modelPricing(modelId: string) {
-  if (isSupportedSiteAgentModel(modelId)) return siteAgentModelPricing[modelId];
+export function modelPricing(modelId: string) {
+  if (Object.hasOwn(siteAgentModelPricing, modelId)) return siteAgentModelPricing[modelId as PricedSiteAgentModel];
   const unqualified = modelId.startsWith("openai/") ? modelId.slice("openai/".length) : "";
-  return unqualified && isSupportedSiteAgentModel(unqualified) ? siteAgentModelPricing[unqualified] : undefined;
+  return unqualified && Object.hasOwn(siteAgentModelPricing, unqualified) ? siteAgentModelPricing[unqualified as PricedSiteAgentModel] : undefined;
 }
 
 function nonnegativeFinite(value: unknown) {

@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { configuredAppOrigin } from "./app-origin";
-import { isSupportedSiteAgentModel, siteAgentModelPricing } from "@/packages/site-agent/run-policy";
+import { isSupportedSiteAgentModel, modelPricing } from "@/packages/site-agent/run-policy";
 import { isEstablishedOpenRouterAuthoringRoute } from "@/packages/site-agent/provider-routes";
 
 export type ModelCatalogProvider = "openai" | "openrouter";
-export type SiteAgentModelAvailability = "selectable" | "pricing_unconfigured" | "capabilities_missing";
+export type SiteAgentModelAvailability = "selectable" | "pricing_unconfigured" | "capabilities_missing" | "not_enabled";
 
 export type ModelCatalogOption = {
   id: string;
@@ -93,8 +93,9 @@ export function normalizeOpenAiModelCatalog(payload: unknown): ModelCatalogOptio
   return parsed.data.flatMap((model) => {
     const id = modelIdSchema.safeParse(model.id);
     if (!id.success) return [];
-    const pricing = isSupportedSiteAgentModel(id.data) ? siteAgentModelPricing[id.data] : undefined;
-    const siteAgentAvailability: SiteAgentModelAvailability = pricing ? "selectable" : "pricing_unconfigured";
+    const pricing = modelPricing(id.data);
+    const siteAgentAvailability: SiteAgentModelAvailability = isSupportedSiteAgentModel(id.data)
+      ? "selectable" : pricing ? "not_enabled" : "pricing_unconfigured";
     return [{
       id: id.data,
       name: id.data,

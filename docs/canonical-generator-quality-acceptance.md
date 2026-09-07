@@ -4,6 +4,40 @@ Status: active autonomous implementation and evaluation, September 4, 2026.
 
 The owner has authorized continued implementation, fresh generations, evaluation, and coordinated deployment until the canonical generator consistently produces customer-ready local-business websites. Preserve the existing canonical architecture and one live authoring configuration. This is an engineering evaluation plan, not a new runtime phase, critic, retry mechanism, or product score.
 
+## Current model constraint — September 7 owner decision
+
+Astra must not be used for production authoring. Luna is the preferred production model; the next quality/cost comparison is Luna versus Terra. Sol remains an option only if a demonstrated quality need justifies evaluating it. Do not continue the previously proposed Astra high-versus-max experiment. Historical Astra runs remain retained diagnostic evidence, not proof of affordable production quality or an eligible production configuration.
+
+The existing direct-OpenAI model-selection predicate now admits only Luna, Terra and Sol. Historical Astra and earlier-model pricing stays available for retained cost evidence, but does not grant new authoring eligibility. The catalog and settings validation use that same predicate, and manager execution rejects excluded models before a provider request. This is a constraint on existing selection, not a new routing or fallback layer; the production default remains Luna.
+
+Close the demonstrated source-name and Google rating/link gaps, separating deployed code corrections from successful fresh-acquisition evidence. Independently compare Luna and Terra on identical, correct retained source, route plan, tools, guidance and reasoning effort, retaining every attempt; an acquisition-research permission issue need not block that isolated authoring comparison. Evaluate specific copy, imagery, responsive composition and factual defects alongside total model cost, duration and necessary edits. Do not change the live Luna default before evidence supports a decision. No additional agent stage, automatic critic or subjective hard gate is implied by this comparison.
+
+The earlier experiment chronology below is retained; this current model constraint supersedes any prospective suggestion to select Astra. The separate browser-only research authorization question remains unresolved and is not implicitly overridden by permission to compare authoring models using retained evidence.
+
+### Executing affordable-model screen
+
+The first Luna/Terra pair uses release `4656e1276d33737c1da85c21cdd92189d722a33b`, the same current canonical authoring guidance, high reasoning, and a $5 ceiling per run. Both start blank through `bootstrapFromRetainedSite` and the ordinary hosted queue consumer, from private tree-service input `input_174f156002b94ddcac3a4f5fe7b76a30`. This input carries the corrected owner-approved disclosure documents and an existing browser-observed Google aggregate with its exact reviews URL. No new research, publication, inquiry, or notification is performed.
+
+The existing workflow independently draws a Luna-high architecture in each arm. Do not add an execution selector or new production interface to force a shared plan for this screen. Record and compare those plans: this is an end-to-end configuration comparison with residual route-planning variation, not a controlled estimate of author-model effect alone. The stricter same-plan comparison above remains an ideal for attribution, not a reason to manufacture test-only production machinery.
+
+- Luna: `run_0060d44f469a482299a42aca2572d1a8`.
+- Terra: `run_534b42abdfed44479489dbb01ad75e04`.
+- Full private experiment identities and evidence: the `affordable-comparison/` directory in the September 4 production-readiness evidence bundle.
+
+Both initial attempts failed before model use with `owner_document_authority_invalid` (zero model requests or metered cost). The canary clone preserved the old site/source references inside the owner approval and reset its operational revision. The correction validates the original approval chain, rebinds only the copied authority references, recomputes the copied payload hash, preserves operational revision, and validates the derived input before persistence. No original approval, document, input, shared page, or artifact changes. The ordinary-workflow fixture verifies that the exact document reaches the cloned site's authoring context and that enqueue remains idempotent.
+
+Corrected attempts are retained separately: Luna `run_bc84d080952d4337be56e0d18ddfa949`; Terra `run_84e7c8ae55f54b89aa7b912a153885bc`. Their operator bootstrap uses the locally verified correction, whose exact diff/hash is retained; execution still uses the unchanged deployed worker at the release above. The two pre-model failures remain in the experiment record and are not model-quality evidence.
+
+Do not describe these as fresh acquisition tests or treat a gate pass as editorial acceptance. Retain every attempt, inspect all route types and actual responsive pixels, and distinguish optional polish from work required before customer delivery. Production remains Luna unless evidence supports a reviewed change.
+
+### Initial-build output-detail treatment
+
+The corrected Luna run finished with a passed hard gate, 33 routes, and $0.23187924 estimated model cost. Independent retained-artifact capture covered 99 route/viewport observations without load errors or horizontal overflow. Review still found overly compressed guide/service content, weak use of retained work imagery, internal evidence language, an unchanged hamburger in the opened menu, and an unsafe loss of the utility-first distinction in a generic power-line CTA. These are delivery findings, not new deterministic checks.
+
+Before adding prompt rules, test the existing Responses output-detail setting: `medium` for initial authoring instead of `low`. Keep Luna, high reasoning, skill, tools, architecture, source, and verification unchanged. Edits, rebases and the structured architect request retain low detail. Record the effective value in each model request's existing telemetry. This is one parameter on the existing manager call, not a new profile selector, stage, retry, or critic. [OpenAI's deployment guidance](https://developers.openai.com/api/docs/guides/deployment-checklist#set-up-textverbosity) identifies medium detail as tending toward more structured coding output and notes that GPT-5.6 is already more concise. That supports a hypothesis, not a guarantee of better authored tool arguments or customer copy.
+
+Accept only demonstrated gains in useful source-specific content, page composition, maintainable source, and review behavior without factual or functional regression; more words alone are not success. Compare the retained low-detail Luna/Terra attempts before interpreting the next Luna result. Keep all failed and successful attempts. Do not add a sentence for every reported aesthetic error or weaken the existing fact/authority boundary to make a sample pass.
+
 ## Acceptance standard
 
 A customer-ready result needs no material corrective pass before delivery:

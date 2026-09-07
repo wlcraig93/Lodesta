@@ -156,6 +156,9 @@ export class WebsiteManagerAgent {
     const taskSkill = authoringProfile.taskSkill;
     const systemPrompt = websiteManagerAuthoringSystemPrompt;
     const promptIdentity = `website-manager@${sha256(systemPrompt)}`;
+    // Whole-site source needs complete content and readable code. Keep narrow
+    // edits, rebases, and the separate structured architect output concise.
+    const textVerbosity = input.kind === "initial_build" ? "medium" : siteAgentTextVerbosity;
     const availableTools = authoringProfile.disabledTools.length
       ? websiteManagerTools.filter((tool) => tool.type !== "function" || !authoringProfile.disabledTools.includes(tool.name as "create_image"))
       : websiteManagerTools;
@@ -311,7 +314,7 @@ export class WebsiteManagerAgent {
               compact_threshold: siteAgentCompactionThresholdTokens
             }]
           } : {}),
-          text: { verbosity: siteAgentTextVerbosity },
+          text: { verbosity: textVerbosity },
           max_output_tokens: maxOutputTokens,
           ...(openAiCacheEnabled ? {
             prompt_cache_key: cacheKey(input),
@@ -339,6 +342,7 @@ export class WebsiteManagerAgent {
             errorCode,
             summary: { error: errorCode, transportRetries, ...promptTelemetry },
             payload: modelTurnPayload(requestHistory, undefined, promptIdentity, route, this.reasoningEffort, {
+              textVerbosity,
               promptTelemetry,
               contextProvenance,
               providerCapabilities: providerCapability.descriptor,
@@ -394,6 +398,7 @@ export class WebsiteManagerAgent {
           ...promptTelemetry
         },
         payload: modelTurnPayload(requestHistory, response, promptIdentity, route, this.reasoningEffort, {
+          textVerbosity,
           promptTelemetry,
           contextProvenance,
           providerCapabilities: providerCapability.descriptor,
@@ -882,7 +887,7 @@ function validatedSiteAgentRoute(apiProvider: SiteAgentApiProvider, modelId: str
       "unknown_internal_failure",
       "platform",
       false,
-      `site_agent_model_pricing_missing:${modelId}`
+      `site_agent_model_not_enabled:${modelId}`
     );
   }
   if (apiProvider === "openrouter" && !isEstablishedOpenRouterAuthoringRoute(modelId)) {
@@ -1258,7 +1263,7 @@ function modelTurnPayload(
   promptIdentity: string,
   route: { apiProvider: SiteAgentApiProvider; modelId: string },
   reasoningEffort: WebsiteManagerReasoningEffort,
-  telemetry: Record<string, unknown>
+  telemetry: Record<string, unknown> & { textVerbosity: "low" | "medium" }
 ) {
   return {
     request: {
@@ -1272,7 +1277,6 @@ function modelTurnPayload(
       reasoningEffort,
       reasoningContext: route.apiProvider === "openai" ? siteAgentReasoningContext : undefined,
       compactionThresholdTokens: route.apiProvider === "openai" ? siteAgentCompactionThresholdTokens : undefined,
-      textVerbosity: siteAgentTextVerbosity,
       ...telemetry
     },
     response: response ? { status: response.status, error: response.error, incompleteDetails: response.incomplete_details, output: response.output, outputText: response.output_text } : undefined

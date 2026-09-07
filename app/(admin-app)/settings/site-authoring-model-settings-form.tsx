@@ -6,7 +6,7 @@ import styles from "./site-authoring-model-settings-form.module.css";
 import { ProductSelect } from "@/components/ProductUI";
 
 type ModelProvider = "openai" | "openrouter";
-type SiteAgentModelAvailability = "selectable" | "pricing_unconfigured" | "capabilities_missing";
+type SiteAgentModelAvailability = "selectable" | "pricing_unconfigured" | "capabilities_missing" | "not_enabled";
 type ModelOption = {
   id: string;
   name: string;

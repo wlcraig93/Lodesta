@@ -16,6 +16,7 @@ import {
   type WebResearchUsage
 } from "@/packages/business-data";
 import { classifySourcePagePath } from "@/packages/business-data/source-page-classification";
+import { resolveApprovedSourceDocuments } from "@/packages/business-data/owner-documents";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
 import {
   configuredArtifactBlobStore,
@@ -420,7 +421,7 @@ export class SiteAuthoringWorkflow {
         sourceId,
         deterministicId("source_canary", { schemaVersion: 1, siteId, sourceId, index })
       ]));
-      const clonedSources = await Promise.all(retainedInput.sourceSnapshotIds.map(async (sourceId) => {
+      const retainedSources = await Promise.all(retainedInput.sourceSnapshotIds.map(async (sourceId) => {
         const [snapshot, retainedSourceSnapshotId, pages] = await Promise.all([
           this.repository.getSourceSnapshot(sourceId),
           this.repository.resolveRetainedSourceSnapshotId(sourceId),
@@ -430,16 +431,37 @@ export class SiteAuthoringWorkflow {
           throw new Error(`retained_canary_source_unavailable:${sourceId}`);
         }
         if (!snapshot) throw new Error(`retained_canary_source_unavailable:${sourceId}`);
+        return { snapshot, retainedSourceSnapshotId, pages };
+      }));
+      // Validate the original approval chain before deriving private canary
+      // authorities. Retained snapshots and their shared page bytes never change.
+      resolveApprovedSourceDocuments({
+        buildInput: retainedInput,
+        snapshots: retainedSources.map(source => source.snapshot),
+        pages: retainedSources.flatMap(source => source.pages)
+      });
+      const clonedSources = retainedSources.map(({ snapshot, retainedSourceSnapshotId, pages }) => {
+        let payload = snapshot.payload;
+        if (snapshot.sourceType === "owner_input"
+          && (payload.change as { kind?: unknown } | undefined)?.kind === "replace_source_document") {
+          if (payload.approvedBy !== template.ownerUserId) throw new Error("retained_canary_document_owner_mismatch");
+          const change = payload.change as Record<string, unknown>;
+          const sourceSnapshotId = sourceIdMap.get(String(change.sourceSnapshotId));
+          if (!sourceSnapshotId) throw new Error("retained_canary_document_source_missing");
+          payload = { ...payload, siteId, change: { ...change, sourceSnapshotId } };
+        }
         return {
           retainedSourceSnapshotId,
           pages,
           snapshot: sourceSnapshotSchema.parse({
             ...snapshot,
-            id: sourceIdMap.get(sourceId),
-            businessId
+            id: sourceIdMap.get(snapshot.id),
+            businessId,
+            payload,
+            contentHash: payload === snapshot.payload ? snapshot.contentHash : sha256(stableJson(payload))
           })
         };
-      }));
+      });
       const clonedAssets = await Promise.all(retainedInput.business.assets.map(async (retainedRef, index) => {
         const retainedRevision = await this.repository.getAssetRevision(retainedRef.revisionId);
         if (!retainedRevision) throw new Error(`retained_canary_asset_unavailable:${retainedRef.revisionId}`);
@@ -566,7 +588,7 @@ export class SiteAuthoringWorkflow {
         businessId,
         siteId,
         revision: 1,
-        ownerOperationalRevision: 1,
+        ownerOperationalRevision: retainedState.ownerOperationalRevision,
         updatedAt: now,
         contacts: {
           ...(projectedPhone ? { phone: projectedPhone } : {}),
@@ -624,6 +646,11 @@ export class SiteAuthoringWorkflow {
         runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
       });
       assertNoPrivateBuildInputFields(buildInput);
+      resolveApprovedSourceDocuments({
+        buildInput,
+        snapshots: clonedSources.map(source => source.snapshot),
+        pages: clonedSources.flatMap(source => source.pages.map(page => ({ ...page, sourceSnapshotId: source.snapshot.id })))
+      });
       const requestedSlug = (input.slug?.trim() || `${template.slug}-canary`).slice(0, 100).replace(/-+$/g, "");
       site = platformSiteRecordSchema.parse({
         id: siteId,

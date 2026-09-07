@@ -7,7 +7,8 @@ import { LocalSitePlatformRepository } from "../packages/platform-data/repositor
 import { LocalArtifactBlobStore } from "../packages/site-artifacts";
 import { SiteAuthoringWorkflow, operatorHomepageContextPages } from "../packages/site-platform/workflow";
 import { createSiteAuthoringContext, siteAgentRunGuardrailsForKind, type WebsiteManagerAgent } from "../packages/site-agent";
-import { businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, sourceSnapshotSchema, sourceSnapshotPageSchema, type SitePublicBuildInput } from "../packages/site-contracts";
+import { businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, sourceSnapshotSchema, sourceSnapshotPageSchema, sourceSnapshotResourceSchema, type SitePublicBuildInput } from "../packages/site-contracts";
+import { resolveApprovedSourceDocuments } from "../packages/business-data/owner-documents";
 import { sha256, stableJson } from "../packages/business-data";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
@@ -27,14 +28,15 @@ try {
     indexability: "indexable", headings: [], wordCount: 10, internalLinks: [], externalLinks: [], linkProminence: 1,
     extractedText: oldDocument, textContentHash: sha256(oldDocument), producer: "fixture", inputHash: sha256("fixture"), createdAt: now });
   const originalSnapshot = sourceSnapshotSchema.parse({ schemaVersion: 1, id: documentPage.sourceSnapshotId, businessId: baseInput.businessId,
-    sourceType: "website", contentHash: sha256("fixture"), capturedAt: now, payload: { fixture: true } });
+    sourceType: "website", sourceUrl: "https://northstar.example/", contentHash: sha256("fixture"), capturedAt: now, payload: { kind: "website-mirror", fixture: true } });
   const approvalPayload = { requestId: "change_privacy", requestedBy: owner, approvedBy: owner, siteId: baseInput.siteId, ownerOperationalRevision: 2,
     change: { kind: "replace_source_document", sourceSnapshotId: originalSnapshot.id, sourcePageId: documentPage.id, path: documentPage.path,
       sourceTextHash: documentPage.textContentHash, expectedDocumentHash: documentPage.textContentHash, replacementText: approvedDocument } };
   const approvalSnapshot = sourceSnapshotSchema.parse({ schemaVersion: 1, id: "source_owner_document", businessId: baseInput.businessId,
     sourceType: "owner_input", contentHash: sha256(stableJson(approvalPayload)), capturedAt: now, payload: approvalPayload });
   const snapshots = [originalSnapshot, approvalSnapshot];
-  const inputBody = { ...baseInput, ownerOperationalRevision: 2, sourceSnapshotIds: [originalSnapshot.id, approvalSnapshot.id] };
+  const inputBody = { ...baseInput, ownerOperationalRevision: 2, sourceSnapshotIds: [originalSnapshot.id, approvalSnapshot.id],
+    publicFacts: baseInput.publicFacts.map(fact => ({ ...fact, source: { ...fact.source, sourceSnapshotId: originalSnapshot.id } })) };
   const { inputHash: _oldHash, ...inputWithoutHash } = inputBody;
   const input = { ...inputWithoutHash, inputHash: sha256(stableJson(inputWithoutHash)) };
   const homepageText = "Northstar home services";
@@ -55,12 +57,40 @@ try {
     links: input.business.links, facts: input.publicFacts
   };
   await repository.createSite({ id: input.siteId, ownerUserId: owner, businessId: input.businessId,
+    sourceUrl: "https://northstar.example/",
     slug: "form-media-test", status: "draft", reportingTimezone: "UTC", currentPublicBuildInputId: input.id, createdAt: now, updatedAt: now });
   await repository.saveBusinessState(businessStateSchema.parse({ ...stateBody, stateHash: sha256(stableJson(stateBody)) }));
   await repository.saveSiteIntent(input.intent);
   for (const form of input.forms) await repository.saveFormDefinition(form);
   await repository.savePublicBuildInput(input);
   for (const snapshot of snapshots) await repository.saveSourceSnapshot(snapshot);
+  await repository.saveSourceSnapshotResources([sourceSnapshotResourceSchema.parse({
+    schemaVersion: 1, id: documentPage.resourceId, sourceSnapshotId: originalSnapshot.id,
+    captureKind: "http_response", role: "document", requestedUrl: documentPage.requestedUrl,
+    finalUrl: documentPage.requestedUrl, outcome: "fetched", status: 200, contentType: "text/html",
+    storedEncoding: "identity", rawContentHash: sha256(oldDocument), blobContentHash: sha256(oldDocument),
+    storageKey: "fixture/privacy", rawBytes: Buffer.byteLength(oldDocument), storedBytes: Buffer.byteLength(oldDocument),
+    headers: {}, redirectChain: [], initiatorUrls: [], capturedAt: now, metadata: {}
+  })]);
+  await repository.saveSourceSnapshotPages(sourcePages);
+  const canaryWorkflow = new SiteAuthoringWorkflow(repository, store);
+  const canary = await canaryWorkflow.bootstrapFromRetainedSite({ templateSiteId: input.siteId,
+    idempotencyKey: "approved-document-clone", modelRoute: { apiProvider: "openai", modelId: "gpt-5.6-luna" }, maxCostUsd: 1 });
+  const canarySnapshots = (await Promise.all(canary.buildInput.sourceSnapshotIds.map(id => repository.getSourceSnapshot(id)))).map(snapshot => snapshot!);
+  const canaryPages = (await Promise.all(canary.buildInput.sourceSnapshotIds.map(id => repository.listSourceSnapshotPages(id)))).flat();
+  const canaryDocuments = resolveApprovedSourceDocuments({ buildInput: canary.buildInput, snapshots: canarySnapshots, pages: canaryPages });
+  assert.equal(canaryDocuments[0]?.text, approvedDocument);
+  assert.equal(canary.buildInput.ownerOperationalRevision, 2, "Approval chronology must not become a future revision in the clone.");
+  assert.equal(canary.site.ownerUserId, owner);
+  assert.equal(canary.run.status, "queued", "The retained canary must never execute inline.");
+  assert.equal(canaryDocuments[0]?.sourcePageId, documentPage.id, "Keep the immutable shared page identity.");
+  assert.notEqual(canaryDocuments[0]?.sourceSnapshotId, originalSnapshot.id, "Bind approval to the cloned source authority.");
+  const canaryContext = createSiteAuthoringContext({ buildInput: canary.buildInput, snapshots: canarySnapshots, pages: canaryPages });
+  assert.equal(canaryContext.ownerAuthority.approvedDocuments?.[0]?.contentHash, sha256(approvedDocument));
+  assert.deepEqual(await repository.getSourceSnapshot(approvalSnapshot.id), approvalSnapshot, "Never rewrite original approval authority.");
+  assert.deepEqual(await repository.getPublicBuildInput(input.id), input, "Never rewrite original retained input.");
+  assert.equal((await canaryWorkflow.bootstrapFromRetainedSite({ templateSiteId: input.siteId,
+    idempotencyKey: "approved-document-clone", modelRoute: { apiProvider: "openai", modelId: "gpt-5.6-luna" }, maxCostUsd: 1 })).run.id, canary.run.id);
   const session = siteAgentSessionSchema.parse({ schemaVersion: "site-agent-session", id: "session_form_media",
     siteId: input.siteId, principal: { kind: "owner", id: owner }, status: "active", publicBuildInputId: input.id,
     sandboxProvider: "cloudflare", sandboxId: "sandbox_form_media", leaseTokenHash: sha256("test-lease"),

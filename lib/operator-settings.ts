@@ -24,7 +24,7 @@ function refineSettings(
   context: z.RefinementCtx
 ) {
   if (value.siteAgentProvider === "openai" && !isSupportedSiteAgentModel(value.siteAgentModel)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["siteAgentModel"], message: "Direct OpenAI site agent models must have a configured pricing entry." });
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["siteAgentModel"], message: "Site authoring supports Luna, Terra, or Sol. Historical model pricing does not enable production use." });
   }
   if (value.siteAgentProvider === "openrouter" && !value.siteAgentModel.includes("/")) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["siteAgentModel"], message: "OpenRouter models must use a provider-qualified slug such as openai/gpt-5." });

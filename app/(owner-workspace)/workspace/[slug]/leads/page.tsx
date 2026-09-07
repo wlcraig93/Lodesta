@@ -15,7 +15,7 @@ export default async function WorkspaceInboxPage({ params, searchParams }: { par
   return (
     <main className="workspace-page workspace-inbox-page">
       <WorkspacePageHeader eyebrow="Leads" title="Customer leads" description="See who reached out, understand what they need, and keep each opportunity moving." actions={<a className="button secondary" href={`/api/inquiries/export?siteId=${context.site.id}`}>Export CSV</a>} />
-      <OwnerInbox siteId={context.site.id} slug={slug} initialInquiries={prioritized} eventsByInquiry={Object.fromEntries(eventPairs)} requestedInquiryId={query.inquiry} />
+      <OwnerInbox siteId={context.site.id} slug={slug} initialInquiries={prioritized} eventsByInquiry={Object.fromEntries(eventPairs)} requestedInquiryId={query.inquiry} timeZone={context.site.reportingTimezone} renderedAt={new Date().toISOString()} />
       {!inquiries.length ? <p className="workspace-inbox-footnote">Need to verify the form? <Link href={`/workspace/${slug}/editor`}>Open the website preview.</Link></p> : null}
     </main>
   );

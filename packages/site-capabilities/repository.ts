@@ -87,8 +87,7 @@ class LocalSiteCapabilityRepository implements SiteCapabilityRepository {
         id: crypto.randomUUID(), siteId: input.siteId, sourceChannel: "form",
         contactName: contact.contactName, contactEmail: contact.contactEmail,
         contactEmailNormalized: contact.contactEmailNormalized, contactPhone: contact.contactPhone,
-        contactPhoneNormalized: contact.contactPhoneNormalized, status: "new", notificationState: "queued",
-        aiEnrichmentState: "queued", createdAt: now, updatedAt: now
+        contactPhoneNormalized: contact.contactPhoneNormalized, status: "new", createdAt: now, updatedAt: now
       };
       const event: InquiryEvent = {
         id: crypto.randomUUID(), siteId: input.siteId, inquiryId: inquiry.id, type: "form_submission", actor: "visitor",
@@ -190,8 +189,7 @@ type InquiryRow = {
   id: string; site_id: string; source_channel: Inquiry["sourceChannel"];
   contact_name: string | null; contact_email: string | null; contact_email_normalized: string | null;
   contact_phone: string | null; contact_phone_normalized: string | null; status: Inquiry["status"];
-  notification_state: Inquiry["notificationState"]; ai_enrichment_state: Inquiry["aiEnrichmentState"];
-  ai_enrichment: unknown; ai_enriched_at: string | null; ai_enrichment_error: string | null;
+  ai_enrichment: unknown; ai_enriched_at: string | null;
   created_at: string; updated_at: string;
 };
 
@@ -330,9 +328,8 @@ function rowToInquiry(row: InquiryRow): Inquiry {
     contactName: row.contact_name ?? undefined, contactEmail: row.contact_email ?? undefined,
     contactEmailNormalized: row.contact_email_normalized ?? undefined, contactPhone: row.contact_phone ?? undefined,
     contactPhoneNormalized: row.contact_phone_normalized ?? undefined, status: row.status,
-    notificationState: row.notification_state, aiEnrichmentState: row.ai_enrichment_state,
-    aiEnrichment: row.ai_enrichment as Inquiry["aiEnrichment"] | undefined,
-    aiEnrichedAt: row.ai_enriched_at ?? undefined, aiEnrichmentError: row.ai_enrichment_error ?? undefined,
+    aiEnrichment: (row.ai_enrichment ?? undefined) as Inquiry["aiEnrichment"],
+    aiEnrichedAt: row.ai_enriched_at ?? undefined,
     createdAt: row.created_at, updatedAt: row.updated_at
   };
 }

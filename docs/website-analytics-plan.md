@@ -1,6 +1,6 @@
 # Website Analytics
 
-Status: implemented in source; database migration and trusted-runtime promotion remain rollout actions
+Status: historical July 23 plan. Its persistent-identity, visit, landing-attribution and related metric definitions are superseded by the September 7 owner-approved [privacy-minimal contract](generated-site-storage-and-disclosures.md). Do not implement the retired measurement vocabulary below as the current product contract.
 Date: 2026-07-23
 
 ## Decision

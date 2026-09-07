@@ -188,6 +188,8 @@ function numberedInternalLabels(source: string) {
 
 function allowedBoundaryLabel(path: string, label: string) {
   if (["api.openai.com/v1", "openrouter.ai/api/v1"].includes(label)) return true;
+  // Supabase's external REST protocol, exercised against loopback by this fixture.
+  if (path === "scripts/verify-inquiry-inbox.ts" && label === "rest/v1") return true;
   if (label.includes("site-runtime-v")) return true;
   const boundaryFiles = [
     /^\.env\.example$/,

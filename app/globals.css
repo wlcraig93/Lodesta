@@ -5843,7 +5843,6 @@ textarea {
 .owner-inbox-ai-summary dl div { display: grid; gap: 2px; }
 .owner-inbox-ai-summary dt { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .owner-inbox-ai-summary dd { margin: 0; font-size: var(--product-font-size-control); }
-.owner-inbox-ai-summary.is-pending { color: var(--product-color-text-subtle); border-color: var(--product-color-border); background: var(--product-color-surface-soft); }
 .owner-inbox-detail-grid { display: grid; gap: 16px; margin-bottom: 16px; }
 .owner-inbox-message > p { margin: 0 0 16px; font-size: 1.05rem; line-height: 1.6; }
 .owner-inbox-message dl { display: grid; gap: 0; margin: 0 0 14px; }
@@ -6024,6 +6023,8 @@ textarea {
 .analytics-trend svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 3; vector-effect: non-scaling-stroke; }
 .analytics-trend svg path.is-page-views { stroke: var(--product-color-primary); }
 .analytics-trend svg path.is-actions { stroke: var(--product-color-intelligence); }
+.analytics-trend svg circle.is-page-views { fill: var(--product-color-primary); }
+.analytics-trend svg circle.is-actions { fill: var(--product-color-intelligence); }
 .analytics-trend-table { margin-top: 6px; border-top: 1px solid var(--product-color-border-subtle); }
 .analytics-trend-table summary { min-height: 44px; padding-top: 13px; color: var(--product-color-primary); font-size: var(--product-font-size-control); cursor: pointer; }
 .analytics-data-table { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }

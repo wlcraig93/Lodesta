@@ -1,6 +1,6 @@
 # Published-page version context
 
-Status: diagnosed September 6, 2026; September 7 correction passes local pipeline/browser checks, not yet deployed.
+Status: diagnosed September 6, 2026; September 7 correction deployed in `4cc3fc233e5625bec14efff8b5a2fe75eee1c4fc`. A fresh live canary verified exact browser/form version binding and a matched analytics page load. Its subsequent inbox-rendering failure is tracked separately in [inbox contract correction](inquiry-inbox-contract.md).
 
 The owner-journey canary on release `06e2bcbfd64a35d2f2c4ac15787611f331c998d5` successfully created, edited and published a temporary Lodesta-owned site. The anonymous form endpoint returned `accepted: true, status: received`. A read-only database check confirms exactly one synthetic inquiry under the published form. The test then failed because the outgoing browser request contained an empty `versionId`. Cleanup paused and detached the temporary site, preserving history; its public route returns 404. The authenticated owner inbox UI was not checked before cleanup.
 
@@ -18,7 +18,7 @@ Supply the exact published version as trusted per-response metadata after artifa
 
 The owner selected privacy-minimal analytics on September 7. The correction therefore ships with a separate audited runtime patch that removes persistent identifiers and uses in-memory page-load context only; the existing runtime's tracking must not be activated as an intermediate rollout. Reports remove unique/returning browsers and visit/landing attribution. See [storage and disclosure audit](generated-site-storage-and-disclosures.md). The empty-storage observation from the broken path is not evidence of that new implementation.
 
-The originally authorized single synthetic inquiry has been used. One additional labeled test inquiry is now approved, conditional on no external notifications, to verify the corrected path through the authenticated inbox UI. It has not been sent. Recheck notification configuration before testing. Do not reassign a disposed site's owner or reactivate it merely to complete a test.
+Both authorized synthetic inquiries have now been used. The second confirmed this version-context correction, but the subsequent inbox-rendering failure means the full owner journey did not pass. Another inquiry requires renewed permission. Do not reassign a disposed site's owner or reactivate it merely to complete a test.
 
 The read-only September 7 inventory verified all 807 HTML routes across 24 retained versions before the new root assertion. The regression now exercises real finalization, verified artifact persistence, the public GET handler and the trusted browser runtime. It verifies nested routes, custom-domain serving metadata, unchanged retained bytes, exact form version context, stale-version rejection and empty local/session storage and cookies. Preview/internal exclusion remains covered by the trusted-runtime fixture.
 

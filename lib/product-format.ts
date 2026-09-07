@@ -18,10 +18,10 @@ export function humanize(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-export function formatProductDate(value: string, includeTime = true) {
+export function formatProductDate(value: string, includeTime = true, timeZone?: string) {
   return new Intl.DateTimeFormat("en", includeTime
-    ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
-    : { month: "short", day: "numeric", year: "numeric" }
+    ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone, ...(timeZone ? { timeZoneName: "short" as const } : {}) }
+    : { month: "short", day: "numeric", year: "numeric", timeZone }
   ).format(new Date(value));
 }
 

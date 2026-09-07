@@ -1,7 +1,5 @@
 export type InquirySourceChannel = "form" | "chat" | "email" | "phone" | "sms" | "booking";
 export type InquiryStatus = "new" | "needs_reply" | "replied" | "booked" | "won" | "lost" | "spam" | "archived";
-export type InquiryNotificationState = "queued" | "processing" | "completed" | "partial" | "failed" | "skipped";
-export type InquiryAiEnrichmentState = "queued" | "processing" | "succeeded" | "retrying" | "rate_limited" | "failed" | "skipped";
 
 export type InquiryAiEnrichment = {
   schemaVersion: string;
@@ -32,11 +30,8 @@ export type Inquiry = {
   contactPhone?: string;
   contactPhoneNormalized?: string;
   status: InquiryStatus;
-  notificationState: InquiryNotificationState;
-  aiEnrichmentState: InquiryAiEnrichmentState;
   aiEnrichment?: InquiryAiEnrichment;
   aiEnrichedAt?: string;
-  aiEnrichmentError?: string;
   createdAt: string;
   updatedAt: string;
 };

@@ -174,7 +174,7 @@ export function ProductAppShell({
       <header className="owner-workspace-mobile-header">
         <Link className="owner-workspace-mobile-brand" href="/account" aria-label="Lodesta account"><img src="/brand/lodesta-mark.svg" alt="" /></Link>
         <WebsiteSwitcher site={site} sites={sites} compact={false} adminPreview={adminPreview} />
-        {site ? site.published ? <a className="owner-workspace-live-link" href={`/sites/${site.slug}`} target="_blank" rel="noreferrer">Live</a> : <span className="owner-workspace-draft-label">Draft</span> : <span className="owner-workspace-draft-label">Account</span>}
+        {site ? siteIsLive(site) ? <a className="owner-workspace-live-link" href={`/sites/${site.slug}`} target="_blank" rel="noreferrer">Live</a> : <span className="owner-workspace-draft-label">{humanStatus(site.status)}</span> : <span className="owner-workspace-draft-label">Account</span>}
       </header>
 
       <div className="owner-workspace-content" id="product-app-main">{children}</div>
@@ -225,7 +225,7 @@ function WebsiteSwitcher({ site, sites, compact, adminPreview }: { site?: OwnerW
   const rootRef = useRef<HTMLDetailsElement>(null);
   const triggerRef = useRef<HTMLElement>(null);
   const content = site
-    ? <><span className="owner-workspace-site-avatar" aria-hidden="true">{initials(site.name)}</span><span className="owner-workspace-site-copy"><strong>{site.name}</strong><small>{adminPreview ? "Admin preview" : site.published ? "Live website" : humanStatus(site.status)}</small></span></>
+    ? <><span className="owner-workspace-site-avatar" aria-hidden="true">{initials(site.name)}</span><span className="owner-workspace-site-copy"><strong>{site.name}</strong><small>{adminPreview ? "Admin preview" : siteIsLive(site) ? "Live website" : humanStatus(site.status)}</small></span></>
     : <><span className="owner-workspace-site-avatar" aria-hidden="true"><AllWebsitesIcon /></span><span className="owner-workspace-site-copy"><strong>All websites</strong><small>{sites.length ? `${sites.length} connected` : "Start with your first site"}</small></span></>;
 
   useEffect(() => {
@@ -268,7 +268,7 @@ function WebsiteSwitcher({ site, sites, compact, adminPreview }: { site?: OwnerW
       <div>
         <span>Websites</span>
         <Link href="/account" aria-current={!site ? "page" : undefined} onClick={() => setOpen(false)}><span className="owner-workspace-site-avatar" aria-hidden="true"><AllWebsitesIcon /></span><span><strong>All websites</strong><small>Account overview</small></span></Link>
-        {sites.map((option) => <Link href={`/workspace/${option.slug}`} key={option.id} aria-current={option.id === site?.id ? "page" : undefined} onClick={() => setOpen(false)}><span className="owner-workspace-site-avatar" aria-hidden="true">{initials(option.name)}</span><span><strong>{option.name}</strong><small>{option.published ? "Live" : humanStatus(option.status)}</small></span></Link>)}
+        {sites.map((option) => <Link href={`/workspace/${option.slug}`} key={option.id} aria-current={option.id === site?.id ? "page" : undefined} onClick={() => setOpen(false)}><span className="owner-workspace-site-avatar" aria-hidden="true">{initials(option.name)}</span><span><strong>{option.name}</strong><small>{siteIsLive(option) ? "Live" : humanStatus(option.status)}</small></span></Link>)}
         <Link href="/account/onboarding" onClick={() => setOpen(false)}><span className="owner-workspace-site-avatar" aria-hidden="true"><AddIcon /></span><span><strong>Add website</strong><small>Create a private draft</small></span></Link>
       </div>
     </details>
@@ -318,6 +318,7 @@ function productAccountActions(input: { base: string; siteSlug?: string; canAcce
 
 function initials(value: string) { return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "WS"; }
 function humanStatus(value: string) { return value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase()); }
+function siteIsLive(site: OwnerWorkspaceSiteOption) { return site.status === "active" && site.published; }
 type IconProps = { collapsed?: boolean };
 function Icon({ children }: { children: ReactNode }) { return <svg viewBox="0 0 24 24" aria-hidden="true">{children}</svg>; }
 function HomeIcon() { return <Icon><path d="m4 10 8-6 8 6v9H8v-6h8v6" /></Icon>; }

@@ -77,6 +77,9 @@ for (const route of routes) {
 assert(home.includes("deriveOwnerSiteLifecycle") && home.indexOf("candidateIntegrity") < home.indexOf("replyInquiries"), "Home does not derive the canonical owner lifecycle");
 assert(inbox.includes('type InboxFilter = "all" | "needs_reply" | "active" | "won" | "archived"'), "Inbox filters do not match the owner contract");
 assert(inbox.includes("router.replace") && inbox.includes("inquiry="), "Inbox selection is not shareable");
+assert(!inbox.includes("aiEnrichmentState") && !repository.includes("notification_state"), "Inbox still reads nonexistent processing-state columns.");
+assert(inbox.includes("timeZone") && inbox.includes("renderedAt") && !inbox.includes("Date.now()"), "Inbox hydration still depends on differing server/browser clocks.");
+assert(shell.includes('site.status === "active" && site.published') && shell.includes("siteIsLive(option)"), "Workspace labels paused retained publications as live.");
 assert(
   results.includes("context.canAccessAdmin ? <CollectionDiagnostics") &&
     results.includes("<dt>Internal excluded</dt>") &&

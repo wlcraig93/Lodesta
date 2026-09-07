@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { resolve } from "node:path";
+import { build } from "esbuild";
+import { createElement, type ComponentType } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   buildAnalyticsReport,
   classifyAnalyticsChannel,
@@ -10,7 +15,19 @@ import {
 } from "../lib/analytics";
 import { analyticsClientContextFromForm, parseAnalyticsClientEvent } from "../lib/analytics-ingestion";
 import { parseAnalyticsQuery } from "../lib/analytics-query";
-import type { AnalyticsEvent, AnalyticsReportQuery } from "../packages/site-capabilities/contracts";
+import type { AnalyticsEvent, AnalyticsReportQuery, AnalyticsTrendPoint } from "../packages/site-capabilities/contracts";
+
+const trendBundle = await build({ stdin: { contents: `export {AnalyticsTrend} from ${JSON.stringify(resolve("components/AnalyticsTrend.tsx"))}`, resolveDir: process.cwd(), loader: "tsx" },
+  bundle: true, write: false, platform: "node", format: "cjs", jsx: "automatic", external: ["react", "react/jsx-runtime"] });
+const trendModule = { exports: {} as { AnalyticsTrend: ComponentType<{ points: AnalyticsTrendPoint[] }> } };
+new Function("require", "module", "exports", trendBundle.outputFiles[0].text)(createRequire(import.meta.url), trendModule, trendModule.exports);
+const onePoint = [{ bucket: "2026-09-07", pageViews: 1, customerActions: 1 }];
+const trendHtml = renderToStaticMarkup(createElement(trendModule.exports.AnalyticsTrend, { points: onePoint }));
+assert.equal((trendHtml.match(/<circle /g) ?? []).length, 2, "A single reporting interval must display both series, not an invisible move-only path.");
+assert(trendHtml.includes('r="6"') && trendHtml.includes('r="3"'), "Equal single-point values must remain distinguishable.");
+assert(renderToStaticMarkup(createElement(trendModule.exports.AnalyticsTrend, { points: [] })).includes("No activity in this date range"));
+const multiplePoints = renderToStaticMarkup(createElement(trendModule.exports.AnalyticsTrend, { points: [...onePoint, { bucket: "2026-09-08", pageViews: 2, customerActions: 0 }] }));
+assert(multiplePoints.includes("L ") && !multiplePoints.includes("<circle "), "Multi-interval line rendering changed unexpectedly.");
 
 assert.equal(classifyAnalyticsTraffic("LodestaWebsiteCrawler/1.0"), "lodesta_internal");
 assert.equal(classifyAnalyticsTraffic("Googlebot/2.1"), "known_bot");

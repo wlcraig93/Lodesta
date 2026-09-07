@@ -26,6 +26,10 @@ export function AnalyticsTrend({ points }: { points: AnalyticsTrendPoint[] }) {
         <line x1={inset} y1={height - inset} x2={width - inset} y2={height - inset} />
         <path className="is-page-views" d={path("pageViews")} />
         <path className="is-actions" d={path("customerActions")} />
+        {points.length === 1 ? <>
+          <circle className="is-page-views" cx={coordinate(points[0].pageViews, 0).x} cy={coordinate(points[0].pageViews, 0).y} r="6" />
+          <circle className="is-actions" cx={coordinate(points[0].customerActions, 0).x} cy={coordinate(points[0].customerActions, 0).y} r="3" />
+        </> : null}
       </svg>
       <details className="analytics-trend-table">
         <summary>View trend as a table</summary>

@@ -1227,6 +1227,41 @@ assert.equal(
   undefined,
   "A non-Google review destination entered retained rating authority."
 );
+const retainedGoogleShareRating = retainedProspectGoogleAggregateRatingSnapshot({
+  businessId: input.businessId,
+  businessName: "Northstar Collision Repair",
+  sourceUrl: "https://northstar.example/",
+  rating: 4.8,
+  profileUrl: "https://share.google/fixtureObservedListing",
+  observedAt: "2026-08-31T12:00:00.000Z"
+});
+assert(retainedGoogleShareRating);
+assert.equal(googleAggregateRatingObservationFromSnapshot(retainedGoogleShareRating)?.profileUrl,
+  "https://share.google/fixtureObservedListing", "Google's own share-link form was silently discarded.");
+const supportedGoogleShareLink = prepareSiteArtifact({
+  authoredArtifact: artifact('<main><h1>Collision repair</h1><p>4.8 stars on Google</p><a href="https://share.google/fixtureObservedListing">Read reviews on Google</a></main>'),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4",
+  sourceSnapshots: [retainedGoogleShareRating]
+});
+assert(!errors(supportedGoogleShareLink).some(finding => finding.id === "fact.link_mismatch"),
+  "An exact retained Google share destination failed final link verification.");
+for (const invalidUrl of ["http://share.google/fixtureObservedListing", "https://share.google.evil.example/listing", "https://evilshare.google/listing"]) {
+  const invalid = retainedProspectGoogleAggregateRatingSnapshot({
+    businessId: input.businessId, businessName: "Northstar Collision Repair", sourceUrl: "https://northstar.example/",
+    rating: 4.8, profileUrl: invalidUrl, observedAt: "2026-08-31T12:00:00.000Z"
+  });
+  assert(invalid);
+  assert.equal(googleAggregateRatingObservationFromSnapshot(invalid)?.profileUrl, undefined,
+    "The Google share-link exception accepted an insecure or lookalike destination.");
+}
+const mismatchedGoogleShareLink = prepareSiteArtifact({
+  authoredArtifact: artifact('<main><h1>Collision repair</h1><a href="https://share.google/unobservedOtherListing">Read reviews on Google</a></main>'),
+  buildInput: input, runtimeSeriesId: "site-runtime-v4", sourceSnapshots: [retainedGoogleShareRating]
+});
+assert(errors(mismatchedGoogleShareLink).some(finding => finding.id === "fact.link_mismatch"),
+  "A different Google share destination was accepted without exact retained evidence.");
+
 const supportedAggregateRating = prepareSiteArtifact({
   authoredArtifact: artifact(`<main><h1>Collision repair with local trust</h1><p>4.8 stars on Google</p></main>`),
   buildInput: input,

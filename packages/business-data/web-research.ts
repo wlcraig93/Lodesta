@@ -344,7 +344,7 @@ function googleProfileUrl(value: string | null) {
   try {
     const url = new URL(value);
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    return url.protocol === "https:" && (host === "google.com" || host.endsWith(".google.com"))
+    return url.protocol === "https:" && (host === "google.com" || host.endsWith(".google.com") || host === "share.google")
       ? url.href
       : undefined;
   } catch {

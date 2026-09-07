@@ -8,6 +8,7 @@ import {
   type ExtractedBusinessFacts
 } from "@/lib/crawler";
 import { assertPublicFetchUrl, PublicFetchUrlError } from "@/lib/url-safety";
+import { preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
 import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "./crawl-errors";
 import { isLikelyCmsTemplateOrSystemSourcePage } from "./source-page-classification";
 import {
@@ -1223,7 +1224,7 @@ function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], inges
     .filter((page) => page.evidenceClass === "first_party")
     .flatMap((page) => [page.url, (page.summary as CrawlPageSummary).url]));
   const factPages = orderedPages.filter((page) => page === primary || firstPartyUrls.has(page.url));
-  const mergedFacts = factPages.reduce((combined, page) => mergeExtractedFacts(combined, page.extractedFacts), emptyFacts());
+  const mergedFacts = factPages.reduce((combined, page) => mergeExtractedFacts(combined, page.extractedFacts, source.hostname), emptyFacts());
   const facts = {
     ...mergedFacts,
     phone: consensusPhone(factPages),
@@ -1478,10 +1479,10 @@ async function captureBrowserResponse(response: import("playwright").Response, i
   }
 }
 
-function mergeExtractedFacts(left: ExtractedBusinessFacts, right: ExtractedBusinessFacts): ExtractedBusinessFacts {
+function mergeExtractedFacts(left: ExtractedBusinessFacts, right: ExtractedBusinessFacts, hostname: string): ExtractedBusinessFacts {
   return {
     ...left,
-    name: left.name ?? right.name,
+    name: preferBusinessNameCandidate(left.name, right.name, hostname),
     description: left.description ?? right.description,
     phone: left.phone ?? right.phone,
     email: left.email ?? right.email,

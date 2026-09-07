@@ -37,6 +37,27 @@ assert.equal(
   "A repeated-pipe title separator leaked a generic Home label into canonical business identity."
 );
 
+const genericTitleOrigin = "https://cedarelectricaustin.example";
+const genericTitleCrawl = await crawlWebsiteForGeneration({
+  url: genericTitleOrigin + "/",
+  validateUrl: async value => value,
+  limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+  sleep: async () => undefined,
+  fetchImpl: async input => {
+    const path = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url).pathname;
+    if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+    if (path === "/") return response(`<!doctype html><title>ELECTRICAL CONTRACTOR</title><main>
+      <h1>CEDAR ELECTRIC WHERE WE KEEP YOU OUT OF THE DARK</h1>
+      <a href="/testimonials.html">Customer testimonials</a></main>`, 200);
+    if (path === "/testimonials.html") return response(`<!doctype html><title>CEDAR ELECTRIC</title>
+      <main><h1>WHAT OUR CUSTOMERS SAY ABOUT US</h1><p>First-party customer testimonials.</p></main>`, 200);
+    return response("missing", 404, "text/plain");
+  }
+});
+assert.equal(genericTitleCrawl.crawl.pageSummaries[0]?.extractedFacts.name, "ELECTRICAL CONTRACTOR");
+assert.equal(genericTitleCrawl.crawl.extractedFacts.name, "CEDAR ELECTRIC",
+  "Generation's first-title merge ignored the shared selector and a stronger retained first-party business name.");
+
 const squarespaceRules = parseRobotsPolicy("User-agent: *\nDisallow: /*?author=*\n");
 assert.equal(robotsAllows(`${origin}/`, squarespaceRules.rules), true);
 assert.equal(robotsAllows(`${origin}/about?author=123`, squarespaceRules.rules), false);

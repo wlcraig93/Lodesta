@@ -81,30 +81,36 @@ try {
   assert(repairDurationMs < 60_000, `Production-sized repair took ${repairDurationMs}ms instead of returning promptly.`);
   assert.notEqual(repaired.revision, applied.revision, "A valid build after an invalid build did not advance the active generation.");
   assert.equal(repaired.activeGenerationRevision, repaired.revision, "The valid post-failure build was not promoted atomically.");
-  const concurrentFiles = repairedFiles.map((file) => file.path === "src/styles.css"
-    ? { ...file, content: `${file.content} p{max-width:65ch}` }
-    : file);
-  const concurrent = await Promise.allSettled([
-    sandbox.apply(sessionId, repaired.revision, concurrentFiles),
-    sandbox.apply(sessionId, repaired.revision, concurrentFiles)
-  ]);
-  const concurrentSuccesses = concurrent
-    .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<SiteSandboxClient["apply"]>>> => result.status === "fulfilled")
-    .map((result) => result.value);
-  const concurrentFailures = concurrent.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-  assert(concurrentSuccesses.length >= 1, `Concurrent identical mutations produced no successful build: ${concurrentFailures
-    .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason))
-    .join(" | ")}`);
-  assert(concurrentSuccesses.every((result) => result.revision === concurrentSuccesses[0]?.revision), "Concurrent identical mutations produced different generations.");
-  assert(concurrentSuccesses.filter((result) => !result.replayed).length === 1, "Concurrent identical mutations executed more than one build.");
-  assert(concurrentFailures.every((result) => result.reason instanceof SiteSandboxRequestError
-    && result.reason.status === 409
-    && result.reason.providerCode === "operation_in_progress"), `Concurrent duplicate returned an unexpected failure: ${concurrentFailures
+  let concurrentRevision = repaired.revision;
+  // Independent mutations, not retries: every pair must succeed exactly once.
+  // Exercise the former mkdir/metadata race repeatedly in the real container.
+  for (let pair = 0; pair < 10; pair++) {
+    const concurrentFiles = repairedFiles.map((file) => file.path === "src/styles.css"
+      ? { ...file, content: `${file.content} p{max-width:${65 + pair}ch}` }
+      : file);
+    const concurrent = await Promise.allSettled([
+      sandbox.apply(sessionId, concurrentRevision, concurrentFiles),
+      sandbox.apply(sessionId, concurrentRevision, concurrentFiles)
+    ]);
+    const concurrentSuccesses = concurrent
+      .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<SiteSandboxClient["apply"]>>> => result.status === "fulfilled")
+      .map((result) => result.value);
+    const concurrentFailures = concurrent.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    assert(concurrentSuccesses.length >= 1, `Concurrent identical mutations produced no successful build (pair ${pair}): ${concurrentFailures
       .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason))
       .join(" | ")}`);
-  const concurrentReplay = await sandbox.apply(sessionId, repaired.revision, concurrentFiles);
-  assert.equal(concurrentReplay.revision, concurrentSuccesses[0]?.revision, "Concurrent operation replay did not retain the promoted generation.");
-  assert.equal(concurrentReplay.replayed, true, "Concurrent operation replay executed a second build.");
+    assert(concurrentSuccesses.every((result) => result.revision === concurrentSuccesses[0]?.revision), "Concurrent identical mutations produced different generations.");
+    assert(concurrentSuccesses.filter((result) => !result.replayed).length === 1, "Concurrent identical mutations executed more than one build.");
+    assert(concurrentFailures.every((result) => result.reason instanceof SiteSandboxRequestError
+      && result.reason.status === 409
+      && result.reason.providerCode === "operation_in_progress"), `Concurrent duplicate returned an unexpected failure: ${concurrentFailures
+        .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason))
+        .join(" | ")}`);
+    const concurrentReplay = await sandbox.apply(sessionId, concurrentRevision, concurrentFiles);
+    assert.equal(concurrentReplay.revision, concurrentSuccesses[0]?.revision, "Concurrent operation replay did not retain the promoted generation.");
+    assert.equal(concurrentReplay.replayed, true, "Concurrent operation replay executed a second build.");
+    concurrentRevision = concurrentReplay.revision;
+  }
   const backup = await sandbox.backup(sessionId);
   const rebootstrapped = await sandbox.bootstrap(sessionId, buildInput);
   const restored = await sandbox.restore(
@@ -135,6 +141,7 @@ try {
     transactionFailureIsolation: "pass",
     operationReplay: "pass",
     concurrentOperationDeduplication: "pass",
+    concurrentMutationPairs: 10,
     invalidBuildDurationMs,
     repairDurationMs,
     artifactRoutes: artifact.routes.length

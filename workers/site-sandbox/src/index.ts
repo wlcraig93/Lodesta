@@ -106,7 +106,6 @@ const publicInputPath = `${workspaceRoot}/public-build-input.json`;
 const previewPort = 4173;
 const maxFilesPerApply = 80;
 const maxApplyBytes = 4_000_000;
-const operationStaleAfterMs = 4 * 60_000;
 const previewStarts = new Map<string, Promise<void>>();
 const sandboxManifest = {
   kind: "site-sandbox-manifest",
@@ -545,66 +544,10 @@ async function operationStatus(
   if (!journal) throw new SandboxOperationError(404, { error: "operation_not_found", operationId });
   if (journal.status === "queued") {
     schedule(startQueuedOperation(sandbox, sessionId, origin, operationId));
-  } else if (journal.status === "running" && journal.phase === "preparing") {
-    schedule(recoverInterruptedPreparation(sandbox, sessionId, origin, journal));
-  } else if (journal.status === "running" && (journal.phase === "validating" || journal.phase === "compiling")) {
+  } else if (journal.status === "running" && ["validating", "compiling", "promoting"].includes(journal.phase)) {
     schedule(advanceRunningOperation(sandbox, sessionId, origin, journal));
-  } else if (journal.status === "running" && journal.phase === "promoting") {
-    schedule(finalizeBuiltOperation(sandbox, sessionId, origin, journal));
   }
   return publicOperationStatus(journal);
-}
-
-async function recoverInterruptedPreparation(
-  sandbox: ReturnType<typeof getSandbox>,
-  sessionId: string,
-  origin: string,
-  journal: OperationJournal
-): Promise<OperationJournal> {
-  // Preparation normally lasts only long enough to copy the immutable scaffold.
-  // Let the original waiter finish unless it has stopped making progress.
-  if (Date.now() - Date.parse(journal.phaseStartedAt) < 30_000) return journal;
-  const input = await readJson<GenerationRequest>(sandbox, operationRequestPath(journal.operationId)).catch(() => undefined);
-  if (!input) {
-    return failOperation(sandbox, journal, new SandboxOperationError(500, { error: "operation_request_missing" }));
-  }
-  const revision = await digest(`${input.expectedRevision}:${input.action}:${journal.payloadHash}`);
-  const processId = `lodesta-build-${journal.operationId.slice(0, 24)}`;
-  const process = await sandbox.getProcess(processId).catch(() => null);
-  if (process) {
-    disposeRpc(process);
-    const now = new Date().toISOString();
-    const resumed: OperationJournal = {
-      ...journal,
-      phase: "validating",
-      updatedAt: now,
-      phaseStartedAt: now,
-      timestamps: { ...journal.timestamps, validating: journal.timestamps.validating ?? now },
-      phaseTimings: {
-        ...journal.phaseTimings,
-        queueMs: journal.phaseTimings.queueMs ?? Math.max(0, Date.parse(journal.timestamps.preparing ?? now) - Date.parse(journal.createdAt)),
-        prepareMs: journal.phaseTimings.prepareMs ?? Math.max(0, Date.parse(now) - Date.parse(journal.timestamps.preparing ?? now))
-      },
-      candidateRevision: revision,
-      processId
-    };
-    await writeOperationJournal(sandbox, resumed);
-    return advanceRunningOperation(sandbox, sessionId, origin, resumed);
-  }
-
-  // The request and deterministic operation identity are retained, so a lost
-  // execution context can safely restart preparation without creating a
-  // second logical mutation.
-  await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
-  const queued: OperationJournal = {
-    ...journal,
-    status: "queued",
-    phase: "queued",
-    updatedAt: new Date().toISOString(),
-    phaseStartedAt: new Date().toISOString()
-  };
-  await writeOperationJournal(sandbox, queued);
-  return startQueuedOperation(sandbox, sessionId, origin, journal.operationId);
 }
 
 async function startQueuedOperation(
@@ -622,6 +565,16 @@ async function startQueuedOperation(
     if (error instanceof SandboxOperationError && error.payload.error === "operation_in_progress") return journal;
     throw error;
   }
+  // A queued poll can wait behind the original execution until it completes.
+  // Re-read under our exclusive lock; its earlier queued snapshot grants no
+  // permission to overwrite a completed journal or rebuild an old revision.
+  const retained = await readOperationJournal(sandbox, operationId);
+  if (!retained || retained.status !== "queued") {
+    await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
+    if (!retained) throw new SandboxOperationError(404, { error: "operation_not_found", operationId });
+    return retained;
+  }
+  journal = retained;
   let candidateRoot: string | undefined;
   try {
     journal = await transitionOperation(sandbox, journal, "preparing");
@@ -679,11 +632,41 @@ async function startQueuedOperation(
     await writeOperationJournal(sandbox, journal);
     return journal;
   } catch (error) {
+    // Once the process has started, an ambiguous journal-write response must
+    // not race a status poll into failing or deleting a successful candidate.
+    // Poll the retained journal; if it never advances, the existing controller
+    // deadline and single fresh-sandbox recovery handle the abandoned attempt.
+    if (journal.processId) throw error;
     return failOperation(sandbox, journal, error, candidateRoot);
   }
 }
 
 async function advanceRunningOperation(
+  sandbox: ReturnType<typeof getSandbox>,
+  sessionId: string,
+  origin: string,
+  journal: OperationJournal
+): Promise<OperationJournal> {
+  // Serialize process-status interpretation with promotion and cleanup, using
+  // the existing finalization lock. A delayed poll must re-read the journal
+  // before interpreting the absence of an already-cleaned completed process.
+  const finalizationLock = `${operationsRoot}/${journal.operationId}.finalize.lock`;
+  const locked = await sandbox.exec(`mkdir ${finalizationLock}`);
+  if (!locked.success) return (await readOperationJournal(sandbox, journal.operationId)) ?? journal;
+  try {
+    const current = await readOperationJournal(sandbox, journal.operationId);
+    if (!current || current.status !== "running") return current ?? journal;
+    if (current.phase === "promoting") return await finalizeBuiltOperation(sandbox, sessionId, origin, current);
+    if (current.phase === "validating" || current.phase === "compiling") {
+      return await advanceBuildProcess(sandbox, sessionId, origin, current);
+    }
+    return current;
+  } finally {
+    await sandbox.exec(`rm -rf ${finalizationLock}`).catch(() => undefined);
+  }
+}
+
+async function advanceBuildProcess(
   sandbox: ReturnType<typeof getSandbox>,
   sessionId: string,
   origin: string,
@@ -765,9 +748,6 @@ async function finalizeBuiltOperation(
   if (!journal.candidateRevision) {
     return failOperation(sandbox, journal, new SandboxOperationError(500, { error: "candidate_revision_missing" }));
   }
-  const finalizationLock = `${operationsRoot}/${journal.operationId}.finalize.lock`;
-  const locked = await sandbox.exec(`mkdir ${finalizationLock}`);
-  if (!locked.success) return (await readOperationJournal(sandbox, journal.operationId)) ?? journal;
   const candidateRoot = generationPath(journal.candidateRevision);
   let promoted = false;
   try {
@@ -873,28 +853,29 @@ async function finalizeBuiltOperation(
     await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
     return completed;
   } catch (error) {
-    if (promoted) {
-      const active = await readActiveGeneration(sandbox).catch(() => undefined);
-      if (active?.operationId === journal.operationId && active.result) {
-        const now = new Date().toISOString();
-        const recovered: OperationJournal = {
-          ...journal,
-          status: "succeeded",
-          phase: "complete",
-          updatedAt: now,
-          phaseStartedAt: now,
-          timestamps: { ...journal.timestamps, complete: now },
-          phaseTimings: active.result.phaseTimings,
-          result: active.result,
-          completedAt: now
-        };
-        await writeOperationJournal(sandbox, recovered);
-        return recovered;
-      }
+    // A rename can commit even when its RPC response is lost, before our local
+    // `promoted` flag changes. Read the active pointer before any failure
+    // cleanup. If that read is unavailable, leave the candidate untouched.
+    const active = await readActiveGeneration(sandbox);
+    if (active.operationId === journal.operationId && active.result) {
+      const now = new Date().toISOString();
+      const recovered: OperationJournal = {
+        ...journal,
+        status: "succeeded",
+        phase: "complete",
+        updatedAt: now,
+        phaseStartedAt: now,
+        timestamps: { ...journal.timestamps, complete: now },
+        phaseTimings: active.result.phaseTimings,
+        result: active.result,
+        completedAt: now
+      };
+      await writeOperationJournal(sandbox, recovered);
+      await cleanupOperationProcess(sandbox, journal);
+      await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
+      return recovered;
     }
     return failOperation(sandbox, journal, error, candidateRoot);
-  } finally {
-    await sandbox.exec(`rm -rf ${finalizationLock}`).catch(() => undefined);
   }
 }
 
@@ -1001,25 +982,11 @@ async function acquireMutationLock(sandbox: ReturnType<typeof getSandbox>, opera
     return;
   }
   const lock = await readJson<{ operationId?: string; startedAt?: string }>(sandbox, `${mutationLock}/lock.json`).catch(() => undefined);
-  const startedAt = lock?.startedAt ? Date.parse(lock.startedAt) : Number.NaN;
-  const stale = !Number.isFinite(startedAt) || Date.now() - startedAt >= operationStaleAfterMs;
-  if (!stale) {
-    throw new SandboxOperationError(409, { error: "operation_in_progress", operationId: lock?.operationId });
-  }
-  const processes = await sandbox.listProcesses();
-  let associatedProcessRunning: boolean;
-  try {
-    associatedProcessRunning = processes.some((process) =>
-      process.status === "running" && !process.command.includes(`--port ${previewPort}`)
-    );
-  } finally {
-    disposeRpcAll(processes);
-  }
-  if (associatedProcessRunning) throw new SandboxOperationError(409, { error: "operation_in_progress", operationId: lock?.operationId });
-  await sandbox.exec(`rm -rf ${mutationLock}`);
-  const retried = await sandbox.exec(`mkdir ${mutationLock}`);
-  if (!retried.success) throw new SandboxOperationError(409, { error: "operation_in_progress", operationId: lock?.operationId });
-  await sandbox.writeFile(`${mutationLock}/lock.json`, JSON.stringify({ operationId, startedAt: new Date().toISOString(), reconciled: true }));
+  // mkdir is the authority, not its separately written diagnostic metadata.
+  // Missing/old metadata cannot prove that an RPC or filesystem copy stopped.
+  // Only the execution that acquired this lock may release it. An abandoned
+  // sandbox is handled by the controller's existing bounded recovery.
+  throw new SandboxOperationError(409, { error: "operation_in_progress", operationId: lock?.operationId });
 }
 
 async function readOperationJournal(

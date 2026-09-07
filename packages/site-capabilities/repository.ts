@@ -25,7 +25,6 @@ export type CreateCapabilityInquiryInput = {
   siteId: string;
   form: InquiryFormDefinition;
   pageId?: string;
-  visitorId?: string;
   payload: Record<string, string>;
   metadata?: Record<string, string | number | boolean>;
   sourceUrl?: string;
@@ -96,7 +95,7 @@ class LocalSiteCapabilityRepository implements SiteCapabilityRepository {
         messageText: inquiryMessageText(input.form, input.payload), payload: input.payload, sourceUrl: input.sourceUrl,
         pageId: input.pageId, formId: input.form.id,
         metadata: { ...(input.metadata ?? {}), contactExtractionStatus: contact.status, contactExtractionNotes: contact.notes,
-          visitorId: input.visitorId, ipHash: input.ipHash, userAgent: input.userAgent },
+          ipHash: input.ipHash, userAgent: input.userAgent },
         dedupeKey, createdAt: now
       };
       if (!existing) state.inquiries.push(inquiry);
@@ -204,8 +203,8 @@ type InquiryEventRow = {
 
 type AnalyticsRow = {
   id: string; schema_version: 1; site_id: string; site_version_id: string; event_id: string;
-  event_type: AnalyticsEvent["eventType"]; visitor_key: string; visit_id: string; page_path: string;
-  landing_path: string; channel: AnalyticsEvent["channel"]; source: string | null; medium: string | null;
+  event_type: AnalyticsEvent["eventType"]; page_view_id: string; page_path: string;
+  channel: AnalyticsEvent["channel"]; source: string | null; medium: string | null;
   campaign: string | null; referrer_host: string | null; device_category: AnalyticsEvent["deviceCategory"];
   properties: Record<string, string | number | boolean>; occurred_at: string; created_at: string;
 };
@@ -223,9 +222,9 @@ class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
     const result = await requireData<{ inquiry: InquiryRow; event: InquiryEventRow; duplicate: boolean }>(
       this.client.rpc("create_inquiry_from_form", {
         p_site_id: input.siteId, p_form_id: input.form.id, p_page_id: input.pageId ?? null,
-        p_visitor_id: input.visitorId ?? null, p_payload: input.payload,
+        p_payload: input.payload,
         p_metadata: { ...(input.metadata ?? {}), contactExtractionStatus: contact.status, contactExtractionNotes: contact.notes,
-          visitorId: input.visitorId, ipHash: input.ipHash, userAgent: input.userAgent },
+          ipHash: input.ipHash, userAgent: input.userAgent },
         p_source_url: input.sourceUrl ?? null, p_user_agent: input.userAgent ?? null, p_ip_hash: input.ipHash ?? null,
         p_contact_name: contact.contactName ?? null, p_contact_email: contact.contactEmail ?? null,
         p_contact_email_normalized: contact.contactEmailNormalized ?? null, p_contact_phone: contact.contactPhone ?? null,
@@ -271,10 +270,8 @@ class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
       site_version_id: event.siteVersionId,
       event_id: event.eventId,
       event_type: event.eventType,
-      visitor_key: event.visitorKey,
-      visit_id: event.visitId,
+      page_view_id: event.pageViewId,
       page_path: event.pagePath,
-      landing_path: event.landingPath,
       channel: event.channel,
       source: event.source,
       medium: event.medium,
@@ -353,8 +350,8 @@ function rowToInquiryEvent(row: InquiryEventRow): InquiryEvent {
 function rowToAnalyticsEvent(row: AnalyticsRow): AnalyticsEvent {
   return {
     schemaVersion: row.schema_version, eventId: row.event_id, siteId: row.site_id,
-    siteVersionId: row.site_version_id, eventType: row.event_type, visitorKey: row.visitor_key,
-    visitId: row.visit_id, pagePath: row.page_path, landingPath: row.landing_path,
+    siteVersionId: row.site_version_id, eventType: row.event_type,
+    pageViewId: row.page_view_id, pagePath: row.page_path,
     channel: row.channel, source: row.source ?? undefined, medium: row.medium ?? undefined,
     campaign: row.campaign ?? undefined, referrerHost: row.referrer_host ?? undefined,
     deviceCategory: row.device_category, properties: row.properties ?? {},

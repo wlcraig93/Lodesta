@@ -185,8 +185,10 @@ expect_empty_route_404 "missing runtime patch reaches encoded route" "/_lodesta/
 
 request POST "/api/forms/submit" '{"siteId":"site_missing","formId":"form_missing","payload":{"name":"Smoke"}}'
 expect_status "unreferenced form rejected" "404"
-request POST "/api/analytics" '{"siteId":"site_missing","eventId":"event_smoke_missing","visitorId":"visitor_smoke_missing","visitId":"visit_smoke_missing","eventType":"page_view","pagePath":"/","deviceCategory":"desktop"}'
+request POST "/api/analytics" '{"siteId":"site_missing","versionId":"version_missing","eventId":"event_smoke_missing","pageViewId":"page_load_smoke_missing","eventType":"page_view","pagePath":"/","deviceCategory":"desktop"}'
 expect_status "unknown analytics site rejected" "404"
+request POST "/api/analytics" '{"siteId":"site_missing","eventId":"event_smoke_missing","visitorId":"visitor_smoke_missing","visitId":"visit_smoke_missing","eventType":"page_view","pagePath":"/","deviceCategory":"desktop"}'
+expect_status "persistent analytics identity rejected" "400"
 
 request GET "/api/site-agent/runs/run_missing"
 expect_status "unknown agent run rejected" "404"

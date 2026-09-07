@@ -47,19 +47,17 @@ function reportCsv(report: AnalyticsReport) {
     ["Timezone", report.query.timezone],
     [],
     ["Metric", "Value"],
-    ["Visitors", report.current.visitors],
-    ["Visits", report.current.visits],
     ["Page views", report.current.pageViews],
-    ["Leads", report.current.leads],
+    ["Tracked inquiries", report.current.leads],
     ["Customer actions", report.current.customerActions],
-    ["Action rate", report.current.actionRate]
+    ["Page action rate", report.current.actionRate]
   ];
   const rows = report.query.view === "traffic"
-    ? sections([["Channels", report.channels], ["Sources", report.sources], ["Campaigns", report.campaigns], ["Visitor types", report.visitorTypes], ["Landing pages", report.landingPages], ["Devices", report.devices]])
+    ? sections([["Channels", report.channels], ["Sources", report.sources], ["Campaigns", report.campaigns], ["Devices", report.devices]])
     : report.query.view === "content"
       ? sections([["Pages", report.pages]])
       : report.query.view === "actions"
-        ? sections([["Actions", report.actions], ["Landing pages", report.landingPages], ["Pages", report.pages], ["Devices", report.devices]])
+        ? sections([["Actions", report.actions], ["Pages", report.pages], ["Devices", report.devices]])
         : sections([["Channels", report.channels], ["Actions", report.actions], ["Pages", report.pages]]);
   return `\uFEFF${[...metadata, [], ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
 }
@@ -68,8 +66,8 @@ function sections(values: Array<[string, AnalyticsReportRow[]]>) {
   return values.flatMap(([title, rows], index) => [
     ...(index ? [[]] : []),
     [title],
-    ["Key", "Label", "Visitors", "Visits", "Page views", "Customer actions", "Action rate", "Engaged seconds"],
-    ...rows.map((row) => [row.key, row.label, row.visitors, row.visits, row.pageViews, row.customerActions, row.actionRate, row.engagedSeconds])
+    ["Key", "Label", "Page views", "Customer actions", "Page action rate", "Engaged seconds"],
+    ...rows.map((row) => [row.key, row.label, row.pageViews, row.customerActions, row.actionRate, row.engagedSeconds])
   ]);
 }
 

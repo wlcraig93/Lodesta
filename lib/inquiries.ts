@@ -24,7 +24,6 @@ export type CreateInquiryFromFormInput = {
   siteId: string;
   form: InquiryFormDefinition;
   pageId?: string;
-  visitorId?: string;
   payload: Record<string, string>;
   metadata?: Record<string, string | number | boolean>;
   sourceUrl?: string;

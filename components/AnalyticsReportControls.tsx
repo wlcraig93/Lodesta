@@ -108,7 +108,7 @@ export function AnalyticsReportControls({
             <span>Page</span>
             <ProductSelect name="page" defaultValue={query.filters.page ?? ""}>
               <option value="">All pages</option>
-              {uniqueRows([...report.pages, ...report.landingPages]).map((row) => <option key={row.key} value={row.key}>{row.label}</option>)}
+              {uniqueRows(report.pages).map((row) => <option key={row.key} value={row.key}>{row.label}</option>)}
             </ProductSelect>
           </label>
           <label>

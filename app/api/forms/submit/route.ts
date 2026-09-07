@@ -77,10 +77,8 @@ export async function POST(request: Request) {
   const analyticsClientContext = analyticsClientContextFromForm({
     siteId,
     eventId: parsedSubmission.eventId,
-    visitorId: parsedSubmission.visitorId,
-    visitId: parsedSubmission.visitId,
+    pageViewId: parsedSubmission.pageViewId,
     pagePath: parsedSubmission.pageId,
-    landingPath: stringMetadata(parsedSubmission.metadata, "landingPath"),
     referrerHost: stringMetadata(parsedSubmission.metadata, "referrerHost"),
     utmSource: stringMetadata(parsedSubmission.metadata, "utmSource"),
     utmMedium: stringMetadata(parsedSubmission.metadata, "utmMedium"),
@@ -95,7 +93,6 @@ export async function POST(request: Request) {
     siteId,
     form,
     pageId: parsedSubmission.pageId || "unknown",
-    visitorId: parsedSubmission.visitorId,
     payload: validation.payload,
     metadata: parsedSubmission.metadata,
     sourceUrl: sanitizeAttributionUrl(parsedSubmission.sourceUrl || request.headers.get("referer") || undefined),
@@ -116,9 +113,7 @@ type ParsedSubmission =
       formId: string;
       pageId: string;
       sectionId?: string;
-      sessionId?: string;
-      visitorId?: string;
-      visitId?: string;
+      pageViewId?: string;
       eventId?: string;
       deviceCategory?: string;
       elapsedMs?: number;
@@ -147,9 +142,7 @@ async function parseSubmissionRequest(request: Request): Promise<ParsedSubmissio
       formId: stringValue(body.formId),
       pageId: stringValue(body.pageId),
       sectionId: stringValue(body.sectionId) || undefined,
-      sessionId: stringValue(body.sessionId) || undefined,
-      visitorId: identifierValue(body.visitorId),
-      visitId: identifierValue(body.visitId ?? body.sessionId),
+      pageViewId: identifierValue(body.pageViewId),
       eventId: identifierValue(body.eventId),
       deviceCategory: stringValue(body.deviceCategory) || undefined,
       elapsedMs: numberValue(body.elapsedMs),
@@ -178,9 +171,7 @@ async function parseSubmissionRequest(request: Request): Promise<ParsedSubmissio
       formId: stringValue(formData.get("formId")),
       pageId: stringValue(formData.get("pageId")),
       sectionId: stringValue(formData.get("sectionId")) || undefined,
-      sessionId: stringValue(formData.get("sessionId")) || undefined,
-      visitorId: identifierValue(formData.get("visitorId")),
-      visitId: identifierValue(formData.get("visitId") ?? formData.get("sessionId")),
+      pageViewId: identifierValue(formData.get("pageViewId")),
       eventId: identifierValue(formData.get("eventId")),
       deviceCategory: stringValue(formData.get("deviceCategory")) || undefined,
       elapsedMs: numberValue(formData.get("elapsedMs")),
@@ -205,6 +196,7 @@ const systemFormFields = new Set([
   "visitorId",
   "visitId",
   "eventId",
+  "pageViewId",
   "deviceCategory",
   "elapsedMs",
   "companyWebsite",
@@ -224,23 +216,11 @@ const systemFormFields = new Set([
 
 function attributionMetadata(source: FormData | Record<string, unknown>) {
   const metadata: Record<string, string | number | boolean> = {};
-  const explicitMetadata = getValue(source, "metadata");
-
-  if (isRecord(explicitMetadata)) {
-    for (const [key, value] of Object.entries(explicitMetadata)) {
-      if (isMetadataValue(value)) metadata[key] = value;
-    }
-  }
-
-  for (const key of ["landingPath", "referrerHost", "utmSource", "utmMedium", "utmCampaign"]) {
+  for (const key of ["referrerHost", "utmSource", "utmMedium", "utmCampaign"]) {
     const value = stringValue(getValue(source, key));
     if (value) metadata[key] = value;
   }
 
-  const sessionId = stringValue(getValue(source, "sessionId"));
-  if (sessionId) metadata.sessionId = sessionId;
-  const sessionStartedAt = numberValue(getValue(source, "sessionStartedAt"));
-  if (Number.isFinite(sessionStartedAt) && sessionStartedAt > 0) metadata.sessionStartedAt = sessionStartedAt;
   return sanitizeAnalyticsMetadata(metadata) ?? {};
 }
 
@@ -272,10 +252,6 @@ function formEntryValue(value: FormDataEntryValue) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isMetadataValue(value: unknown): value is string | number | boolean {
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 }
 
 function stringMetadata(metadata: Record<string, string | number | boolean>, key: string) {

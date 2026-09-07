@@ -97,10 +97,9 @@ export type AnalyticsEvent = {
   siteId: string;
   siteVersionId: string;
   eventType: AnalyticsEventType;
-  visitorKey: string;
-  visitId: string;
+  /** Random, in-memory page-load identifier. Never a browser or cross-page identity. */
+  pageViewId: string;
   pagePath: string;
-  landingPath: string;
   channel: AnalyticsChannel;
   source?: string;
   medium?: string;
@@ -132,12 +131,10 @@ export type AnalyticsReportQuery = {
 };
 
 export type AnalyticsTotals = {
-  visitors: number;
-  visits: number;
   pageViews: number;
   leads: number;
   customerActions: number;
-  actionVisits: number;
+  actionPageViews: number;
   actionRate: number;
   formStarts: number;
   engagedSeconds: number;
@@ -147,18 +144,15 @@ export type AnalyticsTotals = {
 export type AnalyticsReportRow = {
   key: string;
   label: string;
-  visitors: number;
-  visits: number;
   pageViews: number;
   customerActions: number;
   actionRate: number;
   engagedSeconds: number;
-  exits: number;
 };
 
 export type AnalyticsTrendPoint = {
   bucket: string;
-  visits: number;
+  pageViews: number;
   customerActions: number;
 };
 
@@ -189,10 +183,8 @@ export type AnalyticsReport = {
   sources: AnalyticsReportRow[];
   campaigns: AnalyticsReportRow[];
   pages: AnalyticsReportRow[];
-  landingPages: AnalyticsReportRow[];
   actions: AnalyticsReportRow[];
   devices: AnalyticsReportRow[];
-  visitorTypes: AnalyticsReportRow[];
   collectionHealth: AnalyticsCollectionHealth;
   sufficiency: "empty" | "early" | "sufficient";
   recommendations: AnalyticsRecommendation[];

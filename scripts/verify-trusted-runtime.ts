@@ -11,8 +11,8 @@ const materializedRuntimeV4 = await readFile("packages/trusted-runtime/site-runt
 assert.deepEqual(runtimeV4, materializedRuntimeV4, "The canonical V4 builder did not return the materialized source bytes directly.");
 assert.equal(
   createHash("sha256").update(runtimeV4).digest("hex"),
-  "578ead4af629ba76549ed5ad7329fc2173b80459172e521d6643a57477b15403",
-  "Materialized V4 bytes no longer match the deployed active V4 patch; publish a separate audited runtime patch instead."
+  "60b2d8345c68028544ef0cd7856d74183a8f8dbd24e4c763aff9f35e47de935d",
+  "Materialized V4 bytes differ from the reviewed privacy-minimal candidate; runtime changes require a separate audited patch."
 );
 const v4CapabilityStyles = platformCapabilityStylesFor("site-runtime-v4");
 new Function(runtimeV4.toString("utf8"));
@@ -88,8 +88,8 @@ try {
   assert(analytics.some((event) => event.eventType === "page_view" && event.siteId === "site_runtime_test"), "public page view was not recorded");
   const pageView = analytics.find((event) => event.eventType === "page_view");
   assert.equal(typeof pageView?.eventId, "string");
-  assert.equal(typeof pageView?.visitorId, "string");
-  assert.equal(typeof pageView?.visitId, "string");
+  assert.equal(typeof pageView?.pageViewId, "string");
+  assert(!("visitorId" in pageView!) && !("visitId" in pageView!));
   assert.equal(pageView?.versionId, "version_runtime_test");
   await page.fill('input[name="name"]', "Test visitor");
   await page.click('form button[type="submit"]');
@@ -98,6 +98,7 @@ try {
   assert.equal(forms[0].siteId, "site_runtime_test");
   assert.equal(forms[0].formId, "form_runtime_test");
   assert.equal(typeof forms[0].eventId, "string");
+  assert.equal(forms[0].pageViewId, pageView?.pageViewId, "Form attribution did not stay within the current page.");
   assert.equal(analytics.filter((event) => event.eventType === "form_submit").length, 0, "browser emitted a duplicate form submission event");
   await page.click("[data-lodesta-directions]");
   await page.waitForTimeout(50);
@@ -253,6 +254,30 @@ try {
   assert.equal(analytics.length + forms.length, internalBefore, "Lodesta internal agent emitted analytics or form traffic");
   await internalContext.close();
   assert.equal(errors.length, 0, errors.join("\n"));
+
+  // Reuse one real browser context: reload, navigation and a second tab must
+  // neither reuse a page identity nor carry prior campaign attribution.
+  const privacyContext = await browser.newContext();
+  await privacyContext.addInitScript(() => {
+    Object.defineProperty(window, "localStorage", { get() { throw new Error("Unexpected analytics storage access"); } });
+    Object.defineProperty(window, "sessionStorage", { get() { throw new Error("Unexpected analytics storage access"); } });
+  });
+  const privacyPage = await privacyContext.newPage();
+  privacyPage.on("pageerror", (error) => errors.push(error.message));
+  const beforePrivacy = analytics.length;
+  await privacyPage.goto(`${origin}/?utm_source=newsletter&utm_campaign=summer`, { waitUntil: "networkidle" });
+  await privacyPage.goto(origin, { waitUntil: "networkidle" });
+  await privacyPage.reload({ waitUntil: "networkidle" });
+  const otherTab = await privacyContext.newPage();
+  await otherTab.goto(origin, { waitUntil: "networkidle" });
+  const privacyViews = analytics.slice(beforePrivacy).filter((event) => event.eventType === "page_view");
+  assert.equal(privacyViews.length, 4);
+  assert.equal(new Set(privacyViews.map((event) => event.pageViewId)).size, 4);
+  assert.equal(privacyViews[0].utmSource, "newsletter");
+  assert(privacyViews.slice(1).every((event) => !event.utmSource && !event.utmCampaign));
+  assert.deepEqual(await privacyContext.cookies(), []);
+  assert.equal(errors.length, 0, errors.join("\n"));
+  await privacyContext.close();
 
   const v4NoScriptContext = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });
   const v4NoScriptPage = await v4NoScriptContext.newPage();

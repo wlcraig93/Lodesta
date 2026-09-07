@@ -4,7 +4,6 @@ import {
   classifyAnalyticsChannel,
   classifyAnalyticsTraffic,
   normalizeAnalyticsPath,
-  normalizeAnalyticsVisitor,
   normalizeCampaignValue,
   normalizeReferrerHost
 } from "./analytics";
@@ -22,11 +21,9 @@ const clientEventSchema = z.object({
   siteId: z.string().min(1).max(120),
   versionId: z.string().min(1).max(120).optional(),
   eventId: z.string().min(8).max(120),
-  visitorId: z.string().min(8).max(120),
-  visitId: z.string().min(8).max(120),
+  pageViewId: z.string().min(8).max(120),
   eventType: z.enum(publicEventTypes as [typeof publicEventTypes[number], ...typeof publicEventTypes[number][]]),
   pagePath: z.string().min(1).max(500),
-  landingPath: z.string().min(1).max(500).optional(),
   referrerHost: z.string().max(500).optional(),
   utmSource: z.string().max(160).optional(),
   utmMedium: z.string().max(160).optional(),
@@ -111,10 +108,8 @@ export function canonicalAnalyticsEvent(
     siteId: context.site.id,
     siteVersionId: context.version.id,
     eventType,
-    visitorKey: normalizeAnalyticsVisitor(context.site.id, input.visitorId),
-    visitId: scopedVisitId(context.site.id, input.visitId),
+    pageViewId: `page:${hmacSha256Hex(`analytics-page-v1\n${context.site.id}\n${input.pageViewId}`).slice(0, 40)}`,
     pagePath: normalizeAnalyticsPath(input.pagePath),
-    landingPath: normalizeAnalyticsPath(input.landingPath ?? input.pagePath),
     channel: classifyAnalyticsChannel({ utmSource: source, utmMedium: medium, referrerHost }),
     source,
     medium,
@@ -130,10 +125,8 @@ export function canonicalAnalyticsEvent(
 export function analyticsClientContextFromForm(input: {
   siteId: string;
   eventId?: string;
-  visitorId?: string;
-  visitId?: string;
+  pageViewId?: string;
   pagePath: string;
-  landingPath?: string;
   referrerHost?: string;
   utmSource?: string;
   utmMedium?: string;
@@ -144,11 +137,9 @@ export function analyticsClientContextFromForm(input: {
   const parsed = clientEventSchema.safeParse({
     siteId: input.siteId,
     eventId: input.eventId,
-    visitorId: input.visitorId,
-    visitId: input.visitId,
+    pageViewId: input.pageViewId,
     eventType: "form_start",
     pagePath: input.pagePath || "/",
-    landingPath: input.landingPath,
     referrerHost: input.referrerHost,
     utmSource: input.utmSource,
     utmMedium: input.utmMedium,
@@ -207,13 +198,9 @@ function parseUrl(value: string | null) {
   }
 }
 
-function scopedVisitId(siteId: string, visitId: string) {
-  return `visit:${hmacSha256Hex(`analytics-visit-v1\n${siteId}\n${visitId}`).slice(0, 40)}`;
-}
-
 function boundedProperties(eventType: string, value: Record<string, string | number | boolean>) {
   const allowed: Record<string, Set<string>> = {
-    page_view: new Set(["elapsedMs", "returning"]),
+    page_view: new Set(["elapsedMs"]),
     engagement: new Set(["elapsedMs", "engagedMs", "maxScrollDepth"]),
     form_start: new Set(["elapsedMs", "formId"]),
     form_submit: new Set(["elapsedMs", "formId", "inquiryId"]),

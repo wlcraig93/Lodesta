@@ -91,7 +91,7 @@ export default async function WorkspaceHomePage({ params }: { params: Promise<{ 
         <WorkspaceMetric label="Website status" value={lifecycle.label} detail={statusDetail} tone={lifecycle.tone === "attention" ? "attention" : lifecycle.tone === "success" ? "positive" : "default"} />
         <WorkspaceMetric label="Needs reply" value={replyInquiries.length} detail={`${inquiries.length} total inquir${inquiries.length === 1 ? "y" : "ies"}`} tone={replyInquiries.length ? "attention" : "default"} />
         <WorkspaceMetric label="Customer actions" value={analytics.current.customerActions} detail="Calls, forms, directions, and bookings" />
-        <WorkspaceMetric label="Action rate" value={`${Math.round(analytics.current.actionRate * 100)}%`} detail={`${analytics.current.visits} visit${analytics.current.visits === 1 ? "" : "s"} in 30 days`} />
+        <WorkspaceMetric label="Page action rate" value={`${Math.round(analytics.current.actionRate * 100)}%`} detail={`${analytics.current.pageViews} page views in 30 days`} />
       </section>
 
       <div className="workspace-home-grid">

@@ -4,6 +4,7 @@ import { sitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 import { loadPublishedSiteContext, markdownForArtifactRoute, requestAcceptsMarkdown, robotsTextForSite, sitemapXmlForSite } from "@/packages/site-platform/public-site";
 import type { AgentAccessPolicy } from "@/packages/site-contracts";
+import { bindPublishedDocumentContext } from "@/packages/site-platform/public-document-context";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +57,10 @@ export async function GET(
         `<${markdownRouteUrl(request, slug, requestedRoute)}>; rel="alternate"; type="text/markdown"`
       ].join(", ")
     : undefined;
-  return new Response(new Uint8Array(blob.bytes), {
+  const body = blob.contentType.startsWith("text/html")
+    ? bindPublishedDocumentContext(blob.bytes.toString("utf8"), { siteId: site.id, versionId: version.id })
+    : new Uint8Array(blob.bytes);
+  return new Response(body, {
     headers: siteHeaders(
       blob.contentType,
       artifact.artifactHash,

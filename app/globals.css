@@ -6022,7 +6022,7 @@ textarea {
 .analytics-trend svg { display: block; width: 100%; height: auto; min-height: 170px; margin-top: 8px; overflow: visible; }
 .analytics-trend svg line { stroke: var(--product-color-border); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .analytics-trend svg path { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 3; vector-effect: non-scaling-stroke; }
-.analytics-trend svg path.is-visits { stroke: var(--product-color-primary); }
+.analytics-trend svg path.is-page-views { stroke: var(--product-color-primary); }
 .analytics-trend svg path.is-actions { stroke: var(--product-color-intelligence); }
 .analytics-trend-table { margin-top: 6px; border-top: 1px solid var(--product-color-border-subtle); }
 .analytics-trend-table summary { min-height: 44px; padding-top: 13px; color: var(--product-color-primary); font-size: var(--product-font-size-control); cursor: pointer; }
@@ -6749,7 +6749,7 @@ textarea {
   .analytics-control-row { grid-template-columns: repeat(5, minmax(120px, 1fr)); align-items: end; }
   .analytics-control-row.is-comparison { grid-template-columns: repeat(2, minmax(180px, 260px)); }
   .analytics-filter-drawer .analytics-control-row { grid-template-columns: repeat(4, minmax(130px, 1fr)); }
-  .analytics-metric-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .analytics-metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .analytics-funnel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 

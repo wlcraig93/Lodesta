@@ -1,4 +1,3 @@
-import { hmacSha256Hex } from "./hash-secret";
 import type {
   AnalyticsActionType,
   AnalyticsChannel,
@@ -11,6 +10,7 @@ import type {
   AnalyticsTotals,
   AnalyticsTrafficClass
 } from "@/packages/site-capabilities/contracts";
+import { sanitizeAnalyticsMetadata } from "./privacy";
 
 export const analyticsActionTypes = new Set<AnalyticsActionType>([
   "form_submit",
@@ -23,7 +23,7 @@ export const analyticsActionTypes = new Set<AnalyticsActionType>([
 
 export const analyticsSufficiency = {
   rates: 20,
-  recommendations: { visits: 50, actions: 5 }
+  recommendations: { pageViews: 50, actions: 5 }
 } as const;
 
 const knownBots = /bot\b|crawler\b|spider\b|slurp\b|bingpreview\b|facebookexternalhit\b|googleother\b|google-inspectiontool\b|headlesschrome\b|lighthouse\b|curl\/|wget\/|python-requests|go-http-client|postmanruntime/i;
@@ -36,10 +36,6 @@ export function classifyAnalyticsTraffic(userAgent: string | null): AnalyticsTra
   if (lodestaAgents.test(value)) return "lodesta_internal";
   if (!value || knownBots.test(value)) return "known_bot";
   return "human";
-}
-
-export function normalizeAnalyticsVisitor(siteId: string, visitorId: string) {
-  return `v1:${hmacSha256Hex(`analytics-visitor-v1\n${siteId}\n${visitorId}`).slice(0, 40)}`;
 }
 
 export function classifyAnalyticsChannel(input: {
@@ -79,7 +75,9 @@ export function normalizeReferrerHost(value: string | undefined) {
 
 export function normalizeCampaignValue(value: string | undefined) {
   const normalized = value?.trim().replace(/\s+/g, " ").slice(0, 160);
-  return normalized || undefined;
+  if (!normalized) return undefined;
+  const sanitized = sanitizeAnalyticsMetadata({ campaign: normalized })?.campaign;
+  return typeof sanitized === "string" ? sanitized : undefined;
 }
 
 export function buildAnalyticsReport(
@@ -101,19 +99,13 @@ export function buildAnalyticsReport(
     comparison,
     trend: trend(currentEvents, query),
     channels: rows(currentEvents, (event) => event.channel, channelLabel),
-    sources: rows(currentEvents, (event) => event.source ?? event.referrerHost ?? "direct", titleCase),
-    campaigns: rows(currentEvents.filter((event) => Boolean(event.campaign)), (event) => event.campaign ?? "", titleCase),
+    sources: rows(currentEvents, (event) => event.source ?? event.referrerHost ?? "direct", channelLabel),
+    campaigns: rows(currentEvents.filter((event) => Boolean(event.campaign)), (event) => event.campaign ?? "", (value) => value),
     pages: rows(currentEvents, (event) => event.pagePath, pageLabel),
-    landingPages: rows(currentEvents, (event) => event.landingPath, pageLabel),
     actions: rows(currentEvents.filter((event) => analyticsActionTypes.has(event.eventType as AnalyticsActionType)), (event) => event.eventType, actionLabel),
     devices: rows(currentEvents, (event) => event.deviceCategory, titleCase),
-    visitorTypes: rows(
-      currentEvents.filter((event) => event.eventType === "page_view"),
-      (event) => event.properties.returning === true ? "returning" : "new",
-      titleCase
-    ),
     collectionHealth,
-    sufficiency: current.visits === 0 ? "empty" : current.visits < analyticsSufficiency.rates ? "early" : "sufficient",
+    sufficiency: current.pageViews === 0 ? "empty" : current.pageViews < analyticsSufficiency.rates ? "early" : "sufficient",
     recommendations: []
   };
   report.recommendations = recommendations(report);
@@ -130,19 +122,17 @@ export function analyticsReportFromDatabase(siteId: string, query: AnalyticsRepo
     comparison: raw.comparison ? databaseTotals(raw.comparison) : undefined,
     trend: array(raw.trend).map((item) => ({
       bucket: text(item.bucket),
-      visits: integer(item.visits),
+      pageViews: integer(item.page_views),
       customerActions: integer(item.customerActions ?? item.customer_actions)
     })),
     channels: databaseRows(raw.channels),
     sources: databaseRows(raw.sources),
     campaigns: databaseRows(raw.campaigns),
     pages: databaseRows(raw.pages),
-    landingPages: databaseRows(raw.landingPages ?? raw.landing_pages),
     actions: databaseRows(raw.actions),
     devices: databaseRows(raw.devices),
-    visitorTypes: databaseRows(raw.visitorTypes ?? raw.visitor_types),
     collectionHealth: databaseHealth(raw.collectionHealth ?? raw.collection_health),
-    sufficiency: current.visits === 0 ? "empty" : current.visits < analyticsSufficiency.rates ? "early" : "sufficient",
+    sufficiency: current.pageViews === 0 ? "empty" : current.pageViews < analyticsSufficiency.rates ? "early" : "sufficient",
     recommendations: []
   };
   report.recommendations = recommendations(report);
@@ -152,8 +142,9 @@ export function analyticsReportFromDatabase(siteId: string, query: AnalyticsRepo
 function filterEvents(events: AnalyticsEvent[], query: AnalyticsReportQuery, from: string, to: string) {
   const start = localDateBoundary(from, query.timezone);
   const end = localDateBoundary(addDays(to, 1), query.timezone);
-  const actionVisitIds = query.filters.action
-    ? new Set(events.filter((event) => event.eventType === query.filters.action).map((event) => event.visitId))
+  const actionPageIds = query.filters.action
+    ? new Set(events.filter((event) => event.eventType === query.filters.action
+      && Date.parse(event.occurredAt) >= start && Date.parse(event.occurredAt) < end).map((event) => event.pageViewId))
     : undefined;
   return events.filter((event) => {
     const at = Date.parse(event.occurredAt);
@@ -161,24 +152,24 @@ function filterEvents(events: AnalyticsEvent[], query: AnalyticsReportQuery, fro
       && at >= start && at < end
       && (!query.filters.channel || event.channel === query.filters.channel)
       && (!query.filters.source || (event.source ?? event.referrerHost ?? "direct") === query.filters.source)
-      && (!query.filters.page || event.pagePath === query.filters.page || event.landingPath === query.filters.page)
+      && (!query.filters.page || event.pagePath === query.filters.page)
       && (!query.filters.device || event.deviceCategory === query.filters.device)
-      && (!actionVisitIds || actionVisitIds.has(event.visitId));
+      && (!actionPageIds || actionPageIds.has(event.pageViewId));
   });
 }
 
 function totals(events: AnalyticsEvent[]): AnalyticsTotals {
-  const visits = new Set(events.map((event) => event.visitId));
+  const pageViews = new Set(events.filter((event) => event.eventType === "page_view").map((event) => event.pageViewId));
   const actionEvents = events.filter((event) => analyticsActionTypes.has(event.eventType as AnalyticsActionType));
-  const actionVisits = new Set(actionEvents.map((event) => event.visitId));
+  // An action with a missing page-view beacon still counts as an action, but
+  // cannot inflate the fraction of observed page views that led to an action.
+  const actionPageViews = new Set(actionEvents.map((event) => event.pageViewId).filter((id) => pageViews.has(id)));
   return {
-    visitors: new Set(events.map((event) => event.visitorKey)).size,
-    visits: visits.size,
-    pageViews: events.filter((event) => event.eventType === "page_view").length,
+    pageViews: pageViews.size,
     leads: events.filter((event) => event.eventType === "form_submit").length,
     customerActions: actionEvents.length,
-    actionVisits: actionVisits.size,
-    actionRate: visits.size ? actionVisits.size / visits.size : 0,
+    actionPageViews: actionPageViews.size,
+    actionRate: pageViews.size ? actionPageViews.size / pageViews.size : 0,
     formStarts: events.filter((event) => event.eventType === "form_start").length,
     engagedSeconds: Math.round(events.filter((event) => event.eventType === "engagement")
       .reduce((sum, event) => sum + numberProperty(event, "engagedMs") / 1000, 0)),
@@ -197,15 +188,12 @@ function rows(events: AnalyticsEvent[], keyFor: (event: AnalyticsEvent) => strin
     return {
       key,
       label: labelFor(key),
-      visitors: summary.visitors,
-      visits: summary.visits,
       pageViews: summary.pageViews,
       customerActions: summary.customerActions,
       actionRate: summary.actionRate,
-      engagedSeconds: summary.engagedSeconds,
-      exits: scoped.filter((event) => event.eventType === "engagement").length
+      engagedSeconds: summary.engagedSeconds
     };
-  }).sort((left, right) => right.visits - left.visits || right.customerActions - left.customerActions).slice(0, 100);
+  }).sort((left, right) => right.pageViews - left.pageViews || right.customerActions - left.customerActions || left.key.localeCompare(right.key)).slice(0, 100);
 }
 
 function trend(events: AnalyticsEvent[], query: AnalyticsReportQuery) {
@@ -216,24 +204,24 @@ function trend(events: AnalyticsEvent[], query: AnalyticsReportQuery) {
   }
   return [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([bucket, scoped]) => ({
     bucket,
-    visits: new Set(scoped.map((event) => event.visitId)).size,
+    pageViews: new Set(scoped.filter((event) => event.eventType === "page_view").map((event) => event.pageViewId)).size,
     customerActions: scoped.filter((event) => analyticsActionTypes.has(event.eventType as AnalyticsActionType)).length
   }));
 }
 
 function recommendations(report: AnalyticsReport) {
   if (
-    report.current.visits < analyticsSufficiency.recommendations.visits
+    report.current.pageViews < analyticsSufficiency.recommendations.pageViews
     || report.current.customerActions < analyticsSufficiency.recommendations.actions
   ) return [];
   const result = [];
   const leadingChannel = report.channels[0];
-  if (leadingChannel && leadingChannel.visits >= analyticsSufficiency.recommendations.visits) {
+  if (leadingChannel && leadingChannel.pageViews >= analyticsSufficiency.recommendations.pageViews) {
     result.push({
       key: `channel:${leadingChannel.key}`,
       title: `${leadingChannel.label} is the leading source`,
-      detail: `Protect the message and landing experience that is converting this traffic.`,
-      denominator: `${leadingChannel.customerActions} actions from ${leadingChannel.visits} visits`
+      detail: "Review this source alongside its observed actions; page-level attribution does not measure customer acquisition.",
+      denominator: `${leadingChannel.customerActions} actions across ${leadingChannel.pageViews} page views`
     });
   }
   const leadingPage = report.pages.find((page) => page.customerActions >= analyticsSufficiency.recommendations.actions);
@@ -242,7 +230,7 @@ function recommendations(report: AnalyticsReport) {
       key: `page:${leadingPage.key}`,
       title: `${leadingPage.label} helps visitors act`,
       detail: "Keep its primary action prominent and use the same proof pattern on related pages.",
-      denominator: `${leadingPage.customerActions} actions across ${leadingPage.visits} visits`
+      denominator: `${leadingPage.customerActions} actions across ${leadingPage.pageViews} page views`
     });
   }
   return result.slice(0, 2);
@@ -305,7 +293,7 @@ function actionLabel(value: string) {
 }
 
 function pageLabel(value: string) {
-  return value === "/" ? "Homepage" : titleCase(value.replace(/^\/+/, "").replaceAll("-", " ").replaceAll("/", " / "));
+  return value === "/" ? "Homepage" : value;
 }
 
 function titleCase(value: string) {
@@ -322,16 +310,14 @@ function emptyCollectionHealth(): AnalyticsCollectionHealth {
 
 function databaseTotals(value: unknown): AnalyticsTotals {
   const item = isRecord(value) ? value : {};
-  const visits = integer(item.visits);
-  const actionVisits = integer(item.actionVisits ?? item.action_visits);
+  const pageViews = integer(item.page_views);
+  const actionPageViews = integer(item.action_page_views);
   return {
-    visitors: integer(item.visitors),
-    visits,
-    pageViews: integer(item.pageViews ?? item.page_views),
+    pageViews,
     leads: integer(item.leads),
     customerActions: integer(item.customerActions ?? item.customer_actions),
-    actionVisits,
-    actionRate: number(item.actionRate ?? item.action_rate) || (visits ? actionVisits / visits : 0),
+    actionPageViews,
+    actionRate: pageViews ? actionPageViews / pageViews : 0,
     formStarts: integer(item.formStarts ?? item.form_starts),
     engagedSeconds: integer(item.engagedSeconds ?? item.engaged_seconds),
     medianSecondsToAction: nullableNumber(item.medianSecondsToAction ?? item.median_seconds_to_action)
@@ -342,13 +328,10 @@ function databaseRows(value: unknown): AnalyticsReportRow[] {
   return array(value).map((item) => ({
     key: text(item.key),
     label: text(item.label),
-    visitors: integer(item.visitors),
-    visits: integer(item.visits),
     pageViews: integer(item.pageViews ?? item.page_views),
     customerActions: integer(item.customerActions ?? item.customer_actions),
     actionRate: number(item.actionRate ?? item.action_rate),
-    engagedSeconds: integer(item.engagedSeconds ?? item.engaged_seconds),
-    exits: integer(item.exits)
+    engagedSeconds: integer(item.engagedSeconds ?? item.engaged_seconds)
   }));
 }
 

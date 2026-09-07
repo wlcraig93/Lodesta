@@ -1,12 +1,30 @@
 # Generated-site authoring status
 
-Date: 2026-09-06
+Date: 2026-09-07
 
 ## Current decision: generator still under evaluation
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current continuation: onboarding released; publication response defect isolated
+### Current continuation: privacy-minimal analytics and version binding verified locally
+
+The owner selected privacy-minimal analytics: no analytics cookies, local/session storage, persistent visitor identifiers, returning-browser reports or cross-page attribution. The existing runtime and reports now use per-document, in-memory page-load context. Forms remain independently deliverable. No second analytics service, consent platform or authoring orchestration was added.
+
+The read-only cutover report found zero active published sites and zero hosted/local analytics events. The forward migration rechecks emptiness under lock without deleting data. Rolled-back database fixtures verify local/hosted report parity, atomic form analytics, and inquiry persistence without analytics; no test events or inquiries were retained. All 807 routes across 24 retained versions passed the root-context audit without modification.
+
+The public-serving correction binds the exact published version only after verifying artifact bytes. The real finalizer/public GET/browser fixture passes nested routes, custom-domain metadata, exact form version context, stale-version rejection, paused-site exclusion and empty anonymous storage. Full local preflight, final TypeScript/build, architecture/database/deployment checks and smoke pass. The smoke fixture was updated to the new payload while retaining an explicit old-identity rejection check. Coordinated deployment remains pending. A new audited runtime patch will preserve prior runtime bytes. See [storage and disclosure audit](generated-site-storage-and-disclosures.md).
+
+One additional Lodesta-owned inquiry test is authorized only without external notifications; it has not run. The prior disposed site will not be republished. The authenticated inbox and hosted analytics path remain to be verified after deployment. The fixed eight-build/six-business quality screen is still unstarted, so this is not customer-launch acceptance.
+
+### Earlier continuation: publication fixed; runtime version-context gap found
+
+The timestamp correction is deployed in `06e2bcbfd64a35d2f2c4ac15787611f331c998d5`. CI `34061131219` and coordinated release `34061434446` passed. Both Railway services reported that exact SHA, required deep health passed, sandbox `sandbox_deployment_c096e2f91f9cdcb7531f42781c178fc4` was promoted, and maintenance was released.
+
+The next Lodesta-owned canary successfully created, edited and published `version_5921f2f377ab53a72f892daf6d5905a3`. Its one approved synthetic inquiry was accepted and independently verified in the database. The test then exposed missing browser version context: the real public HTML lacks the attribute required by the trusted runtime, while the isolated runtime fixture supplied it manually. Forms can resolve the active version server-side, but analytics never initializes on this path even when enabled. The authenticated inbox UI remains unverified. See [published-page version context](published-site-version-context.md).
+
+The temporary site was disposed through the owner API and returns 404; history remains retained. No second inquiry has been sent. Permission for one additional inquiry and a decision on restoring configured analytics/storage versus keeping analytics off have been requested. No runtime or collection change has been deployed. These workflow observations do not satisfy the still-unstarted eight-run/six-business quality screen.
+
+### Earlier continuation: onboarding released; publication response defect isolated
 
 Release `4f94a240df02718efe5dfd315451159b9edee4be` passed CI and coordinated release `34032890087`. Both Railway services reported the exact SHA before sandbox promotion; required deep health passed and maintenance was released. The hydration correction now passes the hosted creation handoff.
 

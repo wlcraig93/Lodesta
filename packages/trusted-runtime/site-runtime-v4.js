@@ -11,7 +11,7 @@
     || location.pathname.startsWith("/api/site-agent/");
   const internalAgent = /\bLodesta(?:WebsiteCrawler|WebsiteAssessment|RenderInspection|RetainedSiteVerifier)\b/i.test(navigator.userAgent);
   const analyticsAllowed = Boolean(siteId && versionId && analyticsEnabled && !previewContext && !internalAgent);
-  const visit = analyticsAllowed ? visitContext() : null;
+  const page = analyticsAllowed ? pageContext() : null;
   const pageStartedAt = Date.now();
   let activeStartedAt = document.visibilityState === "visible" ? pageStartedAt : 0;
   let engagedMs = 0;
@@ -263,11 +263,11 @@
     sendEngagement();
   });
 
-  track("page_view", { returning: Boolean(visit && !visit.isNewVisitor) });
+  track("page_view", {});
   observeWebVitals();
 
   function track(eventType, properties) {
-    if (!analyticsAllowed || !visit) return;
+    if (!analyticsAllowed || !page) return;
     const body = JSON.stringify({
       ...analyticsContext(newEventId()),
       siteId,
@@ -282,16 +282,14 @@
   }
 
   function analyticsContext(eventId) {
-    if (!visit) return {};
+    if (!page) return {};
     return {
       eventId,
-      visitorId: visit.visitorId,
-      visitId: visit.visitId,
-      landingPath: visit.landingPath,
-      referrerHost: visit.referrerHost,
-      utmSource: visit.utmSource,
-      utmMedium: visit.utmMedium,
-      utmCampaign: visit.utmCampaign,
+      pageViewId: page.id,
+      referrerHost: page.referrerHost,
+      utmSource: page.utmSource,
+      utmMedium: page.utmMedium,
+      utmCampaign: page.utmCampaign,
       deviceCategory: deviceCategory(),
       elapsedMs: Math.max(0, Date.now() - pageStartedAt)
     };
@@ -310,54 +308,16 @@
     }).catch(() => {});
   }
 
-  function visitContext() {
-    const now = Date.now();
-    const visitorKey = `lodesta_analytics_visitor_${siteId}`;
-    const visitKey = `lodesta_analytics_visit_${siteId}`;
-    const visitorTtl = 395 * 24 * 60 * 60 * 1000;
-    let visitor = readStorage(visitorKey);
-    const isNewVisitor = !visitor || !visitor.id || visitor.expiresAt <= now;
-    if (isNewVisitor) visitor = { id: newEventId(), firstSeenAt: now, expiresAt: now + visitorTtl };
-    visitor.expiresAt = now + visitorTtl;
-
-    let current = readStorage(visitKey);
-    if (!current || !current.id || now - current.lastActivityAt >= 30 * 60 * 1000) {
-      const params = new URLSearchParams(location.search);
-      const referrerHost = externalReferrerHost();
-      const observedAttribution = {
-        referrerHost,
-        utmSource: cleanParam(params.get("utm_source")),
-        utmMedium: cleanParam(params.get("utm_medium")),
-        utmCampaign: cleanParam(params.get("utm_campaign"))
-      };
-      const hasObservedAttribution = Boolean(
-        observedAttribution.referrerHost || observedAttribution.utmSource || observedAttribution.utmMedium
-      );
-      if (hasObservedAttribution) visitor.lastNonDirect = observedAttribution;
-      const attribution = hasObservedAttribution ? observedAttribution : visitor.lastNonDirect || {};
-      current = {
-        id: newEventId(),
-        lastActivityAt: now,
-        landingPath: location.pathname,
-        referrerHost: attribution.referrerHost,
-        utmSource: attribution.utmSource,
-        utmMedium: attribution.utmMedium,
-        utmCampaign: attribution.utmCampaign
-      };
-    } else {
-      current.lastActivityAt = now;
-    }
-    writeStorage(visitorKey, visitor);
-    writeStorage(visitKey, current);
+  function pageContext() {
+    // This context lives only in this document. No storage, fingerprint, or
+    // carry-forward attribution connects it to another page or browser visit.
+    const params = new URLSearchParams(location.search);
     return {
-      visitorId: visitor.id,
-      visitId: current.id,
-      isNewVisitor,
-      landingPath: current.landingPath || "/",
-      referrerHost: current.referrerHost || undefined,
-      utmSource: current.utmSource || undefined,
-      utmMedium: current.utmMedium || undefined,
-      utmCampaign: current.utmCampaign || undefined
+      id: newEventId(),
+      referrerHost: externalReferrerHost(),
+      utmSource: cleanParam(params.get("utm_source")),
+      utmMedium: cleanParam(params.get("utm_medium")),
+      utmCampaign: cleanParam(params.get("utm_campaign"))
     };
   }
 
@@ -389,22 +349,6 @@
       paint.observe({ type: "largest-contentful-paint", buffered: true });
     } catch {
       // Unsupported metrics are intentionally omitted.
-    }
-  }
-
-  function readStorage(key) {
-    try {
-      return JSON.parse(localStorage.getItem(key) || "null");
-    } catch {
-      return null;
-    }
-  }
-
-  function writeStorage(key, value) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // Analytics remains non-blocking when storage is unavailable.
     }
   }
 

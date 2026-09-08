@@ -68,6 +68,27 @@ The medium-output run completed with 33 routes, a passed hard gate and $0.294139
 
 ## Acceptance standard
 
+### September 8 affordable-model results and next context treatment
+
+Release `03712416` completed through CI `34173266072` and coordinated release `34173597038`. Web, worker and active sandbox identities were independently checked, deep health passed, maintenance was released, email remained disabled and the live database-selected default remained Luna. The first release canary passed all ten concurrent mutation pairs without a retry. No retained authority or public artifact was rewritten.
+
+Both fresh held-authority treatments finished with a passed hard gate and no observed sandbox replay, recycle or transport timeout:
+
+- Luna `run_f71158ba24164a8eb5267f32025cf141`, version `version_be90e9a61393b2e7f34851fd798bc0d0`: 33 routes, $0.21854814 estimated model cost, 1,668,271 ms recorded execution. Review rejects internal research language, a false photo-upload promise, disproportionate headlines and lost case-study substance despite improvements in footer, service detail and form placement.
+- Terra `run_118a2c73a5354b51a3351072289d5caf`, version `version_44c493a9ba2fa428ffde7abe53888938`: 36 routes, $2.02881856 estimated model cost, 2,075,946 ms recorded execution. Better composition, About content and case-study explanation; still too generic on important service pages, with weak educational prioritization and misdescribed gallery imagery. Two full-gate contrast failures were repaired. The second was a regression from darkening a shared accent without changing its button foreground.
+
+Independent retained-artifact captures cover 99 Luna and 108 Terra route/viewport observations without recorded load errors or horizontal overflow. Both preserve the supported 4.7 Google rating and exact reviews destination. Both omitted authored expanded-state artwork while retaining working navigation state, labels, keyboard/focus behavior and scroll locking; do not describe that as another platform-icon collision. The private arm reviews distinguish delivery work from optional polish. Independent architect draws and n=1 per arm preclude a reliability or isolated model-effect claim. Neither result opens the unchanged eight-run acceptance screen.
+
+Continue with Terra as the next editorial baseline, without changing the live default. The next treatment improves existing context and tool output, not production orchestration:
+
+1. Clarify the single evidence boundary. Mapped first-party sources can support ordinary approved-service scope/process and documented project history, not only biography. Faithful educational explanations are allowed. Keep exact canonical support for sensitive commercial claims and all existing identity, capability, destination and owner-authority restrictions. A project's method or customer experience is not a universal commitment. This addresses a plausible contributor to generic copy; it is not yet a demonstrated causal diagnosis. Do not copy unapproved prices, credentials, guarantees or stale regulatory assertions to make a page longer.
+2. Present inspection findings once, with errors first. Preserve visual and mechanical evidence, scoped routes, distinct examples, every image and raw diagnostic output. Remove only duplicate presentation, including a primary message repeated as its own example. A differing source, selector, message or affected-route set remains evidence. Do not remove the mechanical pass, add a critic, force a tool sequence, or change final verification.
+3. Document the existing navigation CSS state hook beside the SDK contract: `toggleClassName` and `aria-expanded` belong to the rendered button, not the trigger child. Runtime still renders no presentation or fallback artwork; no recipe, component registry or fixed visual template is added.
+
+A read-only replay of Terra's first retained inspection through the actual updated presentation boundary reduces its text from 48,767 to 28,347 bytes (41.9%), while preserving every distinct retained finding and all 40 image blocks byte-for-byte. This is an output-format result, not a model-cost saving or quality claim. Focused fixtures preserve mechanical errors, distinct advisories, images, scope and raw diagnostics. Fresh deployed generation remains the acceptance test; do not reclassify either old output as successful under the new context.
+
+The new distinct-source fixture exposed an existing omission in the deduplication key. It now reuses the source/selector identity already used by root-cause grouping, so identical wording from different sources is not discarded before presentation. No new grouping mechanism or verification rule was introduced. The complete local preflight passed, and typecheck, authoring and focused manager tests were rerun after this correction. The next private Terra generation holds the retained authority, model, reasoning, output detail, toolchain and verification policy fixed; only the documented context/presentation treatment changes.
+
 A customer-ready result needs no material corrective pass before delivery:
 
 - Identity, contact details, geographic scope, services, credentials, quotations, and transactional claims agree with their retained authority. Source material is used accurately and in context.

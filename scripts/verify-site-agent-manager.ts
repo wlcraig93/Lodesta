@@ -102,6 +102,8 @@ assert.match(promptContext.sdk.components.NavigationDisclosure!, /trigger=/);
 assert.match(promptContext.sdk.components.NavigationDisclosure!, /toggleClassName=/);
 assert.match(promptContext.sdk.components.NavigationDisclosure!, /panelClassName=/);
 assert.match(promptContext.sdk.components.NavigationDisclosure!, /navClassName=/);
+assert.match(promptContext.sdk.navigationStateStyling, /toggleClassName and aria-expanded.*rendered button.*not.*child span/i);
+assert.match(promptContext.sdk.navigationStateStyling, /Runtime changes state and labels, not the artwork/i);
 const discussion = createManagerDiscussionContext({
   buildInput,
   message: "Could the homepage feel calmer?",
@@ -118,7 +120,7 @@ assert.equal(websiteManagerDiscussionPromptIdentity, `website-manager-discussion
 assert.notEqual(websiteManagerPromptIdentity, websiteManagerDiscussionPromptIdentity);
 assert.match(websiteManagerDiscussionSystemPrompt, /without modifying source/i);
 assert.doesNotMatch(websiteManagerAuthoringSystemPrompt, /editable.*recipe|recipe provenance|critic agent|automatic repair/i);
-assert.match(websiteManagerAuthoringSystemPrompt, /hundreds of words.*substantive explanatory arc.*three brief snippets.*not a complete route/i);
+assert.match(websiteManagerAuthoringSystemPrompt, /source-backed article or guide.*useful explanatory arc, not a teaser/i);
 assert.match(websiteManagerAuthoringSystemPrompt, /authored TSX and CSS readable, structurally formatted/i);
 
 const taskSkills = {
@@ -145,6 +147,11 @@ const initialGuidance = taskSkills.initial_build.knowledge.join(" ");
 for (const contract of [
   /Owner-authoritative facts outrank retained observations/i,
   /publicFacts support/i,
+  /Mapped first-party pages support.*approved service's scope and process.*documented project history/i,
+  /publicFacts is not a whitelist of every permissible sentence/i,
+  /Exact publicFacts support is still required.*credentials.*prices.*guarantees.*availability.*outcomes/i,
+  /past project's method.*does not establish a universal result or service commitment/i,
+  /Never invent.*services.*upload or booking capabilities.*submission destinations/i,
   /approvedSourceIndex\.liveRoutePaths.*exact internal-route set/i,
   /do not add, remove, merge, or redirect routes/i,
   /sourcePath values are evidence, not destinations.*approvedLinkPath/i,
@@ -388,6 +395,43 @@ assert.equal(forbiddenImportDraft.diagnosticOutput.ok, true);
 assert.equal((await resumedDraftRuntime.execute({ callId: "forbidden-import-finish", name: "finish",
   arguments: { ownerMessage: "Finished" } })).diagnosticOutput.ok, false);
 assert.equal(draftBuildCalls, 2, "Forbidden imports were executed instead of rejected at the build boundary.");
+
+// Mechanical and visual evidence remain present, once, before the unchanged
+// images. This is output deduplication, not a new inspection or repair phase.
+const mechanicalBlocker = { id: "fact.fixture", severity: "error", area: "fact", route: "/", message: "Exact fact mismatch." };
+const sharedWarning = { id: "render.fixture", severity: "warning", area: "render", route: "/", message: "Distinct visible spacing finding." };
+const mechanicalWarning = { id: "advisory.fixture", severity: "warning", area: "route", route: "/other", message: "Distinct source-context finding." };
+const differentSourceWarning = { ...sharedWarning, sourceId: "another-retained-source" };
+const visualError = { id: "render.contrast", severity: "error", area: "render", route: "/", message: "Exact contrast failure at desktop." };
+const image = { type: "input_image", image_url: "data:image/png;base64,fixture", detail: "high" } as const;
+const feedbackRuntime = new WorkspaceManagerRuntime<string>({
+  ...draftOptions,
+  visualInspectionFeedback: "component-diagnostic-route-family-quality-led",
+  inspect: async () => ({ passed: false, inspectionHash: `sha256:${"d".repeat(64)}`,
+    modelSummary: { blockers: [mechanicalBlocker], advisories: [sharedWarning, mechanicalWarning, differentSourceWarning] },
+    diagnosticSummary: { findings: [mechanicalBlocker, sharedWarning, mechanicalWarning] }, checkpoint: "not-passed" }),
+  inspectVisual: async () => ({ inspectionHash: `sha256:${"e".repeat(64)}`,
+    modelSummary: { routes: ["/", "/other"], inspectedRoutes: ["/"], findings: [sharedWarning, visualError] },
+    diagnosticSummary: { findings: [sharedWarning, visualError] }, images: [image] })
+});
+const combinedFeedback = await feedbackRuntime.execute({ callId: "single-feedback-list", name: "inspect_site", arguments: {} });
+assert(Array.isArray(combinedFeedback.modelOutput));
+const modelFeedback = JSON.parse(String(combinedFeedback.modelOutput[0].text));
+assert.equal(modelFeedback.ok, false);
+assert.equal(modelFeedback.blockingFindings, undefined);
+assert.equal(modelFeedback.advisoryFindings, undefined);
+assert.equal(modelFeedback.findings.length, 5);
+assert.equal(modelFeedback.returnedFindingCount, 5);
+assert.deepEqual(modelFeedback.findings.map((finding: { id: string }) => finding.id).sort(),
+  [mechanicalBlocker.id, sharedWarning.id, sharedWarning.id, mechanicalWarning.id, visualError.id].sort());
+assert(modelFeedback.findings.some((finding: { sourceId?: string }) => finding.sourceId === differentSourceWarning.sourceId));
+assert(modelFeedback.findings.every((finding: { message: string; exampleMessages?: string[] }) =>
+  !finding.exampleMessages?.includes(finding.message)), "Primary messages were duplicated as their own examples.");
+assert.deepEqual(combinedFeedback.modelOutput.slice(1), [image]);
+assert.deepEqual(combinedFeedback.diagnosticOutput.findings, [sharedWarning, visualError]);
+assert(Array.isArray(combinedFeedback.diagnosticOutput.blockingFindings));
+assert.equal(modelFeedback.visualScope, "targeted");
+assert.equal(modelFeedback.mechanicalScope, "all-routes");
 
 const requiredDestinations = {
   path: "src/required-destinations.tsx",

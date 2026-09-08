@@ -833,6 +833,24 @@ function visualInspectionResult(
     ...mechanicalAdvisories,
     ...visualFindings.filter((finding) => finding.severity === "warning")
   ]);
+  // One model-facing list, not a visual list repeated in separate blocker and
+  // advisory lists. Keep raw diagnostics and the actual inspection unchanged.
+  const visualEvidence = visualFindings;
+  const findings = [...visualEvidence, ...[...mechanicalBlockers, ...mechanicalAdvisories].filter((finding) =>
+    // Drop only a complete subset of an existing visual record. A different
+    // message, source, selector or affected-route set remains separate evidence.
+    !finding || typeof finding !== "object" || Array.isArray(finding)
+      || !visualEvidence.some((visual) => Object.entries(finding).every(([key, value]) =>
+        stableJson(visual[key]) === stableJson(value)))
+  )].sort((left, right) =>
+    (recordValue(left).severity === "error" ? 0 : 1) - (recordValue(right).severity === "error" ? 0 : 1)
+  ).map((finding) => {
+    if (!finding || typeof finding !== "object" || Array.isArray(finding)) return finding;
+    const { exampleMessages, ...rest } = finding as Record<string, unknown>;
+    if (!Array.isArray(exampleMessages)) return finding;
+    const additional = exampleMessages.filter((message) => message !== rest.message);
+    return additional.length ? { ...rest, exampleMessages: additional } : rest;
+  });
   const summary = {
     ...modelSummary,
     ok: mechanicalInspection?.passed !== false,
@@ -840,8 +858,8 @@ function visualInspectionResult(
     mechanicalCached,
     buildPerformed,
     previewPath,
-    blockingFindings,
-    advisoryFindings,
+    findings,
+    returnedFindingCount: findings.length,
     mechanicalInspection: mechanicalInspection ? {
       passed: mechanicalInspection.passed,
       inspectionHash: mechanicalInspection.inspectionHash

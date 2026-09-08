@@ -85,6 +85,7 @@ function verificationFindingKey(value: unknown) {
     normalized(finding.code ?? finding.id ?? "unknown"),
     normalized(finding.severity ?? "unknown"),
     normalized(finding.area ?? "unknown"),
+    normalizedFindingSource(finding),
     normalized(finding.route ?? finding.path ?? "site"),
     normalized(finding.message ?? value)
   ].join("\u0000");

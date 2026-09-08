@@ -357,6 +357,33 @@ const legalPlan = siteArchitecturePlanSchema.parse({
 const legalIndex = createArchitectureEvidenceFiles([...pages, legalPage], legalPlan, {
   retainedContentMode: "indexed-pull-preview-author-digest"
 })[1]!.content;
+const approvedDocumentReference = {
+  path: legalPage.path,
+  contentHash: `sha256:${"a".repeat(64)}`,
+  approvalSourceId: "source_owner_replacement",
+  sourceSnapshotId: legalPage.sourceSnapshotId,
+  sourcePageId: legalPage.id,
+  sourceTextHash: legalPage.textContentHash!,
+  ownerOperationalRevision: 2,
+  contentFile: "source-site/owner-approved/source_owner_replacement.md"
+};
+const ownerDocumentIndex = createArchitectureEvidenceFiles([...pages, legalPage], legalPlan, {
+  retainedContentMode: "indexed-pull-preview-readable",
+  approvedDocuments: [approvedDocumentReference]
+})[1]!.content;
+assert(ownerDocumentIndex.includes(approvedDocumentReference.contentFile), "The source index hides the current owner-approved document.");
+assert(!ownerDocumentIndex.includes("source-site/source_test/pages/page_privacy_policy.md"),
+  "An author-facing document pointer still selects the superseded source text.");
+assert(!ownerDocumentIndex.includes("We collect information submitted through the contact form"),
+  "The route preview still presents superseded legal text as current evidence.");
+assert.equal(ownerDocumentIndex.split(approvedDocumentReference.contentFile).length - 1, 3,
+  "The source-sensitive, route-to-file and detailed source pointers must all select owner authority.");
+const unmatchedDocumentIndex = createArchitectureEvidenceFiles([...pages, legalPage], legalPlan, {
+  retainedContentMode: "indexed-pull-preview-readable",
+  approvedDocuments: [{ ...approvedDocumentReference, sourceSnapshotId: "another_snapshot" }]
+})[1]!.content;
+assert(!unmatchedDocumentIndex.includes(approvedDocumentReference.contentFile),
+  "A path-only match substituted a document from a different retained authority.");
 assert.match(legalIndex, /"sourceSensitiveDocuments": \[/);
 assert.match(legalIndex, /"routePath": "\/privacy-policy"[\s\S]*"contentFiles": \[[\s\S]*source-site\/source_test\/pages\/page_privacy_policy\.md/);
 assert.match(legalIndex, /"routeSourceFiles": \[[\s\S]*"routePath": "\/ant-control"[\s\S]*source-site\/source_test\/pages\/page_ant\.md/);

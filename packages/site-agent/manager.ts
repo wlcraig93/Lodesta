@@ -1417,7 +1417,7 @@ export const websiteManagerTools: Tool[] = [
       url: { type: "string", maxLength: 2048 }
     }
   }),
-  tool("write_file", "Create or replace one complete source file. Prefer edit_file for a targeted change to an existing file.", {
+  tool("write_file", "Save one complete draft source file. A draft may be temporarily unbuildable; inspect_site and finish validate it before execution. Prefer edit_file for a targeted change to an existing file.", {
     type: "object", additionalProperties: false, required: ["path", "content"],
     properties: { path: sourcePathSchema, content: { type: "string" } }
   }),

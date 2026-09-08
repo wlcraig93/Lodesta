@@ -1133,7 +1133,8 @@ export class SiteAuthoringWorkflow {
         run = preparedArchitecture.run;
         if (preparedArchitecture.architecture) {
           const evidenceFiles = createArchitectureEvidenceFiles(websitePages, preparedArchitecture.architecture.plan, {
-            retainedContentMode: retainedContentModeForAuthoringProfile(initialBuildProfile)
+            retainedContentMode: retainedContentModeForAuthoringProfile(initialBuildProfile),
+            approvedDocuments: authoringContext.ownerAuthority.approvedDocuments
           });
           currentFiles = mergeArchitectureEvidenceFiles(currentFiles, evidenceFiles);
           releasePlan = createArchitectureReleasePlan(preparedArchitecture.architecture.plan, {

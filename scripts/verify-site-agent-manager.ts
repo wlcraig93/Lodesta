@@ -244,7 +244,7 @@ const mutationRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
   publicBuildInputId: "input_source_mutation",
   toolchainVersion: "toolchain-test",
-  sandboxImageDigest: `sha256:${"a".repeat(64)}`,
+  sandboxImageDigest: `sha256:${"a".repeat(64)}` as const,
   initialSandboxRevision: "sandbox_source_mutation_1",
   initialFiles: [
     { path: "src/site.tsx", content: validMutationSite },
@@ -297,10 +297,8 @@ const brokenJsxEdit = await mutationRuntime.execute({
     }]
   }
 });
-assert.equal(brokenJsxEdit.diagnosticOutput.ok, false);
-assert.equal(brokenJsxEdit.diagnosticOutput.error, "source_validation_failed");
-assert.equal(brokenJsxEdit.diagnosticOutput.workspaceUnchanged, true);
-assert.equal(mutationRuntime.currentFiles().find((file) => file.path === "src/site.tsx")?.content, validMutationSite);
+assert.equal(brokenJsxEdit.diagnosticOutput.ok, true);
+assert(mutationRuntime.currentFiles().find((file) => file.path === "src/site.tsx")?.content.includes("<div>Broken</main>"));
 const brokenCssPatch = await mutationRuntime.execute({
   callId: "broken-css-patch",
   name: "apply_patch",
@@ -311,22 +309,85 @@ const brokenCssPatch = await mutationRuntime.execute({
     ]
   }
 });
-assert.equal(brokenCssPatch.diagnosticOutput.ok, false);
-assert.equal(brokenCssPatch.diagnosticOutput.error, "source_validation_failed");
-assert.equal(brokenCssPatch.diagnosticOutput.workspaceUnchanged, true);
-assert.equal(mutationRuntime.currentFiles().find((file) => file.path === "src/site.tsx")?.content, validMutationSite,
-  "An invalid multi-file patch partially mutated the workspace.");
+assert.equal(brokenCssPatch.diagnosticOutput.ok, true);
+assert.equal(mutationRuntime.currentFiles().find((file) => file.path === "src/site.tsx")?.content, validMutationSite.replace("Home", "Updated"));
+assert.equal(mutationRuntime.currentFiles().find((file) => file.path === "src/styles.css")?.content, "body { color: #123;",
+  "A multi-file draft was not saved atomically.");
 const validCssEdit = await mutationRuntime.execute({
   callId: "valid-css",
   name: "edit_file",
   arguments: {
     path: "src/styles.css",
-    expectedContentHash: sha256("body { color: #123; }"),
+    expectedContentHash: sha256("body { color: #123;"),
     edits: [{ startLine: 1, endLine: 1, content: "body { color: #234; }" }]
   }
 });
 assert.equal(validCssEdit.diagnosticOutput.ok, true);
 assert.equal(mutationRuntime.currentFiles().find((file) => file.path === "src/styles.css")?.content, "body { color: #234; }");
+
+// A draft is data, not an executable artifact. A small policy error must not
+// discard a complete first write and force the model to regenerate its copy.
+let draftBuildCalls = 0;
+let draftInspectionCalls = 0;
+const draftOptions = {
+  kind: "initial_build" as const,
+  publicBuildInputId: "input_editable_draft",
+  toolchainVersion: "toolchain-test",
+  sandboxImageDigest: `sha256:${"a".repeat(64)}` as const,
+  initialSandboxRevision: "draft_revision_0",
+  initialFiles: [
+    { path: "src/site.tsx", content: validMutationSite },
+    { path: "src/styles.css", content: "body { color: #123; }" }
+  ],
+  applyBuild: async () => ({ revision: `draft_revision_${++draftBuildCalls}`, buildDurationMs: 0, previewPath: "/preview" }),
+  inspect: async () => {
+    draftInspectionCalls += 1;
+    return { passed: true, inspectionHash: `sha256:${"b".repeat(64)}` as const,
+      modelSummary: {}, diagnosticSummary: {}, checkpoint: "verified-draft" };
+  },
+  inspectVisual: async () => ({ inspectionHash: `sha256:${"c".repeat(64)}` as const,
+    modelSummary: { routes: ["/"], inspectedRoutes: ["/"], findings: [] }, diagnosticSummary: {} })
+};
+const draftRuntime = new WorkspaceManagerRuntime<string>(draftOptions);
+await draftRuntime.execute({ callId: "valid-before-draft", name: "inspect_site", arguments: {} });
+assert.equal(draftBuildCalls, 1);
+assert.equal(draftInspectionCalls, 1);
+const draftBody = "Distinct retained source explanation. ".repeat(500);
+const invalidDraft = [
+  `const sections = { home: ${JSON.stringify(draftBody)} };`,
+  "export function sectionFor(route: string) { return sections[route]; }"
+].join("\n");
+const savedDraft = await draftRuntime.execute({ callId: "first-draft", name: "write_file",
+  arguments: { path: "src/sections.ts", content: invalidDraft } });
+assert.equal(savedDraft.diagnosticOutput.ok, true, "A first draft was discarded before the model could edit its small error.");
+assert.equal(draftRuntime.currentFiles().find(file => file.path === "src/sections.ts")?.content, invalidDraft);
+assert.equal(savedDraft.diagnosticOutput.contentHash, sha256(invalidDraft));
+const blockedDraftInspection = await draftRuntime.execute({ callId: "invalid-draft-inspection", name: "inspect_site", arguments: {} });
+assert.equal(blockedDraftInspection.diagnosticOutput.ok, false);
+const blockedDraftFinish = await draftRuntime.execute({ callId: "invalid-draft-finish", name: "finish", arguments: { ownerMessage: "Finished" } });
+assert.equal(blockedDraftFinish.diagnosticOutput.ok, false);
+assert.equal(draftBuildCalls, 1, "Invalid draft source reached sandbox execution.");
+assert.equal(draftInspectionCalls, 1, "Invalid draft reused a previously successful inspection.");
+assert.equal(draftRuntime.snapshot().sandboxRevision, "draft_revision_1", "Invalid draft changed the last valid sandbox revision.");
+assert.throws(() => draftRuntime.finalCheckpoint(), /manager_finished_without_passing_checkpoint/);
+const resumedDraftRuntime = new WorkspaceManagerRuntime<string>({ ...draftOptions, initialSnapshot: draftRuntime.snapshot() });
+const repairedDraft = await resumedDraftRuntime.execute({ callId: "repair-one-line", name: "edit_file", arguments: {
+  path: "src/sections.ts", expectedContentHash: sha256(invalidDraft),
+  edits: [{ startLine: 2, endLine: 2, content: "export function sectionFor(route: string) { return sections.home; }" }]
+} });
+assert.equal(repairedDraft.diagnosticOutput.ok, true);
+assert.equal(resumedDraftRuntime.currentFiles().find(file => file.path === "src/sections.ts")?.content,
+  invalidDraft.replace("sections[route]", "sections.home"), "A one-line correction changed the retained source body.");
+const repairedInspection = await resumedDraftRuntime.execute({ callId: "repaired-draft-inspection", name: "inspect_site", arguments: {} });
+assert.equal(repairedInspection.diagnosticOutput.ok, true);
+assert.equal(draftBuildCalls, 2);
+assert.equal(draftInspectionCalls, 2);
+const forbiddenImportDraft = await resumedDraftRuntime.execute({ callId: "forbidden-import-draft", name: "write_file",
+  arguments: { path: "src/forbidden.ts", content: 'import fs from "node:fs"; export const secret = fs.readFileSync("/private", "utf8");' } });
+assert.equal(forbiddenImportDraft.diagnosticOutput.ok, true);
+assert.equal((await resumedDraftRuntime.execute({ callId: "forbidden-import-finish", name: "finish",
+  arguments: { ownerMessage: "Finished" } })).diagnosticOutput.ok, false);
+assert.equal(draftBuildCalls, 2, "Forbidden imports were executed instead of rejected at the build boundary.");
 
 const requiredDestinations = {
   path: "src/required-destinations.tsx",

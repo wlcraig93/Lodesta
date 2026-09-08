@@ -4,7 +4,6 @@ import {
   isSiteAuthoringTerminalError,
   managerCompletionSchema,
   managerToolArguments,
-  validateWorkspaceSourcePolicy,
   workspaceSourceFileSchema,
   type ManagerCompletion,
   type ManagerRunRequest,
@@ -399,8 +398,8 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (this.files.get(file.path) === file.content) {
       return result({ ok: true, unchanged: true, path: file.path, contentHash: sha256(file.content), workspaceHash: this.workspaceHash });
     }
-    const rejected = invalidSourceMutation(file);
-    if (rejected) return rejected;
+    // Draft source is editable data. assertCompleteWorkspace in build() checks
+    // syntax and source policy before any sandbox execution or inspection.
     this.files.set(file.path, file.content);
     this.mutated();
     return result({ ok: true, path: file.path, contentHash: sha256(file.content), workspaceHash: this.workspaceHash });
@@ -428,8 +427,6 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       if (change.content === null) next.delete(path);
       else {
         const file = workspaceSourceFileSchema.parse({ path, content: change.content });
-        const rejected = invalidSourceMutation(file);
-        if (rejected) return rejected;
         next.set(path, file.content);
       }
     }
@@ -503,8 +500,6 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         guidance: "This stylesheet is one long source line, so replacing line 1 would discard most existing styles. To append CSS, insert at EOF with startLine 2 and endLine 1. To replace it intentionally, use write_file with the complete stylesheet."
       });
     }
-    const rejected = invalidSourceMutation({ path: parsed.path, content: nextContent });
-    if (rejected) return rejected;
     this.files.set(parsed.path, nextContent);
     this.mutated();
     return result({
@@ -1403,22 +1398,6 @@ function hasVisualBlocker(summary: Record<string, unknown>) {
 
 function numericCount(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
-}
-
-function invalidSourceMutation(file: WorkspaceSourceFile): ManagerToolExecution | undefined {
-  const findings = validateWorkspaceSourcePolicy([file]).filter((finding) => (
-    finding.id !== "source.required_file"
-    && finding.path === file.path
-  ));
-  if (!findings.length) return undefined;
-  return result({
-    ok: false,
-    error: "source_validation_failed",
-    path: file.path,
-    workspaceUnchanged: true,
-    findings,
-    guidance: "The mutation was not applied. Correct every reported source-policy or syntax finding and retry against the same current file hash."
-  });
 }
 
 function result(value: Record<string, unknown>): ManagerToolExecution {

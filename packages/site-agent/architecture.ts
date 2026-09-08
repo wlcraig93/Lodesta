@@ -10,6 +10,7 @@ import type { WorkspaceSourceFile } from "./contracts";
 import { sourceWorkspaceContentFilePaths } from "./source-workspace";
 import { normalizeSiteRedirectPath } from "@/packages/platform-operations/contracts";
 import { isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
+import type { ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
 
 export const siteArchitectureModelId = "gpt-5.6-luna" as const;
 
@@ -604,7 +605,10 @@ export function parseApprovedArchitectureModule(content: string): SiteArchitectu
 export function createArchitectureEvidenceFiles(
   pages: SourceSnapshotPage[],
   plan: SiteArchitecturePlan,
-  input: { retainedContentMode?: "embedded" | "pull" | "indexed-pull" | "indexed-pull-preview" | "indexed-pull-preview-readable" | "indexed-pull-preview-author-digest" } = {}
+  input: {
+    retainedContentMode?: "embedded" | "pull" | "indexed-pull" | "indexed-pull-preview" | "indexed-pull-preview-readable" | "indexed-pull-preview-author-digest";
+    approvedDocuments?: ReadonlyArray<Omit<ApprovedSourceDocument, "text">>;
+  } = {}
 ): WorkspaceSourceFile[] {
   const architectureModule = `${approvedArchitectureModulePrefix}${JSON.stringify(plan)}${approvedArchitectureModuleSuffix}`;
   if (input.retainedContentMode === "pull") {
@@ -617,6 +621,7 @@ export function createArchitectureEvidenceFiles(
     || input.retainedContentMode === "indexed-pull-preview-author-digest"
   ) {
     const sourceIndex = createApprovedSourceIndex(pages, plan, {
+      approvedDocuments: input.approvedDocuments,
       includePreviews: input.retainedContentMode !== "indexed-pull",
       authorDigest: input.retainedContentMode === "indexed-pull-preview-author-digest",
       // The readable index is the canonical workspace author's evidence map.
@@ -655,6 +660,7 @@ function createApprovedSourceIndex(
     authorDigest?: boolean;
     previewCharacters?: number;
     previewLines?: number;
+    approvedDocuments?: ReadonlyArray<Omit<ApprovedSourceDocument, "text">>;
   } = {}
 ) {
   const bestByPath = new Map<string, SourceSnapshotPage>();
@@ -665,6 +671,15 @@ function createApprovedSourceIndex(
     if (!current || page.wordCount > current.wordCount) bestByPath.set(path, page);
   }
   const retainedPages = [...bestByPath.values()];
+  // These references have already been resolved against the immutable owner
+  // approval chain. Keep every author-facing pointer on that current document;
+  // the original scraped page remains retained as historical evidence.
+  const approvedDocumentFor = (page: SourceSnapshotPage) => input.approvedDocuments?.find(document =>
+    document.sourceSnapshotId === page.sourceSnapshotId && document.sourcePageId === page.id);
+  const contentFilesFor = (page: SourceSnapshotPage) => {
+    const approved = approvedDocumentFor(page);
+    return approved ? [approved.contentFile] : sourceWorkspaceContentFilePaths(page);
+  };
   const lineFrequency = new Map<string, number>();
   if (input.includePreviews) {
     for (const page of retainedPages) {
@@ -676,24 +691,26 @@ function createApprovedSourceIndex(
     const sources = route.sourcePaths.flatMap((sourcePath) => {
       const page = bestByPath.get(canonicalPathname(sourcePath));
       if (!page) return [];
+      const approved = approvedDocumentFor(page);
       return [{
         sourcePath,
         sourceRouteRole: canonicalPathname(sourcePath) === route.path
           ? "approved_live_route" as const
           : "consolidated_evidence_only" as const,
         approvedLinkPath: route.path,
-        title: page.title ?? "",
-        headings: page.headings.slice(0, 24),
-        wordCount: page.wordCount,
+        title: approved ? route.label : page.title ?? "",
+        headings: approved ? undefined : page.headings.slice(0, 24),
+        wordCount: approved ? undefined : page.wordCount,
         sourcePageId: page.id,
-        contentFiles: sourceWorkspaceContentFilePaths(page)
+        authority: approved ? "owner-approved" : undefined,
+        contentFiles: contentFilesFor(page)
       }];
     });
     const evidencePreviews = input.includePreviews
       ? route.sourcePaths
           .flatMap((sourcePath) => {
             const page = bestByPath.get(canonicalPathname(sourcePath));
-            return page ? [{ sourcePath, page }] : [];
+            return page && !approvedDocumentFor(page) ? [{ sourcePath, page }] : [];
           })
           .sort((left, right) =>
             Number(right.sourcePath === route.path) - Number(left.sourcePath === route.path)
@@ -724,13 +741,14 @@ function createApprovedSourceIndex(
     const previewSourcePaths = new Set((evidencePreviews ?? []).map((preview) => preview.sourcePath));
     const indexedSources = input.authorDigest
       ? sources
-          .filter((source) => previewSourcePaths.has(source.sourcePath))
+          .filter((source) => source.authority === "owner-approved" || previewSourcePaths.has(source.sourcePath))
           .map((source) => ({
             sourcePath: source.sourcePath,
             sourceRouteRole: source.sourceRouteRole,
             approvedLinkPath: source.approvedLinkPath,
             title: source.title,
             sourcePageId: source.sourcePageId,
+            authority: source.authority,
             contentFiles: source.contentFiles
           }))
       : sources;
@@ -749,12 +767,15 @@ function createApprovedSourceIndex(
     if (!isLegalSourcePagePath(sourcePath)) return [];
     const page = bestByPath.get(canonicalPathname(sourcePath));
     if (!page) return [];
+    const approved = approvedDocumentFor(page);
     return [{
       routePath: route.path,
       sourcePath,
-      title: page.title ?? "",
-      wordCount: page.wordCount,
-      contentFiles: sourceWorkspaceContentFilePaths(page)
+      title: approved ? route.label : page.title ?? "",
+      wordCount: approved ? undefined : page.wordCount,
+      contentFiles: contentFilesFor(page),
+      ...(approved ? { authority: "owner-approved", contentHash: approved.contentHash,
+        ownerOperationalRevision: approved.ownerOperationalRevision } : {})
     }];
   })).sort((left, right) => left.routePath.localeCompare(right.routePath) || left.sourcePath.localeCompare(right.sourcePath));
   const routeSourceFiles = plan.routes.map((route) => ({
@@ -762,7 +783,7 @@ function createApprovedSourceIndex(
     pageType: route.pageType,
     files: route.sourcePaths.flatMap((sourcePath) => {
       const page = bestByPath.get(canonicalPathname(sourcePath));
-      return page ? sourceWorkspaceContentFilePaths(page) : [];
+      return page ? contentFilesFor(page) : [];
     })
   }));
   return {

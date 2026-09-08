@@ -265,7 +265,13 @@ function validateTypeScript(file: WorkspaceSourcePolicyFile, permittedSdkJsxName
     }
     if (ts.isIdentifier(node) && !isPropertyName(node)) {
       const category = forbiddenReferences.get(node.text);
-      if (category) add(category, `Generated source uses forbidden ${category.replaceAll("_", " ")} behavior.`);
+      if (category) {
+        const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
+        add(
+          category,
+          `Reserved ${category.replaceAll("_", " ")} identifier ${JSON.stringify(node.text)} at ${line + 1}:${character + 1} is forbidden in authored source, including local bindings. Use a different name for local data; the runtime capability remains unavailable.`
+        );
+      }
     }
     ts.forEachChild(node, visit);
   };

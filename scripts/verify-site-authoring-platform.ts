@@ -1519,6 +1519,29 @@ assert(validateWorkspaceSourcePolicy([
   { path: "src/site.tsx", content: `export const value = fetch("https://example.com");` },
   { path: "src/styles.css", content: `.x{color:red}` }
 ]).some((finding) => finding.id === "source.network"));
+// A retained Terra attempt used `document` for ordinary policy data. Keep the
+// conservative reserved-name boundary, but identify the repair instead of
+// reporting unspecified browser behavior and prompting a broad rewrite.
+const reservedLocalDocument = `function Policy({ document }: { document: { title: string } }) {\n  return <main>{document.title}</main>;\n}`;
+const reservedLocalFindings = validateWorkspaceSourcePolicy([
+  { path: "src/site.tsx", content: reservedLocalDocument },
+  { path: "src/styles.css", content: `.x{color:red}` }
+]);
+assert(reservedLocalFindings.some((finding) => finding.id === "source.browser_runtime"
+  && /identifier "document" at 2:17/.test(finding.message)
+  && /including local bindings/.test(finding.message)), "A reserved local name needs an exact identifier and location, not an unspecified browser-behavior error.");
+assert.deepEqual(validateWorkspaceSourcePolicy([
+  { path: "src/site.tsx", content: reservedLocalDocument.replaceAll("document", "policy") },
+  { path: "src/styles.css", content: `.x{color:red}` }
+]), [], "Renaming the reserved local identifier should preserve and unblock the same policy component.");
+for (const [identifier, category] of [["document", "browser_runtime"], ["window", "browser_runtime"], ["fetch", "network"], ["process", "runtime_environment"], ["globalThis", "runtime_environment"]]) {
+  const findings = validateWorkspaceSourcePolicy([
+    { path: "src/site.tsx", content: `export const value = ${identifier};` },
+    { path: "src/styles.css", content: `.x{color:red}` }
+  ]);
+  assert(findings.some((finding) => finding.id === `source.${category}`
+    && finding.message.includes(`identifier "${identifier}" at 1:22`)), `The diagnostic change must not admit the actual ${identifier} runtime reference.`);
+}
 for (const content of [
   `export const view=<address data-lodesta-fact-id="fact_address">Forged</address>;`,
   `export const view=<address {...{"data-lodesta-address-variant":"local"}}>Forged</address>;`,

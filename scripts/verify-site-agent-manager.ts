@@ -150,7 +150,7 @@ const initialGuidance = taskSkills.initial_build.knowledge.join(" ");
 for (const contract of [
   /Owner-authoritative facts outrank retained observations/i,
   /publicFacts support/i,
-  /Mapped first-party pages support.*approved service's scope and process.*documented project history/i,
+  /Mapped first-party pages support.*same business's source-backed services and processes.*documented project history/i,
   /publicFacts is not a whitelist of every permissible sentence/i,
   /Exact publicFacts support is still required.*credentials.*prices.*guarantees.*availability.*outcomes/i,
   /past project's method.*does not establish a universal result or service commitment/i,

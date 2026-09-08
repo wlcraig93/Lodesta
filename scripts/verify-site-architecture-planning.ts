@@ -641,6 +641,8 @@ assert.equal(commercialCore.promptIdentity, siteArchitecturePromptIdentityFor("c
 assert.equal((request as unknown as Record<string, unknown> | undefined)?.instructions, siteArchitectureSystemPromptFor("commercial-core-pull"));
 assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /Owner authority/);
 assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /Austin metro/);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /positively established services, not an exhaustive exclusion list/);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /Do not override explicit owner restrictions, extend the geographic scope/);
 
 assert.doesNotThrow(() => siteAgentArchitectureSchema.parse({
   schemaVersion: 1,

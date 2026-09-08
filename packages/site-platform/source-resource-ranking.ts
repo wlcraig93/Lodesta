@@ -173,9 +173,11 @@ function sourceAssetCandidate(resource: SourceSnapshotResource, page: SourceSnap
     score -= 175;
     reasons.push("filename suggests generic stock photography");
   }
-  if (likelyKind === "other" && firstParty && pageRole === "customer_content" && !excludedArtwork && bytes >= 20_000) {
+  // A source page can host its photographs on a CDN. This is a visual-review
+  // candidate, not an ownership determination or automatic adoption permission.
+  if (likelyKind === "other" && pageRole === "customer_content" && !excludedArtwork && bytes >= 20_000) {
     likelyKind = "photo";
-    reasons.push("substantial first-party customer-page image");
+    reasons.push("substantial customer-page image; inspect pixels and provenance before adoption");
   }
 
   return {

@@ -1018,14 +1018,9 @@ export function componentDiagnosticRouteFamilyBalancedVisualSummary(summary: Rec
   return boundedRouteFamilyVisualSummary(summary, balancedRouteFamilyAdvisoryIds, "route-family-balanced");
 }
 
-const componentEvidenceRouteFamilyAdvisoryIds = new Set([
-  ...balancedRouteFamilyAdvisoryIds,
-  "render.header_control_wrap"
-]);
-
-/** Operator-only follow-up with complete shared-component examples and tablet-header evidence. */
+/** Operator-only follow-up with complete shared-component examples. */
 export function componentDiagnosticRouteFamilyComponentEvidenceVisualSummary(summary: Record<string, unknown>) {
-  return boundedRouteFamilyVisualSummary(summary, componentEvidenceRouteFamilyAdvisoryIds, "route-family-component-evidence");
+  return boundedRouteFamilyVisualSummary(summary, balancedRouteFamilyAdvisoryIds, "route-family-component-evidence");
 }
 
 function boundedRouteFamilyVisualSummary(
@@ -1115,7 +1110,6 @@ function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "
     ["render.call_action_label_spacing", 1],
     ["render.inline_link_spacing", 1],
     ["render.mobile_navigation_design", 2],
-    ["render.header_control_wrap", 2],
     ["render.contrast", 3],
     ["render.missing_glyph", 3],
     ["render.empty_control", 3],

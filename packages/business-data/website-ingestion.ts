@@ -1063,6 +1063,9 @@ function serviceAreaHasGeographicEvidence(
     return false;
   }
   if (page.source === "primary") return true;
+  // Company-story pages may use legacy filenames rather than /about. Their
+  // explicit first-party coverage statement is the evidence, not the filename.
+  if (page.purposeTags.includes("about") && !page.purposeTags.includes("blog")) return true;
   return /^\/(?:about(?:-us)?|contact(?:-us)?|locations?|service-areas?|areas-we-serve)(?:\/|$)/.test(path);
 }
 

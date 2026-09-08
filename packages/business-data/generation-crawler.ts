@@ -834,6 +834,12 @@ function extractResourceReferences(html: string, baseUrl: string) {
   for (const match of html.matchAll(/(?:style\s*=\s*["'][^"']*|<style\b[^>]*>[\s\S]*?<\/style>)/gi)) {
     for (const resource of extractCssResourceReferences(match[0], baseUrl)) resources.push(resource);
   }
+  // Some editors put the original photograph on its gallery container and a
+  // thumbnail in inline CSS. Retain the explicitly supplied URL; do not invent
+  // a larger derivative or execute the editor's lazy-loading JavaScript.
+  for (const tag of html.match(/<[a-z][^>]*\sdata-bgimg\s*=[^>]*>/gi) ?? []) {
+    add(htmlAttribute(tag, "data-bgimg"), "image");
+  }
   return uniqueByUrlRole(resources);
 }
 

@@ -497,6 +497,54 @@ assert.deepEqual(
   new Set(["Bradenton", "Sarasota FL", "Venice", "Port Charlotte FL"]),
   "Narrative prose was admitted as immutable geographic authority."
 );
+
+const storyAreaSummary = {
+  ...summarizeCrawlHtml(`<!doctype html><title>Our Story</title><main>
+    <h1>About Cedar Electric</h1>
+    <p>We serve the Austin &amp; surrounding areas to include Round Rock, Cedar Park, and Georgetown.</p>
+  </main>`, `${authorityOrigin}/our-story.html`),
+  source: "sampled_internal" as const
+};
+assert.deepEqual(storyAreaSummary.extractedFacts.serviceAreas, ["Austin", "Round Rock", "Cedar Park", "Georgetown"],
+  "An explicit list after surrounding areas lost its named markets or retained a composite phrase.");
+const storyAreaCrawl = { ...authorityCrawl, pageSummaries: [storyAreaSummary] };
+const storyAreaIngestion = {
+  ...authorityIngestion,
+  pages: [{ ...authorityIngestion.pages[0]!, url: storyAreaSummary.url, finalUrl: storyAreaSummary.url,
+    summary: storyAreaSummary, evidenceClass: "first_party" as const }]
+};
+const acceptedStoryAreas = (crawl: typeof storyAreaCrawl, ingestion = storyAreaIngestion) =>
+  sourcePreparationDiagnosticsFor(crawl, ingestion).facts
+    .filter((fact) => fact.kind === "service_area" && fact.disposition === "accepted")
+    .map((fact) => String(fact.value));
+assert.deepEqual(acceptedStoryAreas(storyAreaCrawl), ["Austin", "Round Rock", "Cedar Park", "Georgetown"],
+  "An explicit first-party company-story coverage statement was discarded because of a legacy filename.");
+assert.deepEqual(acceptedStoryAreas({ ...storyAreaCrawl,
+  pageSummaries: [{ ...storyAreaSummary, purposeTags: ["about", "blog"] }]
+}), [], "A story-like blog page became geographic authority.");
+assert.deepEqual(sourcePreparationDiagnosticsFor(storyAreaCrawl, {
+  ...storyAreaIngestion,
+  pages: storyAreaIngestion.pages.map((page) => ({ ...page, evidenceClass: "third_party" as const }))
+}).facts.filter((fact) => fact.kind === "service_area" && fact.disposition === "accepted"), [],
+"Third-party text became service-area authority.");
+
+const legacyServiceList = {
+  ...summarizeCrawlHtml(`<!doctype html><title>Services</title><main>
+    <h1>Cedar Electric Services</h1>
+    <h3>Dimmers    Doorbells    Ballasts<br>Grounding   Service Loops<br>Ceiling Fans   Lighting<br>Commercial Tenant (Finish-Out)</h3>
+    <h1>About the company</h1><h3>Unrelated heading</h3>
+  </main>`, `${authorityOrigin}/services.html`),
+  source: "sampled_internal" as const
+};
+const listOfferings = selectSourceOfferingFacts({ ...authorityCrawl, pageSummaries: [legacyServiceList] }, {
+  ...authorityIngestion, pages: [{ ...authorityIngestion.pages[0]!, url: legacyServiceList.url,
+    finalUrl: legacyServiceList.url, summary: legacyServiceList, evidenceClass: "first_party" }]
+}, []);
+assert.deepEqual(new Set(listOfferings.map(o => o.name)), new Set([
+  "Dimmers", "Doorbells", "Ballasts", "Grounding", "Service Loops", "Ceiling Fans", "Lighting", "Commercial Tenant Finish Out"
+]), "An explicit legacy heading list collapsed into an unusable phrase, lost a multiword service, or crossed into the next section.");
+assert(listOfferings.every(o => o.evidence.sourceUrl === legacyServiceList.url && o.evidence.sourceBlockId),
+  "Parsed offerings lost their exact first-party block provenance.");
 assert.deepEqual(
   selectBusinessCategories(["Site Navigation Element", "LocalBusiness"], ["well pump repair"]),
   [],
@@ -956,7 +1004,8 @@ const galleryOriginal = await crawlWebsiteForGeneration({
     const path = new URL(url).pathname;
     if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
     if (path === "/sitemap.xml") return response("missing", 404, "text/plain");
-    if (path === "/projects/kitchen") return response(`${pageHtml("Kitchen project")}<img src="/wp-content/gallery/kitchen/thumbs/thumbs_after.jpg" alt="Finished kitchen">`, 200);
+    if (path === "/projects/kitchen") return response(`${pageHtml("Kitchen project")}<img src="/wp-content/gallery/kitchen/thumbs/thumbs_after.jpg" alt="Finished kitchen"><div data-bgimg="https://media.example/original" style="background-image:url(https://media.example/small)"></div><div data-bgimg="javascript:alert(1)"></div>`, 200);
+    if (url === "https://media.example/original" || url === "https://media.example/small") return response("retained-image", 200, "image/jpeg");
     if (path === "/wp-content/gallery/kitchen/thumbs/thumbs_after.jpg") return response("thumbnail", 200, "image/jpeg");
     if (path === "/wp-content/gallery/kitchen/after.jpg") return response("full-resolution-image", 200, "image/jpeg");
     throw new Error(`unexpected_gallery_fixture_url:${url}`);
@@ -966,6 +1015,8 @@ assert(
   galleryOriginal.captures.some((capture) => capture.requestedUrl === `${galleryOrigin}/wp-content/gallery/kitchen/after.jpg` && capture.outcome === "fetched"),
   "A directly evidenced NextGEN gallery thumbnail did not discover its first-party original."
 );
+assert(galleryOriginal.captures.some(capture => capture.requestedUrl === "https://media.example/original" && capture.outcome === "fetched"),
+  "An explicit gallery-container original was missed while its inline thumbnail was retained.");
 const missingGalleryOriginal = await crawlWebsiteForGeneration({
   url: `${galleryOrigin}/projects/missing-original`,
   validateUrl: async (value) => value,

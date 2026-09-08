@@ -181,6 +181,26 @@ const opaqueFirstPartyPhoto = rankSourceAssetCandidates({
   ]
 });
 assert.equal(opaqueFirstPartyPhoto[0]?.likelyKind, "photo", "A substantial first-party customer image required a service keyword to reach visual evidence.");
-assert(opaqueFirstPartyPhoto[0]?.relevanceReasons.includes("substantial first-party customer-page image"));
+assert(opaqueFirstPartyPhoto[0]?.relevanceReasons.includes("substantial customer-page image; inspect pixels and provenance before adoption"));
+
+const cdnPage = page("page_services", "/services.html");
+const cdnCandidates = rankSourceAssetCandidates({
+  pages: [home, cdnPage, authorArchive],
+  resources: [
+    resource("cdn_service", "https://media.example/opaque-work-image", cdnPage.finalUrl!, "image/jpeg", 30_000),
+    resource("cdn_tiny", "https://media.example/opaque-small-image", home.finalUrl!, "image/png", 600),
+    resource("cdn_vendor", "https://media.example/common/scorpion/logo/wordmark.png", home.finalUrl!, "image/png", 80_000),
+    resource("cdn_archive", "https://media.example/opaque-archive-image", authorArchive.finalUrl!, "image/jpeg", 80_000)
+  ]
+});
+assert.equal(cdnCandidates.find(c => c.resource.id === "cdn_service")?.likelyKind, "photo",
+  "A CDN-hosted customer-page photograph was excluded from the photo-first visual selection.");
+for (const id of ["cdn_tiny", "cdn_vendor", "cdn_archive"]) {
+  assert.notEqual(cdnCandidates.find(c => c.resource.id === id)?.likelyKind, "photo",
+    "Tiny graphics, vendor artwork or archive-only media became default photo candidates.");
+}
+assert(cdnCandidates.find(c => c.resource.id === "cdn_service")?.relevanceReasons
+  .includes("cross-origin dependency rather than a first-party asset"),
+"A visual-review hint erased the cross-origin provenance warning.");
 
 console.log("Source asset ranking verification passed.");

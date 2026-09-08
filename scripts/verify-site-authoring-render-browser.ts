@@ -2378,7 +2378,9 @@ assert(
   "A deterministic header-control collision did not block candidate finalization."
 );
 
-const headerControlWrapMarkup = '<a class="header-wrap-a" href="/services">Service areas</a><a class="header-wrap-b" href="/contact">Customer login</a>';
+// Stacked brand/CTA text is authored presentation, not evidence of crowding.
+// The preceding fixture still requires actual header collisions to block release.
+const headerControlWrapMarkup = '<a class="header-wrap-a" href="/services"><span>Services</span><span>Explore our work</span></a><a class="header-wrap-b" href="/contact"><span>Call us</span><span>Contact the team</span></a>';
 const headerControlWrapPrepared = {
   ...prepared,
   routes: prepared.routes.map((route) => route.path === "/"
@@ -2388,7 +2390,7 @@ const headerControlWrapPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</header>", `${headerControlWrapMarkup}</header>`)) }
     : file.path === "site.css"
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}
-@media(min-width:700px) and (max-width:800px){.header-wrap-a,.header-wrap-b{display:inline-block;width:68px;margin-left:8px;white-space:normal}}`) }
+@media(min-width:700px) and (max-width:800px){.header-wrap-a,.header-wrap-b{display:inline-block;margin-left:8px;white-space:normal}.header-wrap-a span,.header-wrap-b span{display:block}}`) }
       : file)
 };
 const headerControlWrapBrowser = await runArtifactBrowserGate({
@@ -2397,18 +2399,9 @@ const headerControlWrapBrowser = await runArtifactBrowserGate({
   blobStore: new MemoryBlobStore(),
   capturePrefix: "verification/site-authoring-render-header-control-wrap"
 });
-const headerControlWrapFinding = headerControlWrapBrowser.findings.find((finding) =>
-  finding.id === "render.header_control_wrap" && finding.message.includes("tablet"));
 assert(
-  headerControlWrapFinding
-    && headerControlWrapFinding.severity === "warning"
-    && headerControlWrapFinding.message.includes("Service areas")
-    && headerControlWrapFinding.message.includes("Customer login"),
-  "Multiple wrapped tablet header controls did not produce focused responsive-navigation guidance."
-);
-assert(
-  !isTechnicalReleaseBlocker(headerControlWrapFinding),
-  "The responsive header-wrap heuristic unexpectedly became a release blocker."
+  !headerControlWrapBrowser.findings.some((finding) => finding.id === "render.header_control_wrap"),
+  "Intentional stacked header controls triggered the retired line-count heuristic."
 );
 
 const joinedFooterLinksPrepared = {

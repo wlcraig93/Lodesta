@@ -1,12 +1,22 @@
 # Generated-site authoring status
 
-Date: 2026-09-07
+Date: 2026-09-08
 
 ## Current decision: generator still under evaluation
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current continuation: private disclosure edits verified; first fresh sample rejected
+### Current continuation: affordable authoring and source-context corrections
+
+Production authoring remains Luna; Astra is excluded from new authoring. Terra's latest tree-service attempt did not justify its higher cost: it passed technical verification but lost useful service/article detail and work imagery. Detailed affordable-model chronology and the unchanged delivery criteria are in `docs/canonical-generator-quality-acceptance.md`.
+
+Release `190751a7` is independently verified on web, worker and the active sandbox. The subsequent private HD Electric Luna diagnostic passed its gate at $0.17788571 and 16.69 minutes recorded execution. Its captured Google rating and exact reviews link are present, and all eight displayed first-party quotes match retained wording. All 18 route/viewport captures completed without browser errors or overflow. It is still not delivery-accepted: primary copy is repair-conversation-heavy, work photos are absent and the phone contact form sits too low.
+
+Retained evidence demonstrates service-list and named-city extraction losses, missed explicit original-image URLs, and CDN photographs being displaced by small graphics in the initial visual selection. Focused corrections and removal of the misleading header line-count advisory are under local verification; functional header checks remain. A wording-only architecture probe did not broaden the sparse input. With corrected extraction from the same retained HTML, a second Luna probe represented commercial/residential/light-industrial work and the four named cities. These probes cost less than one cent combined and do not count as generated-site or reliability acceptance.
+
+No retained artifact or authority was rewritten, no prospect was published or contacted, and no automatic critic, extra authoring stage or model switch was added. Coordinated release and a fresh Luna build remain required before evaluating this treatment. The earlier Astra screen below is historical failed evidence, not an active production-model recommendation.
+
+### Earlier continuation: private disclosure edits verified; first fresh sample rejected
 
 The context-boundary correction `8ff188793d2f7968e905fad618fd82bf01fd7113` passed CI `34141633167` and coordinated release `34142110159`. Web and worker reported that SHA, required deep health passed, maintenance was released and notifications stayed disabled. An initial funded retest was rejected for API quota; it remains failed evidence. After the owner replenished credit, ordinary private cookie and privacy edits both succeeded, with exact approved text and no failed tools. The two edits cost approximately $0.016 and $0.015 in catalog-estimated model charges and each took 6.1 minutes elapsed including preparation and full verification.
 

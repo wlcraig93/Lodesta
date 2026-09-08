@@ -1128,16 +1128,24 @@ function extractVisibleServices(html: string, page: { url: string; title?: strin
 
 function extractServiceSectionHeadings(html: string) {
   const headings = [...html.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)]
-    .map((match) => ({ level: Number(match[1]), text: cleanText(match[2]) }))
-    .filter((heading): heading is { level: number; text: string } => Boolean(heading.text));
+    .map((match) => ({ level: Number(match[1]), text: cleanText(match[2]), html: match[2] }))
+    .filter((heading): heading is { level: number; text: string; html: string } => Boolean(heading.text));
   const values: string[] = [];
   for (let index = 0; index < headings.length; index += 1) {
     const heading = headings[index];
-    if (!/^(?:(?:our|pest control|wildlife) )?(?:services|treatments|solutions)|what we (?:do|treat|handle|help with)$/i.test(heading.text)) continue;
+    if (!/^(?:(?:our|pest control|wildlife) )?(?:services|treatments|solutions)|what we (?:do|treat|handle|help with)$/i.test(heading.text)
+      && !(heading.level === 1 && /\b(?:services|treatments|solutions)$/i.test(heading.text))) continue;
     for (let candidateIndex = index + 1; candidateIndex < headings.length; candidateIndex += 1) {
       const candidate = headings[candidateIndex];
       if (candidate.level <= heading.level) break;
-      values.push(candidate.text);
+      // Legacy editors put whole lists in a single heading. Preserve explicit
+      // line breaks and spaced columns before cleanText collapses whitespace.
+      // Ordinary single-line headings remain intact, including multiword names.
+      const entries = /<br\s*\/?>/i.test(candidate.html)
+        ? decodeHtml(candidate.html.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, ""))!
+          .split(/\n|[ \t]{2,}/).map(cleanText).filter((value): value is string => Boolean(value))
+        : [candidate.text];
+      values.push(...entries);
       if (values.length >= 20) return values;
     }
   }
@@ -1329,7 +1337,9 @@ function cleanServiceCandidate(value: string | undefined) {
   if (/^(?:&m?dash;|[–—-])\s*/i.test(raw)) return undefined;
   if (/^(skip\s+(?:to\s+)?content|view|learn more|read more|show more|close|back|next|previous)$/i.test(raw)) return undefined;
   const cleaned = raw
-    ?.replace(/\b(learn more|read more|view all|all services|our services|services|service|menu|book now|schedule|contact|about|home)\b/gi, " ")
+    ?.replace(/\b(learn more|read more|view all|all services|our services|menu|book now|schedule|contact|about|home)\b/gi, " ")
+    .replace(/\s+services?\s*$/i, " ")
+    .replace(/^services?\s*$/i, " ")
     .replace(/[|•·]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -1438,6 +1448,9 @@ function extractVisibleServiceAreas(html: string) {
     const list = match[1]
       .split(/[.!?]/, 1)[0]
       .replace(/\s+since\s+(?:19|20)\d{2}\b.*$/i, "")
+      // Preserve the named places after an explicit surrounding-area list;
+      // the generic surrounding-area phrase itself is not a named market.
+      .replace(/\s+(?:and|&|plus)\s+(?:the\s+)?surrounding areas?\s+(?:to include|including|such as)\s+/i, ", ")
       .replace(/\b(?:and|plus)\s+(?:the\s+)?surrounding areas?\b.*$/i, "")
       .replace(/([A-Za-z][A-Za-z .'-]{1,60}),\s*([A-Z]{2})(?=$|[,;]|\s+(?:and|&)\s+)/g, "$1 $2");
     for (const candidate of list.split(/\s*(?:,|;|\||\s+(?:and|&)\s+)\s*/)) {

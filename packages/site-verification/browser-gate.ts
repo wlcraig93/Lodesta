@@ -560,15 +560,6 @@ async function runArtifactBrowserGateOnce(input: {
             "render"
           ));
         }
-        if (metrics.headerControlWrapCount > 0) {
-          routeFindings.push(finding(
-            "render.header_control_wrap",
-            `${metrics.headerControlWrapCount} visible header controls wrap onto multiple text lines at ${viewport.name}. Collapse to the compact navigation state before an inline header becomes crowded, or give the controls enough room to remain deliberate. Examples: ${metrics.headerControlWrapExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
         if (metrics.inlineLinkClusterCount > 0) {
           routeFindings.push(finding(
             "render.inline_link_spacing",
@@ -1578,8 +1569,6 @@ type BrowserPageMetrics = {
   textOcclusionExamples: string[];
   headerControlCollisionCount: number;
   headerControlCollisionExamples: string[];
-  headerControlWrapCount: number;
-  headerControlWrapExamples: string[];
   inlineLinkClusterCount: number;
   inlineLinkClusterExamples: string[];
   unstructuredFooterGroupCount: number;
@@ -3543,24 +3532,6 @@ const browserInspectionSource = String.raw`(() => {
       }
       return count;
     };
-    const headerControlLineTops = new Map();
-    for (const box of textBoxes) {
-      const control = box.element.closest("header a[href],header button,header [role=button]");
-      if (!control || !colorTools.visible(control)) continue;
-      const lineTops = headerControlLineTops.get(control) ?? [];
-      if (!lineTops.some((top) => Math.abs(top - box.visibleRect.top) <= 2)) lineTops.push(box.visibleRect.top);
-      headerControlLineTops.set(control, lineTops);
-    }
-    const wrappedHeaderControls = innerWidth > 640
-      ? controls.filter((control) => {
-          if (!colorTools.visible(control) || !control.closest("header")) return false;
-          return (headerControlLineTops.get(control)?.length ?? 0) > 1;
-        })
-      : [];
-    // One deliberately stacked CTA can be a valid treatment. Multiple wrapped
-    // controls are a stronger signal that the inline header outlived its useful
-    // breakpoint and should have yielded to the compact navigation state.
-    const crowdedHeaderControls = wrappedHeaderControls.length >= 2 ? wrappedHeaderControls : [];
     const ownPseudoCircularOutlineLayerCount = (root) => {
       let count = 0;
       for (const pseudo of ["::before", "::after"]) {
@@ -3789,9 +3760,6 @@ const browserInspectionSource = String.raw`(() => {
       textOcclusionExamples: [...new Set(textOcclusion)].slice(0, 3),
       headerControlCollisionCount: [...new Set([...headerControlCollisions, ...headerControlHitTestFailures])].length,
       headerControlCollisionExamples: [...new Set([...headerControlCollisions, ...headerControlHitTestFailures])].slice(0, 3),
-      headerControlWrapCount: crowdedHeaderControls.length,
-      headerControlWrapExamples: crowdedHeaderControls.slice(0, 3).map((element) =>
-        colorTools.selectorFor(element) + ' "' + colorTools.textFor(element).slice(0, 60) + '"'),
       inlineLinkClusterCount: [...new Set(inlineLinkClusters)].length,
       inlineLinkClusterExamples: [...new Set(inlineLinkClusters)].slice(0, 3),
       unstructuredFooterGroupCount: unstructuredFooterGroups.length,

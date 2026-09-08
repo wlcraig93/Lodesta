@@ -1,7 +1,7 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
-// Descriptor: site-authoring-platform:advisory-prose-evidence:continuous-visual-history:explicit-service-area-lists:task-led-conversion:owner-approved-documents:complete-authority-compact-index:editable-source-drafts:owner-current-source-index:source-backed-editorial-scope:single-inspection-findings:2026-09-08
-export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:6eebde1e73c8d366de41541c4602fe23c75be8408f42de2679d8f911751d2fab";
+// Descriptor: site-authoring-platform:advisory-prose-evidence:continuous-visual-history:explicit-service-area-lists:task-led-conversion:owner-approved-documents:complete-authority-compact-index:editable-source-drafts:owner-current-source-index:source-backed-editorial-scope:single-inspection-findings:public-website-voice:2026-09-08
+export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:c394fe8cd4b1bf175252aaa2b4a2863aa681c24efbdd346bd9de89ebe05b86c2";
 export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
@@ -10,7 +10,7 @@ export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:495
 // Checked-in release identity for the compiler scaffold, including platform capability CSS.
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
 export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:88ee378f8c4f6128abfbef9362e0190233339518c0cf73e5d827107b45a86214";
-export const websiteManagerPromptIdentity = "website-manager@sha256:d9ccc3ef7305deeb2dffee65cfa6153e4277ff998f2b59ac0f76bb069eda97b8";
+export const websiteManagerPromptIdentity = "website-manager@sha256:44661e8fa2ca98c76c43c46b73607ed7461531d4bb8a75c2e5123128cce3c3c4";
 // Descriptor: fact-binding-validator:exact-markers-and-bindings:advisory-prose-evidence:2026-09-05
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:e560da37c4418c025b62803388a62cf34a50358b0a6c7ec64436ef6552e71eaa";
 // Descriptor: site-verification-policy:controlled-panel-navigation:advisory-prose-evidence:owner-approved-documents:2026-09-07

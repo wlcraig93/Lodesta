@@ -122,6 +122,9 @@ assert.match(websiteManagerDiscussionSystemPrompt, /without modifying source/i);
 assert.doesNotMatch(websiteManagerAuthoringSystemPrompt, /editable.*recipe|recipe provenance|critic agent|automatic repair/i);
 assert.match(websiteManagerAuthoringSystemPrompt, /source-backed article or guide.*useful explanatory arc, not a teaser/i);
 assert.match(websiteManagerAuthoringSystemPrompt, /authored TSX and CSS readable, structurally formatted/i);
+assert.match(websiteManagerAuthoringSystemPrompt, /finished public-facing site, not a report/i);
+assert.match(websiteManagerAuthoringSystemPrompt, /Preserve the owner's requested voice and existing copy outside an edit's scope/i);
+assert.match(taskSkillFor("initial_build").knowledge.join(" "), /attribution of customer quotations or third-party statements/i);
 
 const taskSkills = {
   initial_build: taskSkillFor("initial_build"),

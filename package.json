@@ -118,7 +118,7 @@
     "@supabase/supabase-js": "^2.106.2",
     "axe-core": "4.12.1",
     "htmlparser2": "^12.0.0",
-    "next": "^15.5.21",
+    "next": "15.5.24",
     "openai": "^6.48.0",
     "playwright": "^1.60.0",
     "postcss": "8.5.23",
@@ -126,7 +126,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "sharp": "0.35.3",
+    "sharp": "0.35.4",
     "typescript": "^5.6.0",
     "zod": "^3.24.0"
   },
@@ -136,7 +136,8 @@
       "undici": "7.29.0"
     },
     "postcss": "8.5.23",
-    "sharp": "0.35.3"
+    "sharp": "0.35.4",
+    "hono": "4.13.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260719.1",

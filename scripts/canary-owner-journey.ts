@@ -292,7 +292,9 @@ try {
 
   await page.reload({ waitUntil: "domcontentloaded" });
   const postLivePreview = await waitForCandidatePreview(page, { versionId: postLiveCandidateId, routeTitle: postLiveHome.title });
-  await page.frameLocator('iframe[title="Website preview"]').getByText(postLiveEditText, { exact: true }).waitFor({ timeout: 60_000 });
+  const postLiveCandidateFrame = page.frameLocator('iframe[title="Website preview"]');
+  await postLiveCandidateFrame.getByText(exactEditText, { exact: true }).waitFor({ timeout: 60_000 });
+  await postLiveCandidateFrame.getByText(postLiveEditText, { exact: true }).waitFor({ timeout: 60_000 });
   await page.getByRole("button", { name: "More", exact: true }).click();
   const compareButton = page.getByRole("button", { name: /Compare with live/ });
   await compareButton.waitFor();
@@ -305,7 +307,11 @@ try {
   await screenshot("05-live-before-republish-compare");
 
   const publicBeforeRepublish = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString());
-  assert.equal(publicBeforeRepublish.status(), 200, "The initial published public route is unavailable before re-publication.");
+  const publicBeforeRepublishIdentity = publishedResponseEvidence(publicBeforeRepublish);
+  evidence.publicBeforeRepublish = publicBeforeRepublishIdentity;
+  assert.equal(publicBeforeRepublishIdentity.status, 200, "The initial published public route is unavailable before re-publication.");
+  assert.equal(publicBeforeRepublishIdentity.versionId, initiallyPublishedVersionId,
+    "The initial published public route resolved a version other than the current public pointer.");
   const publicBeforeRepublishHtml = await publicBeforeRepublish.text();
   assert(publicBeforeRepublishHtml.includes(exactEditText), "The initial published public artifact omitted its approved edit.");
   assert(!publicBeforeRepublishHtml.includes(postLiveEditText), "The public route exposed the unconfirmed post-live candidate.");
@@ -315,7 +321,11 @@ try {
     preview: postLivePreview,
     text: postLiveEditText,
     comparedPublishedVersionId: initiallyPublishedVersionId,
-    publicBeforeRepublish: { containsInitialEdit: true, containsPostLiveEdit: false }
+    publicBeforeRepublish: {
+      ...publicBeforeRepublishIdentity,
+      containsInitialEdit: true,
+      containsPostLiveEdit: false
+    }
   };
   step("post_live_candidate_compare", { status: "passed", candidateVersionId: postLiveCandidateId, publishedVersionId: initiallyPublishedVersionId });
 
@@ -337,14 +347,24 @@ try {
   const finalPublishedVersionId = republishedWorkspace.site?.publishedVersionId;
   assert.equal(finalPublishedVersionId, postLiveCandidateId, "Re-publication did not promote the post-live candidate.");
   const publicAfterRepublish = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString());
-  assert.equal(publicAfterRepublish.status(), 200, "The public route is unavailable after re-publication.");
-  assert((await publicAfterRepublish.text()).includes(postLiveEditText), "The public route did not advance to the confirmed post-live candidate.");
+  const publicAfterRepublishIdentity = publishedResponseEvidence(publicAfterRepublish);
+  evidence.publicAfterRepublish = publicAfterRepublishIdentity;
+  assert.equal(publicAfterRepublishIdentity.status, 200, "The public route is unavailable after re-publication.");
+  assert.equal(publicAfterRepublishIdentity.versionId, finalPublishedVersionId,
+    "The public route resolved a version other than the confirmed post-live candidate.");
+  const publicAfterRepublishHtml = await publicAfterRepublish.text();
+  assert(publicAfterRepublishHtml.includes(exactEditText), "The public route omitted the earlier approved edit after re-publication.");
+  assert(publicAfterRepublishHtml.includes(postLiveEditText), "The public route did not advance to the confirmed post-live candidate.");
   evidence.republication = {
     previousPublishedVersionId: initiallyPublishedVersionId,
     publishedVersionId: finalPublishedVersionId,
     candidateVersionId: postLiveCandidateId,
     confirmedRequests: republishRequests,
-    publicAfterRepublish: { containsPostLiveEdit: true }
+    publicAfterRepublish: {
+      ...publicAfterRepublishIdentity,
+      containsInitialEdit: true,
+      containsPostLiveEdit: true
+    }
   };
   step("republication", { status: "passed", publishedVersionId: finalPublishedVersionId, previousPublishedVersionId: initiallyPublishedVersionId });
 
@@ -359,9 +379,21 @@ try {
   });
   evidence.visitorProfile = "anonymous_playwright_desktop_chrome";
   const livePage = await visitorContext.newPage();
-  await livePage.goto(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { waitUntil: "networkidle" });
-  await livePage.getByText(exactEditText, { exact: true }).waitFor();
-  await livePage.getByText(postLiveEditText, { exact: true }).waitFor();
+  try {
+    const visitorResponse = await livePage.goto(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { waitUntil: "networkidle" });
+    assert(visitorResponse, "The anonymous visitor did not receive a public response.");
+    const visitorIdentity = publishedResponseEvidence(visitorResponse);
+    evidence.visitorPublication = visitorIdentity;
+    assert.equal(visitorIdentity.status, 200, "The anonymous visitor did not receive the published website.");
+    assert.equal(visitorIdentity.versionId, finalPublishedVersionId,
+      "The anonymous visitor received a version other than the confirmed public candidate.");
+    await livePage.getByText(exactEditText, { exact: true }).waitFor();
+    await livePage.getByText(postLiveEditText, { exact: true }).waitFor();
+  } catch (error) {
+    evidence.visitorFailure = { diagnostic: safeDiagnostic(error) };
+    await livePage.screenshot({ path: join(evidenceDirectory, "05-published-failure.png"), fullPage: true }).catch(() => undefined);
+    throw error;
+  }
   evidence.visitorStorage = {
     cookies: (await visitorContext.cookies()).map(({ name, domain, httpOnly, secure, sameSite }) => ({ name, domain, httpOnly, secure, sameSite })),
     localStorage: await livePage.evaluate(() => Object.keys(localStorage).map(key => {
@@ -643,6 +675,22 @@ function safeDiagnostic(error: unknown) {
     .slice(0, 4_000);
 }
 
+function publishedResponseEvidence(response: { status(): number; headers(): Record<string, string> }) {
+  const headers = Object.fromEntries(Object.entries(response.headers()).map(([name, value]) => [name.toLowerCase(), value]));
+  return {
+    status: response.status(),
+    versionId: headers["x-lodesta-site-version"],
+    artifactHash: headers["x-lodesta-artifact-hash"],
+    cacheControl: headers["cache-control"],
+    cdnCacheControl: headers["cdn-cache-control"],
+    cloudflareCdnCacheControl: headers["cloudflare-cdn-cache-control"],
+    age: headers.age,
+    cacheStatus: headers["cache-status"],
+    cloudflareCacheStatus: headers["cf-cache-status"],
+    xCache: headers["x-cache"]
+  };
+}
+
 async function canarySandboxProvenance(targetOrigin: URL, repository: SupabaseClient) {
   const { data: control, error: controlError } = await repository
     .from("site_sandbox_control")
@@ -741,7 +789,7 @@ async function waitForCandidatePreview(targetPage: Page, input: { versionId: str
     if (!(frame instanceof HTMLIFrameElement) || frame.src !== expectedUrl) return false;
     const previewDocument = frame.contentDocument;
     const previewWindow = frame.contentWindow;
-    if (!previewDocument || !previewWindow || previewWindow.location.href !== expectedUrl || previewDocument.title !== routeTitle) return false;
+    if (!previewDocument || !previewWindow || previewWindow.location.href !== expectedUrl || previewDocument.title !== routeTitle || previewDocument.readyState !== "complete") return false;
     const heading = previewDocument.querySelector("main h1");
     if (!heading || !heading.textContent?.trim() || !heading.getClientRects().length) return false;
     for (let element: Element | null = heading; element; element = element.parentElement) {

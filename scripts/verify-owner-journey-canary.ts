@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { build } from "esbuild";
 import { isFinalOwnerCanaryPostResponse } from "./owner-canary-response";
 import { devices } from "playwright";
 import { classifyAnalyticsTraffic } from "../lib/analytics";
@@ -31,6 +33,55 @@ const [source, packageJsonSource, env, gitignore] = await Promise.all([
   readFile(".gitignore", "utf8")
 ]);
 const packageJson = JSON.parse(packageJsonSource) as { scripts?: Record<string, string> };
+
+const responseEvidenceMatch = source.match(/function publishedResponseEvidence[\s\S]*?\n}\n\nasync function canarySandboxProvenance/);
+assert(responseEvidenceMatch, "The canary response-evidence helper was not found.");
+const responseEvidenceSource = responseEvidenceMatch[0].replace(/\nasync function canarySandboxProvenance$/, "");
+const responseEvidenceBuild = await build({
+  stdin: {
+    contents: `${responseEvidenceSource}\nexport { publishedResponseEvidence };`,
+    resolveDir: process.cwd(),
+    loader: "ts"
+  },
+  bundle: true,
+  write: false,
+  platform: "node",
+  format: "cjs"
+});
+const responseEvidenceModule = {
+  exports: {} as {
+    publishedResponseEvidence: (response: { status(): number; headers(): Record<string, string> }) => Record<string, string | number | undefined>;
+  }
+};
+new Function("require", "module", "exports", responseEvidenceBuild.outputFiles[0].text)(createRequire(import.meta.url), responseEvidenceModule, responseEvidenceModule.exports);
+const responseEvidence = responseEvidenceModule.exports.publishedResponseEvidence({
+  status: () => 503,
+  headers: () => ({
+    "X-Lodesta-Site-Version": "version_fixture",
+    "X-Lodesta-Artifact-Hash": "sha256:fixture",
+    "Cache-Control": "public, max-age=60",
+    "CDN-Cache-Control": "public, s-maxage=300",
+    "Cloudflare-CDN-Cache-Control": "no-store",
+    Age: "42",
+    "Cache-Status": "cdn; hit",
+    "CF-Cache-Status": "HIT",
+    "X-Cache": "MISS",
+    "Set-Cookie": "must-not-be-retained",
+    Authorization: "must-not-be-retained"
+  })
+});
+assert.deepEqual(responseEvidence, {
+  status: 503,
+  versionId: "version_fixture",
+  artifactHash: "sha256:fixture",
+  cacheControl: "public, max-age=60",
+  cdnCacheControl: "public, s-maxage=300",
+  cloudflareCdnCacheControl: "no-store",
+  age: "42",
+  cacheStatus: "cdn; hit",
+  cloudflareCacheStatus: "HIT",
+  xCache: "MISS"
+});
 
 assert(
   packageJson.scripts?.["canary:owner-journey"]?.includes("scripts/canary-owner-journey.ts"),
@@ -72,6 +123,10 @@ for (const requiredBehavior of [
   "publicBeforeRepublish",
   "publicAfterRepublish",
   "postLiveEditText",
+  "postLiveCandidateFrame.getByText(exactEditText",
+  "publishedResponseEvidence",
+  "x-lodesta-site-version",
+  "05-published-failure.png",
   "republishRequests",
   '"Published version is live."',
   "method: \"DELETE\"",
@@ -100,8 +155,9 @@ assert(source.includes('userAgent: devices["Desktop Chrome"].userAgent'),
 assert(source.includes("mobilePublishButton.click()") && source.includes("publishButton.click({ timeout: 60_000 })") && !source.includes("publishButton.isEnabled()"),
   "Publication must wait for normal button actionability rather than racing the editor's loading state.");
 assert(source.includes("postLiveCandidateId") && source.includes("liveComparison.getByText(postLiveEditText")
-  && source.includes("!publicBeforeRepublishHtml.includes(postLiveEditText)") && source.includes("publishedVersionId === postLiveCandidateId"),
-  "The canary does not prove a post-live candidate stays private until its own confirmation.");
+  && source.includes("!publicBeforeRepublishHtml.includes(postLiveEditText)") && source.includes("publishedVersionId === postLiveCandidateId")
+  && source.includes("publicAfterRepublishHtml.includes(exactEditText)") && source.includes("visitorFailure"),
+  "The canary does not prove preservation, public-version identity, and failure evidence across re-publication.");
 assert(source.includes('step("bootstrap_response"') && source.includes('step("browser_navigation"'),
   "The owner canary must retain safe handoff diagnostics and the created site's cleanup target.");
 assert(source.includes("LODESTA_OWNER_CANARY_CONFIRMED_NONPRODUCTION")

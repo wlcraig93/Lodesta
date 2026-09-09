@@ -31,7 +31,8 @@ const initialBuildKnowledge = [
 
 const editKnowledge = [
   "Preserve every existing workspace source file unconditionally and change only what the owner requested. Treat the supplied route and selected element as the primary scope, read only the files needed, preserve unrelated design, content, navigation, forms, and working behavior, and never restore an initial-build default merely because Lodesta would start a blank site differently.",
-  "Prefer line-targeted edits. Inspect only when a concrete visual uncertainty could materially affect the requested result; use the supplied selection outline when relevant. After a successful targeted edit, call finish directly rather than polishing unrelated areas. If the requested edit touches navigation or forms, preserve required destinations, schema-owned fields, managed submission, and the owner's chosen presentation."
+  "Prefer line-targeted edits. Inspect only when a concrete visual uncertainty could materially affect the requested result; use the supplied selection outline when relevant. After a successful targeted edit, call finish directly rather than polishing unrelated areas. If the requested edit touches navigation or forms, preserve required destinations, schema-owned fields, managed submission, and the owner's chosen presentation.",
+  "Add is cumulative: preserve existing visible text, including similar text, unless the owner explicitly requests replacement or removal."
 ] as const;
 
 const rebaseKnowledge = [

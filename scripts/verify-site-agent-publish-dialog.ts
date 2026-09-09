@@ -38,10 +38,27 @@ const captureScreenshots = process.env.LODESTA_FIXTURE_CAPTURE !== "false";
 
 let workspace = makeWorkspace();
 let clientScript = "";
-let artifactMode: "hidden" | "visible" = "hidden";
+let artifactMode: "hidden" | "visible" | "delayed-stylesheet" = "hidden";
 let publishMode: "failure" | "success" = "failure";
 let sessionMode: "success" | "failure" = "success";
 const publishRequests: Array<{ path: string; mode: string }> = [];
+
+type StylesheetGate = {
+  started: Promise<void>;
+  markStarted(): void;
+  released: Promise<void>;
+  release(): void;
+};
+
+function stylesheetGate(): StylesheetGate {
+  let markStarted: () => void = () => undefined;
+  let release: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  return { started, markStarted, released, release };
+}
+
+let delayedStylesheet: StylesheetGate | undefined;
 
 function makeWorkspace(overrides: Record<string, unknown> = {}) {
   return {
@@ -106,7 +123,18 @@ const server = createServer(async (request, response) => {
     response.writeHead(200, { "content-type": "text/html" });
     response.end(artifactMode === "visible"
       ? "<!doctype html><title>Fixture candidate</title><main><h1>Fixture authored heading</h1></main>"
+      : artifactMode === "delayed-stylesheet"
+        ? "<!doctype html><title>Fixture candidate</title><link rel=\"stylesheet\" href=\"/fixture-delayed.css\"><main><h1>Fixture authored heading</h1></main>"
       : "<!doctype html><title>Fixture candidate</title><main style=\"visibility:hidden\"><h1>Hidden candidate heading</h1></main>");
+    return;
+  }
+  if (url.pathname === "/fixture-delayed.css") {
+    if (delayedStylesheet) {
+      delayedStylesheet.markStarted();
+      await delayedStylesheet.released;
+    }
+    response.writeHead(200, { "content-type": "text/css" });
+    response.end("main { color: rgb(20, 35, 31); }");
     return;
   }
   if (url.pathname === "/api/site-versions/stale_fixture/artifact/") {
@@ -290,8 +318,9 @@ try {
   assert.equal(await page.locator(".site-agent-publish-desktop").count(), 0, "A successful promotion with a failed editor refresh offered a repeat publish control.");
   assert.equal(publishRequests.filter((request) => request.mode === "success").length, 3, "Editor refresh failure made an additional promotion request.");
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ ok: true, desktop: "Escape focus + successful More focus + no preconfirm POST", phone: "Cancel/Escape focus + successful Preview-options focus + no preconfirm POST", failure: "dialog retained", staleSelection: "blocked in open confirmation", activeRun: "blocked", staleCandidate: "blocked", publish: "one exact confirmed POST", refreshFailure: "successful promotion remains closed and non-repeatable", preview: "actual canary helper rejects about:blank, stale URL, and hidden ancestor" }));
+  console.log(JSON.stringify({ ok: true, desktop: "Escape focus + successful More focus + no preconfirm POST", phone: "Cancel/Escape focus + successful Preview-options focus + no preconfirm POST", failure: "dialog retained", staleSelection: "blocked in open confirmation", activeRun: "blocked", staleCandidate: "blocked", publish: "one exact confirmed POST", refreshFailure: "successful promotion remains closed and non-repeatable", preview: "actual canary helper rejects about:blank, stale URL, hidden ancestor, and stylesheet-loading interactive document before accepting complete" }));
 } finally {
+  delayedStylesheet?.release();
   await browser.close();
   await new Promise<void>((done) => server.close(() => done()));
 }
@@ -310,6 +339,73 @@ async function verifyCandidatePreview(page: Page, origin: string) {
   await setPreviewUrl(page, expectedUrl);
   const evidence = await waitForCandidatePreview(page, input);
   assert.equal(evidence.h1Text, "Fixture authored heading");
+
+  delayedStylesheet = stylesheetGate();
+  artifactMode = "delayed-stylesheet";
+  await setPreviewUrl(page, expectedUrl);
+  let stylesheetStartTimeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      delayedStylesheet.started,
+      new Promise<never>((_, reject) => {
+        stylesheetStartTimeout = setTimeout(() => reject(new Error("The fixture stylesheet request never started.")), 5_000);
+      })
+    ]);
+  } finally {
+    clearTimeout(stylesheetStartTimeout);
+  }
+  await page.waitForFunction(oldPreviewPredicateAccepts, inputToExpected(page, input), {
+    timeout: 5_000,
+    polling: 25
+  });
+  assert.equal(await page.evaluate(() => {
+    const frame = document.querySelector('iframe[title="Website preview"]');
+    return frame instanceof HTMLIFrameElement ? frame.contentDocument?.readyState : undefined;
+  }), "interactive",
+    "The stylesheet gate must hold the preview before document completion.");
+  assert.equal(await oldPreviewPredicateAccepted(page, input), true,
+    "The prior canary predicate must demonstrate the false-ready condition.");
+  await assertPreviewRejected(page, input, "stylesheet still loading");
+  const pendingPreview = waitForCandidatePreview(page, input);
+  let previewSettled = false;
+  void pendingPreview.then(
+    () => { previewSettled = true; },
+    () => { previewSettled = true; }
+  );
+  await page.evaluate(() => Promise.resolve());
+  assert.equal(previewSettled, false, "The canonical helper accepted before the stylesheet completed.");
+  delayedStylesheet.release();
+  const stylesheetEvidence = await pendingPreview;
+  assert.equal(stylesheetEvidence.h1Text, "Fixture authored heading");
+  assert.equal(await page.evaluate(() => {
+    const frame = document.querySelector('iframe[title="Website preview"]');
+    return frame instanceof HTMLIFrameElement ? frame.contentDocument?.readyState : undefined;
+  }), "complete");
+  delayedStylesheet = undefined;
+  artifactMode = "visible";
+}
+
+function inputToExpected(page: Page, input: { versionId: string; routeTitle: string }) {
+  return { expectedUrl: `${new URL(page.url()).origin}/api/site-versions/${encodeURIComponent(input.versionId)}/artifact/`, routeTitle: input.routeTitle };
+}
+
+function oldPreviewPredicateAccepts({ expectedUrl, routeTitle }: { expectedUrl: string; routeTitle: string }) {
+  const frame = document.querySelector('iframe[title="Website preview"]');
+  if (!(frame instanceof HTMLIFrameElement) || frame.src !== expectedUrl) return false;
+  const previewDocument = frame.contentDocument;
+  const previewWindow = frame.contentWindow;
+  if (!previewDocument || !previewWindow || previewWindow.location.href !== expectedUrl || previewDocument.title !== routeTitle) return false;
+  const heading = previewDocument.querySelector("main h1");
+  if (!heading || !heading.textContent?.trim() || !heading.getClientRects().length) return false;
+  for (let element: Element | null = heading; element; element = element.parentElement) {
+    const style = previewWindow.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || Number.parseFloat(style.opacity) === 0) return false;
+  }
+  return true;
+}
+
+async function oldPreviewPredicateAccepted(page: Page, input: { versionId: string; routeTitle: string }) {
+  return page.evaluate(oldPreviewPredicateAccepts, inputToExpected(page, input));
 }
 
 async function setPreviewUrl(page: Page, url: string) {

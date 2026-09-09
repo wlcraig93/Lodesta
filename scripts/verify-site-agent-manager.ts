@@ -131,6 +131,10 @@ const taskSkills = {
   edit: taskSkillFor("edit"),
   rebase: taskSkillFor("rebase")
 } as const;
+const cumulativeEditKnowledge = "Add is cumulative: preserve existing visible text, including similar text, unless the owner explicitly requests replacement or removal.";
+assert(taskSkills.edit.knowledge.includes(cumulativeEditKnowledge), "The edit skill must distinguish additive requests from replacement/removal.");
+assert(!taskSkills.initial_build.knowledge.includes(cumulativeEditKnowledge));
+assert(!taskSkills.rebase.knowledge.includes(cumulativeEditKnowledge));
 for (const [kind, skill] of Object.entries(taskSkills)) {
   assert.equal(skill.id, "website-authoring");
   assert.equal(skill.identity, `website-authoring@${sha256(stableJson({

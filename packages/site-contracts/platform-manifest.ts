@@ -10,8 +10,9 @@ export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:495
 // Checked-in release identity for the compiler scaffold, including platform capability CSS.
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
 export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:4035a9c30f9143fa4d57ad4ef012df70c88321c2b6da25d9096b58ee96d26a5c";
-// Descriptor: website-manager:truthful-source-media-context:guarded-missed-logo-adoption:2026-09-09
-export const websiteManagerPromptIdentity = "website-manager@sha256:7d71b07c6f1dffc5bea77e13cbafc007de0414a2af450ca517c75382cb0144e1";
+// Hash of the actual authoring system prompt. Tool/context changes are carried
+// by the platform identity; they do not redefine unchanged system-prompt bytes.
+export const websiteManagerPromptIdentity = "website-manager@sha256:44661e8fa2ca98c76c43c46b73607ed7461531d4bb8a75c2e5123128cce3c3c4";
 // Descriptor: fact-binding-validator:exact-markers-and-bindings:advisory-prose-evidence:2026-09-05
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:e560da37c4418c025b62803388a62cf34a50358b0a6c7ec64436ef6552e71eaa";
 // Descriptor: site-verification-policy:controlled-panel-navigation:advisory-prose-evidence:owner-approved-documents:no-header-line-count-advisory:2026-09-08

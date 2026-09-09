@@ -329,6 +329,27 @@ const prepareApprovedPrivacy = (text: string) => prepareSiteArtifact({
 assert(!errors(prepareApprovedPrivacy(approvedPrivacyText)).some(finding => finding.id === "fact.legal_source_preservation"));
 assert(errors(prepareApprovedPrivacy(privacySourceText)).some(finding => finding.id === "fact.legal_source_preservation"), "The old text must not satisfy a specifically approved correction, even at >85% similarity.");
 assert(errors(prepareApprovedPrivacy(approvedPrivacyText.replace("This website does not use persistent analytics browser storage.", ""))).some(finding => finding.id === "fact.legal_source_preservation"));
+const approvedMismatch = (text: string) => errors(prepareApprovedPrivacy(text)).find(finding => finding.id === "fact.legal_source_preservation");
+const omittedApprovedWord = approvedMismatch(approvedPrivacyText.replace("respond to your request", "respond to request"));
+assert(omittedApprovedWord, "A single omitted approved word must still block.");
+assert.equal(omittedApprovedWord.severity, "error");
+assert.equal(omittedApprovedWord.route, "/privacy");
+assert.match(omittedApprovedWord.message, /First prefix-aligned difference at normalized token offsets/);
+assert.match(omittedApprovedWord.message, /zero-based, not source-line coordinates/);
+assert.match(omittedApprovedWord.message, /Expected context: .*respond to your request/);
+assert.match(omittedApprovedWord.message, /Rendered context: .*respond to request/);
+for (const changedText of [
+  approvedPrivacyText.replace("respond to your request", "respond to each request"),
+  approvedPrivacyText.replace("respond to your request", "respond directly to your request"),
+  approvedPrivacyText.slice(0, -"applicable legal obligations.".length)
+]) assert.match(approvedMismatch(changedText)?.message ?? "", /First prefix-aligned difference/);
+assert.match(approvedMismatch(approvedPrivacyText.replace("Privacy Policy We collect", "A different notice We collect"))?.message ?? "",
+  /Could not align the approved document's opening normalized tokens; no mismatch offset is reported/);
+const longMismatch = approvedMismatch(approvedPrivacyText.replace("respond to your request", `respond to ${"x".repeat(1_000)} request`));
+assert(longMismatch && longMismatch.message.length < 900, "Diagnostic excerpts must be bounded even for a very long token.");
+assert(!approvedMismatch(`Surrounding introduction. ${approvedPrivacyText} Surrounding footer.`), "Surrounding text must remain permitted.");
+assert(!approvedMismatch(approvedPrivacyText.replace("respond to your request", "respond <strong>to your</strong> request")), "Inline markup must preserve approved tokens.");
+assert(!approvedMismatch(approvedPrivacyText.toUpperCase().replaceAll(".", "!")), "Existing case/punctuation normalization must remain unchanged.");
 assert.deepEqual(resolveApprovedSourceDocuments({ ...documentArgs, buildInput: input }), [], "Unbound approval must not affect a prior input.");
 assert.deepEqual(resolveApprovedSourceDocuments({ ...documentArgs, snapshots: [originalDocumentSnapshot, { ...approvalSnapshot, sourceType: "website" }] }), [], "Scraped approval-shaped prose must not authorize a replacement.");
 for (const invalid of [

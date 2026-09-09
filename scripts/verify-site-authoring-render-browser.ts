@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { readFile } from "node:fs/promises";
 import sharp from "sharp";
+import ts from "typescript";
 import { chromium } from "playwright";
 import { sanitizeAgentHtml } from "../packages/site-verification/sanitizer";
 import { sha256 } from "../packages/business-data";
@@ -15,6 +18,98 @@ import {
 import { expectedSiteSandboxManifest } from "../packages/site-contracts";
 import { materializeSourceLogo } from "../packages/site-platform/source-logo-materialization";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
+import { BrowserVerificationInfrastructureError } from "../packages/site-verification/browser-gate";
+import { trustedFontFiles } from "../workers/site-sandbox/scaffold/platform/font-library";
+
+// Execute the actual navigation helper with deterministic request events. No
+// production timeout override or browser wait is needed to exercise failures.
+const navigationSource = await readFile("packages/site-verification/browser-gate.ts", "utf8");
+const navigationAst = ts.createSourceFile("browser-gate.ts", navigationSource, ts.ScriptTarget.Latest, true);
+const navigationNames = new Set(["navigatePageWithRetry", "abortable", "transientBrowserInfrastructureError", "browserFailureMessage"]);
+const navigationFunctions = navigationAst.statements.filter(statement => ts.isFunctionDeclaration(statement) && navigationNames.has(statement.name?.text ?? ""));
+assert.equal(navigationFunctions.length, navigationNames.size);
+const navigationJs = ts.transpileModule(navigationFunctions.map(statement => statement.getText(navigationAst)).join("\n"), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022 }
+}).outputText;
+let navigationClockMs = 0;
+const navigateForTest = new Function("BrowserVerificationInfrastructureError", "BrowserVerificationUnavailableError", "trustedFontFiles", "Date",
+  `${navigationJs}; return navigatePageWithRetry;`)(BrowserVerificationInfrastructureError, BrowserVerificationUnavailableError, trustedFontFiles, { now: () => navigationClockMs }) as
+  (input: { page: EventEmitter; url: string; route: string; viewport: string; signal?: AbortSignal }) => Promise<unknown>;
+const navigationUrl = "http://127.0.0.1:43123/services/";
+const navigationRequest = (url: string, type: string) => ({ url: () => url, resourceType: () => type });
+const navigationCalls: Array<{ url: string; options: unknown }> = [];
+let navigationAttempts = 0;
+const timeoutPage = Object.assign(new EventEmitter(), { goto: async (url: string, options: unknown) => {
+  navigationCalls.push({ url, options });
+  if (url === "about:blank") return undefined;
+  navigationAttempts += 1;
+  const emit = (path: string, type: string) => {
+    const request = navigationRequest(path.startsWith("http") ? path : `http://127.0.0.1:43123${path}`, type);
+    timeoutPage.emit("request", request);
+    return request;
+  };
+  if (navigationAttempts === 1) emit("/_lodesta/assets/asset_revision_first_attempt", "image");
+  else {
+    emit("/services/?secret=query#private", "document");
+    emit("/site.css?secret=query#private", "stylesheet");
+    emit(`/_lodesta/fonts/${trustedFontFiles[0]}?secret=query`, "font");
+    emit("/_lodesta/runtime/site-runtime-v4.js?secret=query", "script");
+    emit("http://user:password@127.0.0.1:43123/_lodesta/assets/asset_revision_pending?secret=query#private", "image");
+    const finished = emit("/_lodesta/assets/asset_revision_finished", "image");
+    timeoutPage.emit("requestfinished", finished);
+    const failed = emit("/_lodesta/assets/asset_revision_failed", "image");
+    timeoutPage.emit("requestfailed", failed);
+    emit("https://external.invalid/_lodesta/assets/asset_revision_external?secret=query", "image");
+    emit("/private-secret-path", "document");
+    emit("/_lodesta/fonts/not-a-trusted-font.woff2", "font");
+    emit("/site.css", "fetch");
+    for (let index = 0; index < 32; index += 1) emit(`/_lodesta/assets/asset_revision_pending_${index}`, "image");
+  }
+  navigationClockMs += 1_250;
+  throw new Error("page.goto: Timeout 30000ms exceeded.");
+} });
+const assertNavigationListenersRemoved = (page: EventEmitter) => {
+  for (const event of ["request", "requestfinished", "requestfailed"]) assert.equal(page.listenerCount(event), 0, `${event} listener leaked`);
+};
+await assert.rejects(navigateForTest({ page: timeoutPage, url: navigationUrl, route: "/services", viewport: "desktop" }), error => {
+  assert(error instanceof BrowserVerificationInfrastructureError);
+  const details = error.details as typeof error.details & { pendingResources?: Array<{ path: string; resourceType: string; elapsedMs: number }> };
+  assert.equal(details.attempts, 2);
+  assert.equal(details.pendingResources?.length, 8, "Final timeout must retain bounded pending-resource evidence.");
+  assert.deepEqual(details.pendingResources?.slice(0, 5).map(item => item.resourceType), ["document", "stylesheet", "font", "script", "image"]);
+  assert(details.pendingResources?.every(item => item.elapsedMs === 1_250));
+  const serialized = JSON.stringify(details.pendingResources);
+  for (const forbidden of ["secret", "private", "external", "password", "user:", "?", "#", "http", "first_attempt", "finished", "failed", "not-a-trusted"]) assert(!serialized.includes(forbidden), `Leaked ${forbidden}`);
+  return true;
+});
+assert.deepEqual(navigationCalls, [
+  { url: navigationUrl, options: { waitUntil: "load", timeout: 30_000 } },
+  { url: "about:blank", options: { waitUntil: "commit", timeout: 5_000 } },
+  { url: navigationUrl, options: { waitUntil: "load", timeout: 30_000 } }
+]);
+assertNavigationListenersRemoved(timeoutPage);
+for (const mode of ["success", "abort", "non-transient", "non-timeout"] as const) {
+  const controller = new AbortController();
+  const result = { ok: true };
+  const page = Object.assign(new EventEmitter(), { goto: async (url: string) => {
+    if (url === "about:blank") return undefined;
+    page.emit("request", navigationRequest("http://127.0.0.1:43123/site.css?secret=query", "stylesheet"));
+    if (mode === "success") return result;
+    if (mode === "abort") { queueMicrotask(() => controller.abort()); return new Promise(() => undefined); }
+    throw new Error(mode === "non-timeout" ? "ECONNRESET" : "Unexpected fixture failure");
+  } });
+  const operation = navigateForTest({ page, url: navigationUrl, route: "/services", viewport: "desktop", signal: controller.signal });
+  if (mode === "success") assert.equal(await operation, result);
+  else await assert.rejects(operation, error => {
+    if (mode === "non-timeout") {
+      assert(error instanceof BrowserVerificationInfrastructureError);
+      assert.equal("pendingResources" in error.details, false);
+    }
+    return true;
+  });
+  assertNavigationListenersRemoved(page);
+}
+console.log(JSON.stringify({ ok: true, navigationTimeoutTelemetry: "bounded-sanitized-cleaned", navigationBehavior: "unchanged" }));
 
 class MemoryBlobStore implements ArtifactBlobStore {
   private readonly values = new Map<string, ImmutableBlob>();

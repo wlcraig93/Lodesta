@@ -1,7 +1,7 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
-// Descriptor: site-authoring-platform:observed-name-authority:explicit-missed-logo-adoption:question-scoped-metered-research:explicit-line-edit-semantics:scope-preserving-type-advisory:2026-09-09
-export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:d97112b4a9db2daa863cfc0c8e3084e721dfe173c6f25d432a9eba048cff701d";
+// Descriptor: site-authoring-platform:observed-name-authority:explicit-missed-logo-adoption:question-scoped-metered-research:explicit-line-edit-semantics:scope-preserving-type-advisory:approved-document-mismatch-context:pending-navigation-resource-evidence:2026-09-09
+export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:d62150cf4edb536f7e53eb3d0c7c9cb68c6c4abfa88d7e30ffec09164b531414";
 export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
@@ -15,8 +15,8 @@ export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:e9d0d
 export const websiteManagerPromptIdentity = "website-manager@sha256:44661e8fa2ca98c76c43c46b73607ed7461531d4bb8a75c2e5123128cce3c3c4";
 // Descriptor: fact-binding-validator:exact-markers-and-bindings:advisory-prose-evidence:2026-09-05
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:e560da37c4418c025b62803388a62cf34a50358b0a6c7ec64436ef6552e71eaa";
-// Descriptor: site-verification-policy:controlled-panel-navigation:advisory-prose-evidence:owner-approved-documents:no-header-line-count-advisory:qualified-body-text-advisory:2026-09-09
-export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:b75a53d6a28650efff784a2e72c84a854331b3a37dcd7ddb5028705ac76cceb7";
+// Descriptor: site-verification-policy:controlled-panel-navigation:advisory-prose-evidence:owner-approved-documents:no-header-line-count-advisory:qualified-body-text-advisory:approved-document-mismatch-context:pending-navigation-resource-evidence:2026-09-09
+export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:03891266f4f69958c583a2afcd728b77fdf75caf0b4ea0076ea996fe26306d85";
 export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:a9dc99a379ac4ccb9bd4a590bda1b4864ac05827a8d2e560fe06f46706974cab";
 
 export const siteTechnicalReleasePolicy = {

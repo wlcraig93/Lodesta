@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { DomUtils, parseDocument } from "htmlparser2";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page, type Request } from "playwright";
 import { isCustomerPortalLink, sha256 } from "@/packages/business-data";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts/blob-store";
 import type { SitePublicBuildInput } from "@/packages/site-contracts";
@@ -66,6 +66,7 @@ export type BrowserVerificationInfrastructureDetails = {
   viewport?: BrowserGateCapture["viewport"];
   attempts: 1 | 2;
   cause: string;
+  pendingResources?: Array<{ path: string; resourceType: string; elapsedMs: number }>;
 };
 
 export class BrowserVerificationInfrastructureError extends Error {
@@ -4118,7 +4119,29 @@ async function navigatePageWithRetry(input: {
   viewport: BrowserGateCapture["viewport"];
   signal?: AbortSignal;
 }) {
+  const target = new URL(input.url);
   for (const attempts of [1, 2] as const) {
+    // Bounded diagnostic telemetry only; never wait on or alter these requests.
+    const pending = new Map<Request, { path: string; resourceType: string; startedAt: number }>();
+    const requested = (request: Request) => {
+      if (pending.size >= 16) return;
+      try {
+        const url = new URL(request.url());
+        const path = url.pathname;
+        const resourceType = request.resourceType();
+        if (url.origin !== target.origin || path.length > 240) return;
+        const knownResource = (resourceType === "document" && path === target.pathname)
+          || (resourceType === "stylesheet" && path === "/site.css")
+          || (resourceType === "image" && /^\/_lodesta\/assets\/asset_revision_[a-zA-Z0-9_-]+$/.test(path))
+          || (resourceType === "font" && trustedFontFiles.some(file => path === `/_lodesta/fonts/${file}`))
+          || (resourceType === "script" && /^\/_lodesta\/runtime\/(?:[a-zA-Z0-9_-]+|patches\/[a-f0-9]{64})\.js$/.test(path));
+        if (knownResource) pending.set(request, { path, resourceType, startedAt: Date.now() });
+      } catch { /* Malformed/unrecognized URLs provide no safe diagnostic. */ }
+    };
+    const settled = (request: Request) => { pending.delete(request); };
+    input.page.on("request", requested);
+    input.page.on("requestfinished", settled);
+    input.page.on("requestfailed", settled);
     try {
       return await abortable(input.page.goto(input.url, {
         // Finalized routes are fetched byte-for-byte before browser inspection,
@@ -4135,10 +4158,20 @@ async function navigatePageWithRetry(input: {
           route: input.route,
           viewport: input.viewport,
           attempts,
-          cause: browserFailureMessage(error)
+          cause: browserFailureMessage(error),
+          ...(/timeout|timed out/i.test(browserFailureMessage(error)) ? {
+            pendingResources: [...pending.values()].slice(0, 8).map(({ path, resourceType, startedAt }) => ({
+              path, resourceType, elapsedMs: Math.max(0, Date.now() - startedAt)
+            }))
+          } : {})
         });
       }
       await input.page.goto("about:blank", { waitUntil: "commit", timeout: 5_000 }).catch(() => undefined);
+    } finally {
+      input.page.off("request", requested);
+      input.page.off("requestfinished", settled);
+      input.page.off("requestfailed", settled);
+      pending.clear();
     }
   }
   throw new Error("browser_navigation_retry_exhausted");

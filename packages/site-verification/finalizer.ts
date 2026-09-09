@@ -436,7 +436,7 @@ function validateSourceSensitiveLegalRoutes(
       // Preserve its complete word stream, allowing markup and surrounding shell.
       if (!sourceTokens.length || !(` ${renderedTokens.join(" ")} `).includes(` ${sourceTokens.join(" ")} `)) {
         findings.push(gateFinding("fact.legal_source_preservation", "claim",
-          `Owner-approved document ${path} must retain its complete approved text. Read ownerAuthority.approvedDocuments rather than the historical source document.`, path));
+          `Owner-approved document ${path} must retain its complete approved text. Read ownerAuthority.approvedDocuments rather than the historical source document. ${approvedDocumentMismatchContext(sourceTokens, renderedTokens)}`, path));
       }
       continue;
     }
@@ -459,6 +459,22 @@ function validateSourceSensitiveLegalRoutes(
   }
 
   return findings;
+}
+
+function approvedDocumentMismatchContext(sourceTokens: string[], renderedTokens: string[]) {
+  // Diagnostic only: the exact contiguous-token assertion above is unchanged.
+  // A short opening anchor permits surrounding page chrome without a diff engine.
+  const prefix = sourceTokens.slice(0, 8);
+  const start = prefix.length ? renderedTokens.findIndex((_token, index) =>
+    prefix.every((token, offset) => renderedTokens[index + offset] === token)) : -1;
+  if (start < 0) return "Could not align the approved document's opening normalized tokens; no mismatch offset is reported. Compare the complete approved document with the rendered text.";
+  let offset = prefix.length;
+  while (offset < sourceTokens.length && sourceTokens[offset] === renderedTokens[start + offset]) offset += 1;
+  const excerpt = (tokens: string[], index: number) => {
+    const context = tokens.slice(Math.max(0, index - 6), index + 8).join(" ");
+    return context.length > 180 ? `${context.slice(0, 179)}…` : context;
+  };
+  return `First prefix-aligned difference at normalized token offsets approved=${offset}, rendered=${start + offset} (zero-based, not source-line coordinates). Expected context: "${excerpt(sourceTokens, offset)}". Rendered context: "${excerpt(renderedTokens, start + offset)}".`;
 }
 
 function sourceTextLines(value: string) {

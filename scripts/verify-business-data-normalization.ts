@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { selectObservedFirstPartyWarrantyBlocks } from "../packages/business-data/website-ingestion";
+import { selectObservedFirstPartyWarrantyBlocks, selectSupportingSourceBlock } from "../packages/business-data/website-ingestion";
 import {
   businessNameCandidateScore,
   normalizeObservedBusinessHours,
@@ -43,6 +43,20 @@ const identity = "Capital Collision";
 assert(businessNameCandidateScore(identity, hostname) > businessNameCandidateScore(generic, hostname));
 assert.equal(preferBusinessNameCandidate(generic, identity, hostname), identity);
 assert.equal(preferBusinessNameCandidate(identity, generic, hostname), identity);
+
+const identityBlocks = [
+  { id: "device", sourceUrl: "https://identity.example/privacy", sourcePageHash: "fixture", containerId: "p:1", order: 0, displayText: "Analytics records broad device categories." },
+  { id: "prefix", sourceUrl: "https://identity.example/privacy", sourcePageHash: "fixture", containerId: "p:2", order: 1, displayText: "Devon provides information." },
+  { id: "name", sourceUrl: "https://identity.example/", sourcePageHash: "fixture", containerId: "p:1", order: 0, displayText: "Welcome to DEV, our business." }
+];
+assert.equal(selectSupportingSourceBlock(identityBlocks.slice(0, 2), "Dev", new Map(), "business_name"), undefined,
+  "A name fragment inside another word was treated as business identity evidence.");
+assert.equal(selectSupportingSourceBlock(identityBlocks, "Dev", new Map(), "business_name")?.id, "name",
+  "An observed case-insensitive, punctuation-delimited complete name lost its citation.");
+assert.equal(selectSupportingSourceBlock([{ ...identityBlocks[2]!, displayText: "Dev" }], "Dev Consulting", new Map(), "business_name"), undefined,
+  "A block containing only part of a longer business name was treated as support for the entire identity.");
+assert.equal(selectSupportingSourceBlock(identityBlocks, "Dev", new Map())?.id, "device",
+  "Business-name citation tightening unexpectedly changed other fact kinds' existing matching semantics.");
 
 assert.deepEqual(businessOfferingSchema.parse({
   id: "offering_owner_1",

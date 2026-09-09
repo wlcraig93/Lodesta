@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
 import { explicitServiceAreaListEvidence, type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
 import { assertPublicFetchUrl } from "@/lib/url-safety";
 import type { SourceTextBlock } from "@/lib/source-text-blocks";
@@ -212,10 +211,10 @@ export async function ingestWebsite(input: {
     ...crawl.extractedFacts,
     ...scopedContactAndLocation
   };
-  const crawlName = clean(crawl.extractedFacts.name) ?? clean(crawl.title)?.replace(/\s*[|\-–].*$/, "").trim();
-  const sourceBackedName = preferBusinessNameCandidate(crawlName, undefined, new URL(sourceUrl).hostname);
-  const identityStatus = clean(sourceBackedName) ? "verified" as const : "provisional" as const;
-  const name = clean(sourceBackedName) ?? hostnameBusinessName(sourceUrl);
+  // An unselected page title or hostname is not an observed business name.
+  const crawlName = clean(crawl.extractedFacts.name);
+  const identityStatus = crawlName ? "verified" as const : "provisional" as const;
+  const name = crawlName ?? hostnameBusinessName(sourceUrl);
   const sourceContentHash = websiteMirrorManifestHash({ ingestion: generationIngestion, captures });
   const sourceSnapshotId = sourceSnapshotIdForBusiness(businessId, sourceContentHash);
   const mirror = buildWebsiteSourceMirror({
@@ -260,7 +259,7 @@ export async function ingestWebsite(input: {
       ? blockIndex.find((candidate) => candidate.id === evidence.sourceBlockId && candidate.sourceUrl === evidence.sourceUrl)
       : evidence
         ? undefined
-        : selectSupportingSourceBlock(blockIndex, text, evidenceClassByUrl);
+        : selectSupportingSourceBlock(blockIndex, text, evidenceClassByUrl, kind);
     const evidenceClass: EvidenceClass = evidence?.evidenceClass ?? (block ? evidenceClassByUrl.get(block.sourceUrl) ?? "unknown" : "first_party");
     const automaticallyEligible = publicEligible && evidenceClass === "first_party";
     publicFacts.push({
@@ -1363,12 +1362,16 @@ function isPlausiblyOwnedSocialProfile(value: string, businessName: string | und
 export function selectSupportingSourceBlock(
   blocks: SourceTextBlock[],
   value: string,
-  evidenceClassByUrl: ReadonlyMap<string, EvidenceClass> = new Map()
+  evidenceClassByUrl: ReadonlyMap<string, EvidenceClass> = new Map(),
+  factKind?: BusinessFact["kind"]
 ) {
   const target = normalizedText(value);
   if (target.length < 3) return undefined;
   const matches = blocks.filter((block) => {
     const text = normalizedText(block.displayText);
+    // Identity citations must contain the entire name, not e.g. Dev in device
+    // or a shorter block that happens to be part of a longer business name.
+    if (factKind === "business_name") return ` ${text} `.includes(` ${target} `);
     return text.includes(target) || target.includes(text);
   });
   const rank = (block: SourceTextBlock) => {

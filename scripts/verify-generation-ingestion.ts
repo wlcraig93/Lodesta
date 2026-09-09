@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import dns from "node:dns/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { mock } from "node:test";
 import { gzipSync } from "node:zlib";
 import { explicitServiceAreaListEvidence, summarizeCrawlHtml, type CrawlAssessment } from "../lib/crawler";
 import {
@@ -15,6 +18,8 @@ import {
 import { PublicFetchUrlError } from "../lib/url-safety";
 import {
   assertSourceSuitableForGeneration,
+  createLooseWebsiteBootstrap,
+  ingestWebsite,
   observedProof,
   retainedContactConsensus,
   selectObservedFirstPartyTestimonialBlocks,
@@ -26,6 +31,83 @@ import {
 } from "../packages/business-data/website-ingestion";
 
 const origin = "https://fixture.example";
+
+// Synthetic source-authority regression; every request and DNS lookup is stubbed.
+// Exercise final BusinessState creation, not a duplicate of its name/status logic.
+const identityOrigin = "https://dev.identity-fixture.example";
+const identityBody = `<p>First-party website analytics records page views, clicks, form activity,
+  limited performance measurements, page paths, referrer hosts, campaign fields, and broad device categories.
+  A random identifier held in page memory connects activity only within that page load;
+  it does not identify returning visitors or connect activity across pages.</p>`;
+const identityPage = (title: string | undefined, metadata = "", links = "") =>
+  `<!doctype html>${title === undefined ? "" : `<title>${title}</title>`}${metadata}<main>${identityBody}${links}</main>`;
+const identityHome = identityPage("Lodesta | AI website manager for local businesses",
+  '<meta property="og:site_name" content="Lodesta">',
+  '<a href="/privacy/">Privacy</a><a href="/terms/">Terms</a>');
+const identityPrivacy = identityPage("Privacy Policy | Lodesta");
+const identityTerms = identityPage("Terms of Service | Lodesta");
+assert.equal(summarizeCrawlHtml(identityHome, identityOrigin).extractedFacts.name, "Lodesta");
+for (const html of [identityPrivacy, identityTerms, identityPage("Home"), identityPage(undefined)]) {
+  assert.equal(summarizeCrawlHtml(html, identityOrigin).extractedFacts.name, undefined,
+    "A page without a selected observed name manufactured a hostname-derived extracted fact.");
+}
+const identityBootstrap = await createLooseWebsiteBootstrap({ url: identityOrigin });
+assert.equal(identityBootstrap.state.identity.name, "Dev");
+assert.equal(identityBootstrap.state.identity.status, "provisional");
+assert.equal(identityBootstrap.state.facts.some((fact) => fact.kind === "business_name"), false);
+
+let identityDocuments = new Map([
+  ["/", identityHome], ["/privacy", identityPrivacy], ["/terms", identityTerms]
+]);
+const identityDns = mock.method(dns, "lookup", async (hostname: string) => {
+  assert.equal(hostname, new URL(identityOrigin).hostname, "Identity fixture attempted an unexpected DNS lookup.");
+  return [{ address: "93.184.216.34", family: 4 }];
+});
+syncBuiltinESMExports();
+const identityFetch = mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  assert.equal(url.origin, identityOrigin, "Identity fixture attempted an unexpected network request.");
+  if (url.pathname === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+  const html = identityDocuments.get(url.pathname);
+  return html === undefined ? response("missing", 404, "text/plain") : response(html, 200);
+});
+try {
+  const observedIdentity = await ingestWebsite({ url: identityOrigin });
+  assert.equal(observedIdentity.generationIngestion.counts.fetched, 3);
+  assert.equal(observedIdentity.generationIngestion.counts.browserRendered, 0);
+  assert.equal(observedIdentity.state.identity.name, "Lodesta",
+    "Policy-page hostname fallbacks displaced the homepage's observed business identity.");
+  assert.equal(observedIdentity.state.identity.status, "verified");
+  const observedNameFacts = observedIdentity.state.facts.filter((fact) => fact.kind === "business_name");
+  assert.equal(observedNameFacts.length, 1);
+  assert.equal(observedNameFacts[0]?.value, "Lodesta");
+  assert.equal(observedNameFacts[0]?.publicEligible, true);
+
+  for (const title of ["Home", "Privacy Policy | Lodesta", undefined]) {
+    identityDocuments = new Map([["/", identityPage(title)]]);
+    const provisionalIdentity = await ingestWebsite({ url: identityOrigin });
+    assert.equal(provisionalIdentity.generationIngestion.counts.browserRendered, 0);
+    assert.equal(provisionalIdentity.crawl.extractedFacts.name, undefined);
+    assert.equal(provisionalIdentity.state.identity.name, "Dev");
+    assert.equal(provisionalIdentity.state.identity.status, "provisional",
+      "An unchecked raw title or hostname was promoted to verified identity.");
+    assert.equal(provisionalIdentity.state.facts.some((fact) => fact.kind === "business_name"), false,
+      "A provisional hostname label produced a public business-name authority fact.");
+  }
+
+  identityDocuments = new Map([["/", identityPage("Home", '<meta property="og:site_name" content="Dev">')]]);
+  const metadataIdentity = await ingestWebsite({ url: identityOrigin });
+  const metadataName = metadataIdentity.state.facts.find((fact) => fact.kind === "business_name");
+  assert.equal(metadataName?.value, "Dev");
+  assert.equal(metadataName?.publicEligible, true);
+  assert.equal(metadataName?.source.sourceUrl, `${identityOrigin}/`);
+  assert.equal(metadataName?.source.sourceBlockId, undefined,
+    "The substring dev in device was attached as business-name proof instead of retaining metadata-only page provenance.");
+} finally {
+  identityFetch.mock.restore();
+  identityDns.mock.restore();
+  syncBuiltinESMExports();
+}
 
 const repeatedPipeTitle = summarizeCrawlHtml(
   "<!doctype html><title>Home || Western Roof Company</title><main><h1>Western Roof Company</h1></main>",

@@ -1547,12 +1547,7 @@ function inferNameFromTitle(title: string | undefined, hostname: string) {
     }))
     .sort((left, right) => right.score - left.score);
   const best = scored.find((candidate) => candidate.score > 0);
-  if (best) return best.candidate;
-  return hostname
-    .replace(/^www\./, "")
-    .split(".")[0]
-    .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (character) => character.toUpperCase());
+  return best?.candidate;
 }
 
 function extractVisibleBusinessNameCandidate(html: string, hostname: string) {

@@ -114,6 +114,7 @@ import {
   type SiteWorkspaceRevision,
   type SourceSnapshot,
   type SourceSnapshotPage,
+  type SourceSnapshotResource,
   type TrustedRuntimePatch
 } from "@/packages/site-contracts";
 import {
@@ -4844,26 +4845,33 @@ export class SiteAuthoringWorkflow {
         storageKey: string;
       }>;
       for (const resourceId of unresolvedIds) {
-        const resource = await this.repository.getSourceSnapshotResource(resourceId).catch(() => undefined);
-        if (!resource || !sourceResourceIsAdoptableImage(resource) || !resource.storageKey) continue;
+        let resolved: { sourceId: string; resource: SourceSnapshotResource } | undefined;
+        for (const sourceId of input.sourceCatalog.keys()) {
+          const resource = await this.repository.getSourceSnapshotResource(resourceId, sourceId).catch(() => undefined);
+          if (resource) {
+            resolved = { sourceId, resource };
+            break;
+          }
+        }
+        if (!resolved || !sourceResourceIsAdoptableImage(resolved.resource) || !resolved.resource.storageKey) continue;
         const candidate = rankSourceAssetCandidates({
-          resources: [resource],
-          pages: await this.repository.listSourceSnapshotPages(resource.sourceSnapshotId)
+          resources: [resolved.resource],
+          pages: await this.repository.listSourceSnapshotPages(resolved.sourceId)
         })[0];
         if (!candidate || candidate.likelyKind === "logo") continue;
         sourceAssets.push({
           resourceId,
-          sourceId: resource.sourceSnapshotId,
+          sourceId: resolved.sourceId,
           sourcePageId: candidate.sourcePageId,
           sourcePageUrl: candidate.sourcePageUrl,
-          sourceUrl: resource.finalUrl ?? resource.requestedUrl,
-          contentType: (resource.contentType ?? "").split(";", 1)[0] ?? "",
-          rawContentHash: asContentHash(resource.rawContentHash!),
-          rawBytes: resource.rawBytes,
+          sourceUrl: resolved.resource.finalUrl ?? resolved.resource.requestedUrl,
+          contentType: (resolved.resource.contentType ?? "").split(";", 1)[0] ?? "",
+          rawContentHash: asContentHash(resolved.resource.rawContentHash!),
+          rawBytes: resolved.resource.rawBytes,
           likelyKind: candidate.likelyKind,
           relevanceScore: candidate.relevanceScore,
           relevanceReasons: candidate.relevanceReasons,
-          storageKey: resource.storageKey
+          storageKey: resolved.resource.storageKey
         });
       }
       const resolvedSourceIds = new Set(sourceAssets.map((asset) => asset.resourceId));

@@ -117,6 +117,92 @@ try {
   });
   await store.putImmutable({ key: logoResource.storageKey!, bytes: logoBytes, contentType: "image/png", contentHash: sha256(logoBytes) });
   await repository.saveSourceSnapshotResources([logoResource, { ...logoResource, id: "resource_other_crest", rawContentHash: sha256("different") }]);
+  const mirroredWebsiteSource = canarySnapshots.find((snapshot) => snapshot.sourceType === "website")!;
+  const inspectedPhoto = sourceSnapshotResourceSchema.parse({
+    schemaVersion: 1, id: "resource_mirrored_service_photo", sourceSnapshotId: originalSnapshot.id,
+    captureKind: "http_response", role: "image", requestedUrl: "https://northstar.example/assets/service-photo.webp",
+    finalUrl: "https://northstar.example/assets/service-photo.webp", outcome: "fetched", status: 200, contentType: "image/webp",
+    storedEncoding: "identity", rawContentHash: sha256(mediaBytes), blobContentHash: sha256(mediaBytes),
+    storageKey: "fixture/service-photo", rawBytes: mediaBytes.length, storedBytes: mediaBytes.length,
+    headers: {}, redirectChain: [], initiatorUrls: [homepage.requestedUrl], capturedAt: now, metadata: {}
+  });
+  const secondarySnapshot = sourceSnapshotSchema.parse({
+    ...originalSnapshot, id: "source_secondary_catalog", businessId: canary.buildInput.businessId,
+    sourceUrl: "https://second.example/", contentHash: sha256("secondary-catalog")
+  });
+  const secondaryPhoto = sourceSnapshotResourceSchema.parse({
+    ...inspectedPhoto, id: "resource_secondary_catalog_photo", sourceSnapshotId: secondarySnapshot.id,
+    requestedUrl: "https://second.example/assets/service-photo.webp", finalUrl: "https://second.example/assets/service-photo.webp",
+    storageKey: "fixture/secondary-service-photo", initiatorUrls: [secondarySnapshot.sourceUrl!]
+  });
+  const secondaryPage = sourceSnapshotPageSchema.parse({
+    ...homepage, id: "page_secondary_catalog", sourceSnapshotId: secondarySnapshot.id, resourceId: secondaryPhoto.id,
+    requestedUrl: secondarySnapshot.sourceUrl!, finalUrl: secondarySnapshot.sourceUrl!, extractedText: "Secondary source home",
+    textContentHash: sha256("Secondary source home")
+  });
+  const outsideSnapshot = sourceSnapshotSchema.parse({
+    ...originalSnapshot, id: "source_outside_catalog", businessId: canary.buildInput.businessId,
+    sourceUrl: "https://outside.example/", contentHash: sha256("outside-catalog")
+  });
+  const outsidePhoto = sourceSnapshotResourceSchema.parse({
+    ...inspectedPhoto, id: "resource_outside_catalog_photo", sourceSnapshotId: outsideSnapshot.id,
+    requestedUrl: "https://outside.example/assets/service-photo.webp", finalUrl: "https://outside.example/assets/service-photo.webp",
+    storageKey: "fixture/outside-service-photo", initiatorUrls: [outsideSnapshot.sourceUrl!]
+  });
+  const outsidePage = sourceSnapshotPageSchema.parse({
+    ...secondaryPage, id: "page_outside_catalog", sourceSnapshotId: outsideSnapshot.id, resourceId: outsidePhoto.id,
+    requestedUrl: outsideSnapshot.sourceUrl!, finalUrl: outsideSnapshot.sourceUrl!, extractedText: "Outside source home",
+    textContentHash: sha256("Outside source home")
+  });
+  await repository.saveSourceSnapshotResources([inspectedPhoto]);
+  await repository.saveSourceSnapshot(secondarySnapshot);
+  await repository.saveSourceSnapshotResources([secondaryPhoto]);
+  await repository.saveSourceSnapshotPages([secondaryPage]);
+  await repository.saveSourceSnapshot(outsideSnapshot);
+  await repository.saveSourceSnapshotResources([outsidePhoto]);
+  await repository.saveSourceSnapshotPages([outsidePage]);
+  for (const asset of [inspectedPhoto, secondaryPhoto, outsidePhoto]) {
+    await store.putImmutable({ key: asset.storageKey!, bytes: mediaBytes, contentType: "image/webp", contentHash: sha256(mediaBytes) });
+  }
+  const inspectionSession = siteAgentSessionSchema.parse({ ...session, id: "session_asset_inspection",
+    siteId: canary.site.id, publicBuildInputId: canary.buildInput.id, sandboxId: "sandbox_asset_inspection" });
+  const inspectionRun = siteAgentRunSchema.parse({ ...run, id: "run_asset_inspection", sessionId: inspectionSession.id,
+    siteId: canary.site.id, publicBuildInputId: canary.buildInput.id, request: { kind: "owner_instruction", messageIds: ["message_asset_inspection"] } });
+  await repository.saveAgentSession(inspectionSession);
+  await repository.saveAgentRun(inspectionRun);
+  const inspectionComplete = new Error("asset_inspection_fixture_complete");
+  const inspectionManager = { run: async ({ runtime }: Parameters<WebsiteManagerAgent["run"]>[0]) => {
+    const inspected = await runtime.execute({ callId: "inspect_catalog_assets", name: "inspect_assets", arguments: {
+      assetIds: [inspectedPhoto.id, secondaryPhoto.id, outsidePhoto.id]
+    } });
+    const sourceAssets = inspected.diagnosticOutput.sourceAssets as Array<{
+      resourceId: string; sourceId: string; sourcePageId: string;
+    }>;
+    assert.deepEqual(sourceAssets.map((asset) => asset.resourceId).sort(), [inspectedPhoto.id, secondaryPhoto.id].sort(),
+      "Inspect must include every active-catalog image and not leak a retained image outside it.");
+    const mirrored = sourceAssets.find((asset) => asset.resourceId === inspectedPhoto.id)!;
+    const secondary = sourceAssets.find((asset) => asset.resourceId === secondaryPhoto.id)!;
+    assert.equal(mirrored.sourceId, mirroredWebsiteSource.id, "A mirrored resource must advertise the active logical source ID.");
+    assert.equal(secondary.sourceId, secondarySnapshot.id, "The matching second catalog source must be retained in the result.");
+    assert.equal(sourceAssets.some((asset) => asset.resourceId === outsidePhoto.id), false);
+    for (const asset of [mirrored, secondary]) {
+      const adopted = await runtime.execute({ callId: `adopt_${asset.resourceId}`, name: "adopt_source_asset", arguments: {
+        sourceId: asset.sourceId, resourceId: asset.resourceId, sourcePageId: asset.sourcePageId,
+        kind: "photo", alt: "Fixture service photo"
+      } });
+      assert.equal(adopted.diagnosticOutput.ok, true, "The exact inspect tuple must be accepted by adoption.");
+    }
+    throw inspectionComplete;
+  } };
+  const inspectionWorkflow = new SiteAuthoringWorkflow(repository, store, undefined, inspectionManager as never);
+  await assert.rejects(() => Reflect.get(inspectionWorkflow, "runAuthoring").call(inspectionWorkflow, {
+    run: inspectionRun, session: inspectionSession, buildInput: canary.buildInput,
+    authoringContext: createSiteAuthoringContext({ buildInput: canary.buildInput,
+      snapshots: [...canarySnapshots, secondarySnapshot], pages: [...canaryPages, secondaryPage] }),
+    snapshots: [...canarySnapshots, secondarySnapshot], sourcePages: [...canaryPages, secondaryPage],
+    sandboxRevision: "initial", kind: "edit", instruction: "Inspect the approved source photos.",
+    currentFiles: [{ path: "src/site.tsx", content: 'export const siteDefinition = { routes: [{path:"/",element:<main><h1>Home</h1></main>}] };' }]
+  }), (error: unknown) => error === inspectionComplete);
   const rebased: SitePublicBuildInput[] = [];
   const sandbox = {
     rebase: async (_id: string, _revision: string, next: SitePublicBuildInput) => {

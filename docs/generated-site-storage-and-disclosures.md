@@ -12,7 +12,7 @@ Reports show observed page views, tracked inquiries, action counts and page acti
 
 Managed form submission remains independent of analytics. Configured field values go to the managed inbox, with existing abuse-prevention metadata (including a server-side IP hash and user agent) and retained form provenance. Authentication and abuse prevention are separate from website analytics; this change does not remove those security controls. Existing raw analytics retention remains 14 months through the operator retention command; this change does not add a retention scheduler or consent platform.
 
-Preview/internal inspection contexts suppress analytics. The ordinary Google rating is authored text plus an external link; it does not load a Google SDK or review widget. Assets/fonts and the trusted runtime are served locally. Owner/account authentication, protected-preview access cookies and Lodesta product theme preferences are separate from ordinary anonymous customer-site visits. Hosting-layer response cookies still require a fresh-browser check.
+Preview/internal inspection contexts suppress analytics. The ordinary Google rating is authored text plus an external link; it does not load a Google SDK or review widget. Assets/fonts and the trusted runtime are served locally. Owner fast-preview CSP permits same-origin fonts only; it does not authorize external font hosts. Owner/account authentication, protected-preview access cookies and Lodesta product theme preferences are separate from ordinary anonymous customer-site visits. Hosting-layer response cookies still require a fresh-browser check.
 
 ## Disclosure boundary
 

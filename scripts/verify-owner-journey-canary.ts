@@ -83,6 +83,112 @@ assert.deepEqual(responseEvidence, {
   xCache: "MISS"
 });
 
+const fetchHelperMatch = source.match(/function ownerCanaryFetch[\s\S]*?\n}\n\nfunction normalizeSameSite/);
+assert(fetchHelperMatch, "The owner canary's bounded fetch helper was not found.");
+const fetchHelperSource = fetchHelperMatch[0].replace(/\nfunction normalizeSameSite$/, "");
+const fetchHelperBuild = await build({
+  stdin: {
+    contents: `const ownerCanaryFetchTimeoutMs = 30_000;\n${fetchHelperSource}\nexport { ownerCanaryFetch };`,
+    resolveDir: process.cwd(),
+    loader: "ts"
+  },
+  bundle: true,
+  write: false,
+  platform: "node",
+  format: "cjs"
+});
+const fetchHelperModule = {
+  exports: {} as { ownerCanaryFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> }
+};
+new Function("require", "module", "exports", fetchHelperBuild.outputFiles[0].text)(
+  createRequire(import.meta.url), fetchHelperModule, fetchHelperModule.exports
+);
+
+const waitForWorkspaceMatch = source.match(/async function waitForWorkspace[\s\S]*?\n}\n\nasync function waitForCandidatePreview/);
+assert(waitForWorkspaceMatch, "The owner canary workspace polling helper was not found.");
+const waitForWorkspaceSource = waitForWorkspaceMatch[0].replace(/\nasync function waitForCandidatePreview$/, "");
+const waitForWorkspaceBuild = await build({
+  stdin: {
+    contents: `
+      import assert from "node:assert/strict";
+      const admin: any = {};
+      const ownerCanaryFetchTimeoutMs = 30_000;
+      type Page = any;
+      type WorkspaceSnapshot = any;
+      ${waitForWorkspaceSource}
+      export { waitForWorkspace };
+    `,
+    resolveDir: process.cwd(),
+    loader: "ts"
+  },
+  bundle: true,
+  write: false,
+  platform: "node",
+  format: "cjs"
+});
+const waitForWorkspaceModule = {
+  exports: {} as {
+    waitForWorkspace: (
+      page: { evaluate: (callback: (input: unknown) => Promise<unknown>, input: unknown) => Promise<unknown> },
+      siteId: string,
+      accept: () => boolean,
+      timeoutMs: number
+    ) => Promise<unknown>;
+  }
+};
+new Function("require", "module", "exports", waitForWorkspaceBuild.outputFiles[0].text)(
+  createRequire(import.meta.url), waitForWorkspaceModule, waitForWorkspaceModule.exports
+);
+
+const originalFetch = globalThis.fetch;
+const originalTimeout = AbortSignal.timeout;
+try {
+  const timeoutCalls: number[] = [];
+  let requestSignal: AbortSignal | undefined;
+  let fetchCalls = 0;
+  AbortSignal.timeout = (milliseconds) => {
+    timeoutCalls.push(milliseconds);
+    return new AbortController().signal;
+  };
+  globalThis.fetch = async (_input, init) => {
+    fetchCalls += 1;
+    requestSignal = init?.signal ?? undefined;
+    return new Response(null, { status: 204 });
+  };
+  const caller = new AbortController();
+  await fetchHelperModule.exports.ownerCanaryFetch("https://fixture.example", { signal: caller.signal });
+  assert.deepEqual(timeoutCalls, [30_000]);
+  assert.equal(fetchCalls, 1, "The bounded admin fetch must not retry a request.");
+  assert(requestSignal && requestSignal !== caller.signal, "The bounded fetch must combine the caller signal with its timeout.");
+  caller.abort();
+  assert(requestSignal.aborted, "Aborting the caller signal must abort the combined Supabase request signal.");
+
+  timeoutCalls.length = 0;
+  AbortSignal.timeout = (milliseconds) => {
+    timeoutCalls.push(milliseconds);
+    const controller = new AbortController();
+    queueMicrotask(() => controller.abort(new DOMException("fixture timeout", "TimeoutError")));
+    return controller.signal;
+  };
+  globalThis.fetch = async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+    const signal = init?.signal;
+    assert(signal, "Workspace fetch omitted its abort signal.");
+    if (signal.aborted) reject(signal.reason);
+    else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+  await assert.rejects(
+    waitForWorkspaceModule.exports.waitForWorkspace({
+      evaluate: async (callback, input) => await callback(input)
+    }, "site_fixture", () => false, 60_000),
+    (error: unknown) => error instanceof DOMException && error.name === "TimeoutError",
+    "A hung workspace fetch must abort rather than hold the outer canary loop indefinitely."
+  );
+  assert.deepEqual(timeoutCalls, [30_000]);
+} finally {
+  globalThis.fetch = originalFetch;
+  AbortSignal.timeout = originalTimeout;
+}
+
 assert(
   packageJson.scripts?.["canary:owner-journey"]?.includes("scripts/canary-owner-journey.ts"),
   "The owner journey must have one canonical operator command."
@@ -167,6 +273,10 @@ assert(!source.includes("duplicateDialog"), "Reusable source URLs must never pau
 assert(!source.includes("page.goto(actionLink"), "Credential-bearing magic links must never enter browser history or Playwright diagnostics.");
 assert(source.includes("safeDiagnostic") && source.includes("[redacted-url]"), "Canary failures must redact credential-bearing URLs before storage or output.");
 assert(gitignore.split(/\r?\n/).includes(".data"), "Owner-canary evidence must remain gitignored.");
+assert(source.includes("const ownerCanaryFetchTimeoutMs = 30_000"), "Owner-canary outbound requests must have a 30-second ceiling.");
+assert(source.includes("global: { fetch: ownerCanaryFetch }"), "The Supabase admin client must use the bounded fetch helper.");
+assert.equal((source.match(/signal: AbortSignal.timeout\(timeoutMs\)/g) ?? []).length, 3,
+  "Every browser-owned workspace or owner-disposal fetch must carry the bounded timeout.");
 
 process.stdout.write(`${JSON.stringify({
   ok: true,

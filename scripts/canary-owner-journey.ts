@@ -32,12 +32,14 @@ const serviceRoleKey = required("SUPABASE_SERVICE_ROLE_KEY");
 const anonKey = publicAnonKey();
 const buildTimeoutMs = positiveInteger(process.env.LODESTA_OWNER_CANARY_BUILD_TIMEOUT_MS, 45 * 60_000);
 const editTimeoutMs = positiveInteger(process.env.LODESTA_OWNER_CANARY_EDIT_TIMEOUT_MS, 30 * 60_000);
+const ownerCanaryFetchTimeoutMs = 30_000;
 const canaryId = `${timestampId()}-${crypto.randomUUID().slice(0, 8)}`;
 const evidenceDirectory = join(".data", "owner-journey", canaryId);
 const startedAt = new Date().toISOString();
 const exactEditText = `Lodesta canary verification ${canaryId}`;
 const admin = createClient(supabaseUrl, serviceRoleKey, {
-  auth: { autoRefreshToken: false, persistSession: false }
+  auth: { autoRefreshToken: false, persistSession: false },
+  global: { fetch: ownerCanaryFetch }
 });
 const sandboxProvenance = await canarySandboxProvenance(origin, admin);
 
@@ -418,10 +420,13 @@ try {
   await visitorContext.close();
   step("published_lead_delivery", { status: "passed" });
 
-  const disposal = await page.evaluate(async (targetSiteId) => {
-    const response = await fetch(`/api/sites/${encodeURIComponent(targetSiteId)}`, { method: "DELETE" });
+  const disposal = await page.evaluate(async ({ targetSiteId, timeoutMs }) => {
+    const response = await fetch(`/api/sites/${encodeURIComponent(targetSiteId)}`, {
+      method: "DELETE",
+      signal: AbortSignal.timeout(timeoutMs)
+    });
     return { status: response.status, body: await response.json().catch(() => ({})) };
-  }, siteId);
+  }, { targetSiteId: siteId, timeoutMs: ownerCanaryFetchTimeoutMs });
   assert.equal(disposal.status, 200, `Owner disposal returned ${disposal.status}.`);
   assert.equal((disposal.body as { disposed?: boolean }).disposed, true, "Owner disposal did not confirm completion.");
   disposed = true;
@@ -614,7 +619,7 @@ function timestampId() {
 }
 
 async function magicLinkSessionCookies(actionLink: string, expectedUserId: string) {
-  const verification = await fetch(actionLink, { redirect: "manual" });
+  const verification = await ownerCanaryFetch(actionLink, { redirect: "manual" });
   assert(
     verification.status >= 300 && verification.status < 400,
     `Supabase magic-link verification returned ${verification.status}.`
@@ -659,6 +664,13 @@ async function magicLinkSessionCookies(actionLink: string, expectedUserId: strin
   assert.equal(data.user?.id, expectedUserId, "The magic-link session resolved a different owner.");
   assert(writes.length > 0, "Supabase SSR did not emit authenticated session cookies.");
   return writes;
+}
+
+function ownerCanaryFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const timeout = AbortSignal.timeout(ownerCanaryFetchTimeoutMs);
+  const requestSignal = init.signal ?? (input instanceof Request ? input.signal : undefined);
+  const signal = requestSignal ? AbortSignal.any([requestSignal, timeout]) : timeout;
+  return fetch(input, { ...init, signal });
 }
 
 function normalizeSameSite(value: boolean | "lax" | "strict" | "none" | undefined) {
@@ -752,13 +764,14 @@ async function waitForWorkspace(
   let last: WorkspaceSnapshot | undefined;
   while (Date.now() - started < timeoutMs) {
     if (targetSiteId) {
-      last = await targetPage.evaluate(async (id) => {
+      last = await targetPage.evaluate(async ({ id, timeoutMs }) => {
         const response = await fetch(`/api/site-agent/sessions?siteId=${encodeURIComponent(id)}`, {
-          cache: "no-store"
+          cache: "no-store",
+          signal: AbortSignal.timeout(timeoutMs)
         });
         if (!response.ok) throw new Error(`Workspace request returned ${response.status}.`);
         return response.json();
-      }, targetSiteId) as WorkspaceSnapshot;
+      }, { id: targetSiteId, timeoutMs: ownerCanaryFetchTimeoutMs }) as WorkspaceSnapshot;
     } else {
       const editorSlug = new URL(targetPage.url()).pathname.split("/").filter(Boolean).at(-2);
       assert(editorSlug, "The editor URL does not contain a site slug.");
@@ -811,10 +824,13 @@ async function cleanupCanaryState(input: {
   ownerUserId: string;
   siteId: string;
 }) {
-  const status = await input.page.evaluate(async (id) => {
-    const response = await fetch(`/api/sites/${encodeURIComponent(id)}`, { method: "DELETE" });
+  const status = await input.page.evaluate(async ({ id, timeoutMs }) => {
+    const response = await fetch(`/api/sites/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      signal: AbortSignal.timeout(timeoutMs)
+    });
     return response.status;
-  }, input.siteId).catch(() => 0);
+  }, { id: input.siteId, timeoutMs: ownerCanaryFetchTimeoutMs }).catch(() => 0);
   if (status === 200) return { disposed: true, method: "owner_site_api", status };
 
   const { data, error } = await input.admin.rpc("dispose_owned_site", {

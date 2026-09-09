@@ -58,31 +58,82 @@ async function main() {
       batchLimit: limit,
       releaseSha: process.env.LODESTA_RELEASE_GIT_SHA ?? null
     }));
+    const maxInFlight = Math.min(limit, 4);
+    const inFlight = new Set<Promise<void>>();
+    let fatalError: unknown;
     let backoffMs = idleMs;
-    while (!shuttingDown) {
-      try {
-        const result = await siteAuthoringWorkflow.processQueuedSiteAuthoring({ limit, workerId });
-        if (result.processed.length) {
-          console.log(JSON.stringify({ event: "agent_runs_processed", processed: result.processed.map((run) => ({ id: run.id, status: run.status })) }));
-          backoffMs = idleMs;
-          continue;
+    const startClaimedRun = (run: Awaited<ReturnType<typeof sitePlatformRepository.claimNextAgentRun>>) => {
+      if (!run) return;
+      let task: Promise<void>;
+      task = siteAuthoringWorkflow.executeRunAndFinalize(run.id, undefined, run).then(
+        (completed) => console.log(JSON.stringify({
+          event: "agent_runs_processed", processed: [{ id: completed.id, status: completed.status }]
+        })),
+        (error) => {
+          if (isTransientExternalFailure(error)) {
+            console.error(JSON.stringify({ event: "worker_execution_transient_failure", message: compactErrorMessage(error) }));
+          } else {
+            console.error(JSON.stringify({ event: "worker_execution_failure", message: compactErrorMessage(error) }));
+            fatalError ??= error;
+          }
         }
-        const assessment = await processNextWebsiteAssessmentJob();
-        if (assessment) {
-          console.log(JSON.stringify({ event: "website_assessment_processed", ...assessment }));
-          backoffMs = idleMs;
-          continue;
+      ).finally(() => { inFlight.delete(task); });
+      inFlight.add(task);
+    };
+    try {
+      while (!shuttingDown && fatalError === undefined) {
+        let emptyClaim = false;
+        let claimFailed = false;
+        while (!shuttingDown && fatalError === undefined && inFlight.size < maxInFlight) {
+          try {
+            const claimed = await sitePlatformRepository.claimNextAgentRun(workerId);
+            if (!claimed) {
+              emptyClaim = true;
+              break;
+            }
+            // A signal may have arrived while the claim RPC was in flight. It
+            // is now owned work, so start it for the final drain but make no
+            // further claims on the next loop condition.
+            startClaimedRun(claimed);
+          } catch (error) {
+            claimFailed = true;
+            if (isTransientExternalFailure(error)) {
+              console.error(JSON.stringify({ event: "worker_claim_transient_failure", message: compactErrorMessage(error) }));
+            } else {
+              console.error(JSON.stringify({ event: "worker_claim_failure", message: compactErrorMessage(error) }));
+              fatalError ??= error;
+            }
+            break;
+          }
         }
-      } catch (error) {
-        if (!isTransientExternalFailure(error)) throw error;
-        console.error(JSON.stringify({
-          event: "worker_cycle_transient_failure",
-          message: compactErrorMessage(error)
-        }));
+        if (shuttingDown || fatalError !== undefined) break;
+        if (inFlight.size === 0 && emptyClaim && !claimFailed) {
+          try {
+            const assessment = await processNextWebsiteAssessmentJob();
+            if (shuttingDown || fatalError !== undefined) break;
+            if (assessment) {
+              console.log(JSON.stringify({ event: "website_assessment_processed", ...assessment }));
+              backoffMs = idleMs;
+              continue;
+            }
+          } catch (error) {
+            claimFailed = true;
+            if (isTransientExternalFailure(error)) {
+              console.error(JSON.stringify({ event: "worker_assessment_transient_failure", message: compactErrorMessage(error) }));
+            } else {
+              console.error(JSON.stringify({ event: "worker_assessment_failure", message: compactErrorMessage(error) }));
+              fatalError ??= error;
+            }
+          }
+        }
+        if (shuttingDown || fatalError !== undefined) break;
+        await sleep(inFlight.size ? idleMs : backoffMs);
+        backoffMs = inFlight.size ? idleMs : Math.min(2_000, backoffMs * 2);
       }
-      await sleep(backoffMs);
-      backoffMs = Math.min(2_000, backoffMs * 2);
+    } finally {
+      await Promise.allSettled([...inFlight]);
     }
+    if (fatalError !== undefined) throw fatalError;
     console.log(JSON.stringify({ event: "worker_stopped" }));
     return;
   }

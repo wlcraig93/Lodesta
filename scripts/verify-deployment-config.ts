@@ -58,7 +58,8 @@ for (const command of ["verify:postcss-security", "typecheck", "build", "verify:
 }
 assert(packageJson.scripts["verify:browser"].includes("npm run verify:generation-ingestion")
   && packageJson.scripts["verify:browser"].includes("npm run verify:render-browser")
-  && packageJson.scripts["verify:browser"].includes("npm run verify:trusted-runtime"), "verify:browser must compose rendering and trusted-runtime coverage.");
+  && packageJson.scripts["verify:browser"].includes("npm run verify:trusted-runtime")
+  && packageJson.scripts["verify:browser"].includes("npm run verify:owner-fast-preview"), "verify:browser must compose rendering, trusted-runtime and owner-preview coverage.");
 for (const command of ["verify:site-sandbox-manifest", "verify:development-sandbox", "verify:site-sandbox-local"]) {
   assert(packageJson.scripts["verify:sandbox"].includes(`npm run ${command}`), `verify:sandbox must compose ${command}.`);
 }

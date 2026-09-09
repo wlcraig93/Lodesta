@@ -6,7 +6,7 @@ import { assetRevisionRefSchema } from "@/packages/site-contracts";
 import type { SitePlatformRepository } from "@/packages/platform-data";
 
 export const dynamic = "force-dynamic";
-export const fastPreviewContentSecurityPolicy = "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'; form-action 'none'; frame-ancestors 'self'; base-uri 'none'";
+export const fastPreviewContentSecurityPolicy = "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; connect-src 'none'; form-action 'none'; frame-ancestors 'self'; base-uri 'none'";
 
 export async function GET(
   request: Request,

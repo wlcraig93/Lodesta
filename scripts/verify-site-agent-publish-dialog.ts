@@ -34,6 +34,16 @@ const candidate = (id = "candidate_fixture", number = 7) => ({
   id, number, status: "candidate", workspaceRevisionId: "revision_fixture"
 } as any);
 const published = { id: "published_fixture", number: 6, status: "published", workspaceRevisionId: "revision_published" } as any;
+const succeededHistoryRun = {
+  id: "run_succeeded_history", status: "succeeded", kind: "edit", stage: "candidate_ready",
+  startedAt: "2026-09-09T10:00:00.000Z", completedAt: "2026-09-09T10:02:00.000Z",
+  progress: { label: "Private draft ready", detail: "The website passed its required checks and is ready for your review." }
+} as any;
+const failedHistoryRun = {
+  id: "run_failed_history", status: "failed", kind: "edit", stage: "failed",
+  startedAt: "2026-09-09T10:00:00.000Z", completedAt: "2026-09-09T10:02:00.000Z",
+  progress: { label: "Website needs attention", detail: "The work stopped before it finished." }
+} as any;
 const captureScreenshots = process.env.LODESTA_FIXTURE_CAPTURE !== "false";
 
 let workspace = makeWorkspace();
@@ -71,6 +81,17 @@ function makeWorkspace(overrides: Record<string, unknown> = {}) {
     runs: [],
     candidateIntegrity: { status: "current", issues: [] },
     ...overrides
+  };
+}
+
+function historySnapshot(run: typeof succeededHistoryRun) {
+  return {
+    run,
+    completed: [
+      { key: `${run.id}-failed`, kind: "review", status: "failed", label: "Finalizing the draft.", startedAt: run.startedAt, completedAt: "2026-09-09T10:01:00.000Z" },
+      { key: `${run.id}-succeeded`, kind: "review", status: "succeeded", label: "Checking the website.", startedAt: "2026-09-09T10:01:00.000Z", completedAt: run.completedAt }
+    ],
+    hasEarlierActivity: false
   };
 }
 
@@ -117,6 +138,16 @@ const server = createServer(async (request, response) => {
     }
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(workspace));
+    return;
+  }
+  if (url.pathname === `/api/site-agent/runs/${succeededHistoryRun.id}/activity`) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(historySnapshot(succeededHistoryRun)));
+    return;
+  }
+  if (url.pathname === `/api/site-agent/runs/${failedHistoryRun.id}/activity`) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(historySnapshot(failedHistoryRun)));
     return;
   }
   if (url.pathname === "/api/site-versions/candidate_fixture/artifact/") {
@@ -317,8 +348,31 @@ try {
   assert.equal(await page.getByRole("dialog").count(), 0, "A successful promotion with a failed editor refresh kept the confirmation open.");
   assert.equal(await page.locator(".site-agent-publish-desktop").count(), 0, "A successful promotion with a failed editor refresh offered a repeat publish control.");
   assert.equal(publishRequests.filter((request) => request.mode === "success").length, 3, "Editor refresh failure made an additional promotion request.");
+
+  sessionMode = "success";
+  workspace = makeWorkspace({ runs: [succeededHistoryRun] });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByText("Private draft ready", { exact: true }).waitFor();
+  const succeededFailedRow = page.locator(".site-agent-activity-list li.is-failed").filter({ hasText: "Finalizing the draft." });
+  await succeededFailedRow.waitFor({ state: "visible" });
+  assert.equal(await succeededFailedRow.getByText("Earlier attempt", { exact: true }).count(), 1, "A recovered failed step in a succeeded run needs an explicit Earlier attempt label.");
+  assert.equal(await page.locator(".site-agent-activity-list li.is-succeeded").filter({ hasText: "Checking the website." }).count(), 1, "The later completed step disappeared from a succeeded run.");
+  await capture(page, resolve(screenshots, "succeeded-run-earlier-attempt-desktop.png"));
+  await page.setViewportSize({ width: 375, height: 812 });
+  assert.equal(await succeededFailedRow.getByText("Earlier attempt", { exact: true }).isVisible(), true);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, "Earlier-attempt history must not overflow the phone viewport.");
+  await capture(page, resolve(screenshots, "succeeded-run-earlier-attempt-phone.png"));
+
+  workspace = makeWorkspace({ runs: [failedHistoryRun] });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const failedRunRow = page.locator(".site-agent-activity-list li.is-failed").filter({ hasText: "Finalizing the draft." });
+  await failedRunRow.waitFor({ state: "visible" });
+  assert.equal(await failedRunRow.getByText("Earlier attempt", { exact: true }).count(), 0, "A currently failed run must not be labelled as an earlier attempt.");
+  await capture(page, resolve(screenshots, "failed-run-no-earlier-attempt-desktop.png"));
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ ok: true, desktop: "Escape focus + successful More focus + no preconfirm POST", phone: "Cancel/Escape focus + successful Preview-options focus + no preconfirm POST", failure: "dialog retained", staleSelection: "blocked in open confirmation", activeRun: "blocked", staleCandidate: "blocked", publish: "one exact confirmed POST", refreshFailure: "successful promotion remains closed and non-repeatable", preview: "actual canary helper rejects about:blank, stale URL, hidden ancestor, and stylesheet-loading interactive document before accepting complete" }));
+  console.log(JSON.stringify({ ok: true, desktop: "Escape focus + successful More focus + no preconfirm POST", phone: "Cancel/Escape focus + successful Preview-options focus + no preconfirm POST", failure: "dialog retained", staleSelection: "blocked in open confirmation", activeRun: "blocked", staleCandidate: "blocked", publish: "one exact confirmed POST", refreshFailure: "successful promotion remains closed and non-repeatable", activityHistory: "succeeded-run failed step marked earlier; failed enclosing run unmarked", preview: "actual canary helper rejects about:blank, stale URL, hidden ancestor, and stylesheet-loading interactive document before accepting complete" }));
 } finally {
   delayedStylesheet?.release();
   await browser.close();

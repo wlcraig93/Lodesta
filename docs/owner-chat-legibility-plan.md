@@ -78,6 +78,13 @@ The UI shows current work and the latest four completed groups in the card, with
 twelve under Details. If no event maps while a run is active, the real run header remains
 with “Working on your website.”
 
+When the enclosing run succeeded, a failed completed group retains its failure
+styling and timestamp but also says “Earlier attempt,” in both the compact card
+and Details. A failed or still-running enclosing run does not receive that label.
+This clarifies historical repair activity without hiding evidence or changing
+event statuses, run outcomes, or the publication gate. Desktop and phone fixtures
+cover the succeeded/failed distinction and narrow-screen layout.
+
 ## Strict projection boundary
 
 The activity projection is a strict allow-list boundary. It constructs each returned

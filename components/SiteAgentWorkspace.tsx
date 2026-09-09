@@ -1448,7 +1448,7 @@ function RunActivityCard({
         <details className="site-agent-activity-details">
           <summary>Details</summary>
           <div className="site-agent-activity-expanded">
-            <ActivityRows groups={snapshot.completed} />
+            <ActivityRows groups={snapshot.completed} succeededRun={run.status === "succeeded"} />
             {snapshot.hasEarlierActivity ? <small>Earlier activity is not shown.</small> : null}
           </div>
         </details>
@@ -1492,7 +1492,7 @@ function RunActivityBody({
       {snapshot?.current ? <ActivityRows groups={[snapshot.current]} /> : active ? (
         <div className="site-agent-activity-fallback"><ActivityDot status="running" /><span>Working on your website.</span></div>
       ) : null}
-      {visibleCompleted.length ? <ActivityRows groups={visibleCompleted} /> : null}
+      {visibleCompleted.length ? <ActivityRows groups={visibleCompleted} succeededRun={run.status === "succeeded"} /> : null}
       {!active && snapshot && !hasMappedActivity ? <p className="site-agent-activity-empty">No detailed activity was recorded.</p> : null}
       {(run.status === "needs_input" || run.status === "failed") ? <p className="site-agent-activity-guidance">{run.progress.detail}</p> : null}
       {detailed && snapshot?.hasEarlierActivity ? <small>Earlier activity is not shown.</small> : null}
@@ -1500,13 +1500,14 @@ function RunActivityBody({
   );
 }
 
-function ActivityRows({ groups }: { groups: OwnerActivityGroup[] }) {
+function ActivityRows({ groups, succeededRun = false }: { groups: OwnerActivityGroup[]; succeededRun?: boolean }) {
   return (
     <ol className="site-agent-activity-list">
       {groups.map((group) => (
         <li key={group.key} className={`is-${group.status}`}>
           <ActivityDot status={group.status} />
           <span>{activityGroupLabel(group)}</span>
+          {succeededRun && group.status === "failed" ? <small className="site-agent-activity-earlier-attempt">Earlier attempt</small> : null}
           {group.completedAt ? <time dateTime={group.completedAt} suppressHydrationWarning>{quietTimestamp(group.completedAt)}</time> : null}
         </li>
       ))}

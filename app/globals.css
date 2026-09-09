@@ -3957,6 +3957,14 @@ textarea {
   flex: 1;
 }
 
+.site-agent-activity-list li > .site-agent-activity-earlier-attempt {
+  flex: 0 0 auto;
+  color: var(--product-color-text-muted);
+  font-size: var(--product-font-size-micro);
+  font-weight: var(--product-font-weight-medium);
+  white-space: nowrap;
+}
+
 .site-agent-activity-list time {
   flex: 0 0 auto;
   color: var(--product-color-text-tertiary);

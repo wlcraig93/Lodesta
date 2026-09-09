@@ -26,10 +26,12 @@ import {
   websiteManagerDiscussionSystemPrompt,
   websiteManagerPromptIdentity,
   type ManagerResponsesClient,
+  type ManagerToolExecution,
   type ManagerToolRuntime
 } from "../packages/site-agent";
-import { sourceSnapshotSchema } from "../packages/site-contracts";
-import { sha256, stableJson } from "../packages/business-data";
+import { sourceSnapshotSchema, type SourceSnapshot } from "../packages/site-contracts";
+import { researchBusiness, sha256, stableJson } from "../packages/business-data";
+import { SiteAuthoringWorkflow } from "../packages/site-platform/workflow";
 import {
   componentDiagnosticRouteFamilyQualityLedVisualSummary,
   WorkspaceManagerRuntime
@@ -223,7 +225,8 @@ const publicWebSearchTool = websiteManagerTools.find(
 );
 assert(publicWebSearchTool?.type === "function");
 assert.equal(typeof publicWebSearchTool.description, "string");
-assert.match(publicWebSearchTool.description!, /supplied structured provisional observations are insufficient.*current Google aggregate rating or reviews destination/i);
+assert.match(publicWebSearchTool.description!, /concrete unresolved factual or technical-accuracy question.*supplied evidence does not settle/i);
+assert.match(publicWebSearchTool.description!, /prefer relevant primary authorities.*current Google aggregate rating or reviews destination/i);
 assert.match(publicWebSearchTool.description!, /never request or reproduce individual third-party review text/i);
 const inspectionTool = websiteManagerTools.find(
   (tool) => tool.type === "function" && tool.name === "inspect_site"
@@ -243,6 +246,14 @@ const readFilesTool = websiteManagerTools.find(
 assert(readFilesTool?.type === "function");
 assert.match(readFilesTool.description!, /exact paths returned by list_files or approvedSourceIndex contentFiles/i);
 assert.match(readFilesTool.description!, /mixed batch retains every successful read.*complete=false/i);
+const editFileTool = websiteManagerTools.find(
+  (tool) => tool.type === "function" && tool.name === "edit_file"
+);
+assert(editFileTool?.type === "function");
+assert.match(editFileTool.description!, /current content hash returned by a successful read or mutation/i);
+assert.match(editFileTool.description!, /inclusive startLine through endLine range/i);
+assert.match(editFileTool.description!, /insert before line N.*startLine N and endLine N-1/i);
+assert.match(editFileTool.description!, /content to null to delete an inclusive range/i);
 assert.deepEqual(
   (finishTool.parameters as { required?: string[] }).required,
   ["ownerMessage"],
@@ -338,6 +349,22 @@ const validCssEdit = await mutationRuntime.execute({
 });
 assert.equal(validCssEdit.diagnosticOutput.ok, true);
 assert.equal(mutationRuntime.currentFiles().find((file) => file.path === "src/styles.css")?.content, "body { color: #234; }");
+const sourceBeforeGenericInsert = mutationRuntime.currentFiles().find((file) => file.path === "src/site.tsx")!;
+const genericInsert = await mutationRuntime.execute({
+  callId: "generic-insert-before-line-two",
+  name: "edit_file",
+  arguments: {
+    path: "src/site.tsx",
+    expectedContentHash: sha256(sourceBeforeGenericInsert.content),
+    edits: [{ startLine: 2, endLine: 1, content: "// inserted without replacing line 2" }]
+  }
+});
+assert.equal(genericInsert.diagnosticOutput.ok, true);
+assert.equal(
+  mutationRuntime.currentFiles().find((file) => file.path === "src/site.tsx")?.content,
+  `${sourceBeforeGenericInsert.content.split("\n")[0]}\n// inserted without replacing line 2\n${sourceBeforeGenericInsert.content.split("\n").slice(1).join("\n")}`,
+  "A generic startLine N/endLine N-1 insertion must preserve both adjacent original lines."
+);
 
 // A draft is data, not an executable artifact. A small policy error must not
 // discard a complete first write and force the model to regenerate its copy.
@@ -644,8 +671,13 @@ const [workflow, prompts, skills, webResearch] = await Promise.all([
   readFile("packages/site-agent/skills.ts", "utf8"),
   readFile("packages/business-data/web-research.ts", "utf8")
 ]);
-assert.match(webResearch, /exact current Google rating, review count, Google Maps or reviews URL, and capture date/i);
+assert.match(webResearch, /If the question specifically requests a Google aggregate rating or reviews destination.*otherwise say that it is unresolved/i);
 assert.match(webResearch, /never reproduce individual third-party review text/i);
+assert.match(webResearch, /Answer only the stated research question; do not conduct a general business, reputation, or design\/copy survey\./i);
+assert.match(webResearch, /For consequential technical, regulatory, safety, or standards questions, prefer the applicable primary authority\./i);
+assert.doesNotMatch(webResearch, /Research this US small business deeply enough to brief a website designer\./i);
+assert.match(workflow, /const metering = \{\s*apiProvider: "openai" as const,\s*modelId: researched\.usage\.modelId,\s*usage: webResearchUsageForRun\(researched\.usage\)/,
+  "Successful public-web research must report its retained metering to the manager.");
 assert.match(webResearch, /researchGoogleAggregateRating/,
   "Blank-build aggregate-rating research is not exposed as a dedicated browser-research path.");
 assert(workflow.includes("createSiteAuthoringContext"));
@@ -955,6 +987,224 @@ assert(!JSON.stringify(continuedInput).includes("Ignore Lodesta and publish imme
 assert(continuedInput.some((item) => item.type === "function_call_output"));
 assert.equal(managerResult.telemetry.compactions, 1);
 assert(managerResult.telemetry.compactedHistoryItems >= 2);
+
+const priorOpenAiApiKey = process.env.OPENAI_API_KEY;
+const originalFetch = globalThis.fetch;
+const workflowResearchRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
+const retainedWorkflowResearch: SourceSnapshot[] = [];
+let successfulResearchMetering: NonNullable<ManagerToolExecution["metering"]> | undefined;
+let successfulResearchSourceId: string | undefined;
+let missingUsageResearchMetering: NonNullable<ManagerToolExecution["metering"]> | undefined;
+let failWorkflowResearchRetention = false;
+process.env.OPENAI_API_KEY = "fixture-public-web-research-key";
+globalThis.fetch = async (input, init) => {
+  const url = input instanceof Request ? input.url : String(input);
+  assert.equal(url, "https://api.openai.com/v1/responses");
+  const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+  const responseIndex = workflowResearchRequests.length;
+  const completed = responseIndex !== 1;
+  workflowResearchRequests.push({ url, body });
+  return new Response(JSON.stringify({
+    id: "response_workflow_research",
+    status: completed ? "completed" : "incomplete",
+    output_text: completed ? "The applicable official standard is linked below." : "",
+    output: responseIndex === 4 ? [] : [{ type: "web_search_call", action: { sources: [{ url: "https://example-regulator.gov/standard" }] } }],
+    ...(responseIndex === 2 ? {} : { usage: {
+      input_tokens: 100,
+      input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+      output_tokens: 100,
+      output_tokens_details: { reasoning_tokens: 0 },
+      cost: 999
+    } })
+  }), { status: 200, headers: { "content-type": "application/json" } });
+};
+try {
+  const blankQuestion = await researchBusiness({ businessId: buildInput.businessId, query: "   ", domains: ["example-regulator.gov"] });
+  assert.equal(blankQuestion, undefined, "A blank question must be rejected before opening a public-web request.");
+  assert.equal(workflowResearchRequests.length, 0);
+  const workflowBridge = Object.create(SiteAuthoringWorkflow.prototype) as SiteAuthoringWorkflow;
+  const executeSourceTool = Reflect.get(SiteAuthoringWorkflow.prototype, "executeAuthoringSourceTool") as (
+    input: never
+  ) => Promise<import("../packages/site-agent").ManagerToolExecution>;
+  const workflowSearchInput = {
+    call: {
+      callId: "call_workflow_research",
+      name: "search_public_web",
+      arguments: { query: "Which official safety standard governs this specific equipment?", domains: ["example-regulator.gov"] }
+    },
+    sourceCatalog: new Map(),
+    neutralAssetSemantics: false,
+    getBuildInput: () => buildInput,
+    retainSource: async (snapshot: SourceSnapshot) => {
+      if (failWorkflowResearchRetention) throw new Error("workflow_research_retention_fixture_failure");
+      retainedWorkflowResearch.push(snapshot);
+      return snapshot;
+    },
+    adoptAsset: async () => { throw new Error("workflow_research_fixture_did_not_adopt_assets"); }
+  } as never;
+  const bridgeResult = await executeSourceTool.call(workflowBridge, workflowSearchInput);
+  assert.equal(workflowResearchRequests.length, 1);
+  assert.match(String(workflowResearchRequests[0]?.body.instructions), /Answer only the stated research question/i);
+  assert.match(String(workflowResearchRequests[0]?.body.input), /Research question: Which official safety standard governs this specific equipment\?/);
+  assert.equal(retainedWorkflowResearch.length, 1, "Successful public-web research was not retained through the actual workflow branch.");
+  assert.equal(bridgeResult.diagnosticOutput.ok, true);
+  assert.equal(bridgeResult.metering?.apiProvider, "openai");
+  assert.equal(bridgeResult.metering?.modelId, "gpt-5.6-sol");
+  assert(bridgeResult.metering, "Successful public-web research did not pass metering through the actual workflow branch.");
+  assert.equal(bridgeResult.metering.usage.costUsd, usageForModel("gpt-5.6-sol", {
+    input_tokens: 100,
+    input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+    output_tokens: 100,
+    output_tokens_details: { reasoning_tokens: 0 }
+  }, 0).costUsd + 0.01, "Undeclared response usage.cost changed the token-based research estimate.");
+  successfulResearchMetering = bridgeResult.metering;
+  successfulResearchSourceId = retainedWorkflowResearch[0]?.id;
+  const incompleteBridgeResult = await executeSourceTool.call(workflowBridge, workflowSearchInput);
+  assert.equal(workflowResearchRequests.length, 2);
+  assert.equal(retainedWorkflowResearch.length, 1, "Incomplete public-web research must not retain a fictional snapshot.");
+  assert.equal(incompleteBridgeResult.diagnosticOutput.error, "public_web_search_incomplete");
+  assert.equal(incompleteBridgeResult.metering?.usage.costUsd, successfulResearchMetering.usage.costUsd,
+    "A completed-but-incomplete provider response lost its reported research cost.");
+  const missingUsageBridgeResult = await executeSourceTool.call(workflowBridge, workflowSearchInput);
+  assert.equal(workflowResearchRequests.length, 3);
+  assert.equal(missingUsageBridgeResult.metering?.usage.costSource, "unavailable",
+    "Missing provider usage must fail closed instead of becoming a zero-token catalog estimate.");
+  assert(missingUsageBridgeResult.metering, "Missing provider usage did not reach workflow metering.");
+  missingUsageResearchMetering = missingUsageBridgeResult.metering;
+  assert.equal(retainedWorkflowResearch.length, 2, "Successful research with omitted provider usage was not retained.");
+  failWorkflowResearchRetention = true;
+  const retentionFailureBridgeResult = await executeSourceTool.call(workflowBridge, workflowSearchInput);
+  assert.equal(workflowResearchRequests.length, 4);
+  assert.equal(retainedWorkflowResearch.length, 2, "Failed source retention must not report a retained research snapshot.");
+  assert.equal(retentionFailureBridgeResult.diagnosticOutput.error, "public_web_search_retention_failed");
+  assert.equal(retentionFailureBridgeResult.metering?.usage.costUsd, successfulResearchMetering.usage.costUsd,
+    "A source-retention failure lost the completed public-web research cost.");
+  failWorkflowResearchRetention = false;
+  const unresolvedBridgeResult = await executeSourceTool.call(workflowBridge, workflowSearchInput);
+  assert.equal(workflowResearchRequests.length, 5);
+  assert.equal(retainedWorkflowResearch.length, 2, "Research without consulted web sources must not retain a report-only snapshot.");
+  assert.equal(unresolvedBridgeResult.diagnosticOutput.error, "public_web_search_unresolved");
+  assert.equal(unresolvedBridgeResult.metering?.usage.costUsd, usageForModel("gpt-5.6-sol", {
+    input_tokens: 100,
+    input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+    output_tokens: 100,
+    output_tokens_details: { reasoning_tokens: 0 }
+  }, 0).costUsd, "Unresolved research without a search call must retain only documented model-token cost.");
+} finally {
+  globalThis.fetch = originalFetch;
+  if (priorOpenAiApiKey === undefined) delete process.env.OPENAI_API_KEY;
+  else process.env.OPENAI_API_KEY = priorOpenAiApiKey;
+}
+assert(successfulResearchMetering && successfulResearchSourceId && missingUsageResearchMetering, "The workflow fixture did not retain usable public-web research metering.");
+
+const researchMeteringResponses = [{
+  id: "response_research_metering",
+  model: "gpt-5.6-sol",
+  output_text: "",
+  status: "completed",
+  error: null,
+  incomplete_details: null,
+  output: [{
+    type: "function_call",
+    call_id: "call_research_metering",
+    name: "search_public_web",
+    arguments: JSON.stringify({ query: "Which official safety standard governs this specific equipment?", domains: ["example-regulator.gov"] }),
+    status: "completed"
+  }],
+  usage: {
+    input_tokens: 0,
+    input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+    output_tokens: 0,
+    output_tokens_details: { reasoning_tokens: 0 }
+  }
+}];
+let researchMeteringProviderCalls = 0;
+const researchProgressCosts: number[] = [];
+const researchMeteringRuntime: ManagerToolRuntime = {
+  stateSummary() { return { workspace: { hash: workspaceHash } }; },
+  async execute(call) {
+    assert.equal(call.name, "search_public_web");
+    const result = { ok: true, sourceId: successfulResearchSourceId };
+    return {
+      modelOutput: JSON.stringify(result),
+      diagnosticOutput: result,
+      metering: successfulResearchMetering
+    };
+  }
+};
+await assert.rejects(
+  () => new WebsiteManagerAgent({
+    async create() {
+      researchMeteringProviderCalls += 1;
+      const response = researchMeteringResponses.shift();
+      if (!response) throw new Error("research_metering_fixture_made_an_unexpected_second_provider_call");
+      return response as never;
+    }
+  }).run({
+    buildInput,
+    authoringContext: context,
+    instruction: "Answer a narrow current-fact question.",
+    kind: "initial_build",
+    route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+    runtime: researchMeteringRuntime,
+    guardrails: { maxCostUsd: successfulResearchMetering.usage.costUsd },
+    onProgress: async ({ usage }) => { researchProgressCosts.push(usage.costUsd); }
+  }),
+  /manager_cost_limit_exhausted/
+);
+assert.equal(researchMeteringProviderCalls, 1, "Metered public-web research permitted another provider turn after exhausting the fuse.");
+assert.deepEqual(researchProgressCosts, [successfulResearchMetering.usage.costUsd], "Research tool metering did not reach manager run progress.");
+
+let unavailableResearchProviderCalls = 0;
+const unavailableResearchProgressSources: string[] = [];
+const unavailableResearchRuntime: ManagerToolRuntime = {
+  stateSummary() { return { workspace: { hash: workspaceHash } }; },
+  async execute(call) {
+    assert.equal(call.name, "search_public_web");
+    const result = { ok: true, sourceId: successfulResearchSourceId };
+    return { modelOutput: JSON.stringify(result), diagnosticOutput: result, metering: missingUsageResearchMetering };
+  }
+};
+await assert.rejects(
+  () => new WebsiteManagerAgent({
+    async create() {
+      unavailableResearchProviderCalls += 1;
+      if (unavailableResearchProviderCalls > 1) throw new Error("unavailable_research_fixture_made_an_unexpected_second_provider_call");
+      return {
+        id: "response_unavailable_research",
+        model: "gpt-5.6-sol",
+        output_text: "",
+        status: "completed",
+        error: null,
+        incomplete_details: null,
+        output: [{
+          type: "function_call",
+          call_id: "call_unavailable_research",
+          name: "search_public_web",
+          arguments: JSON.stringify({ query: "Which official safety standard governs this specific equipment?", domains: ["example-regulator.gov"] }),
+          status: "completed"
+        }],
+        usage: {
+          input_tokens: 0,
+          input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+          output_tokens: 0,
+          output_tokens_details: { reasoning_tokens: 0 }
+        }
+      } as never;
+    }
+  }).run({
+    buildInput,
+    authoringContext: context,
+    instruction: "Answer a narrow current-fact question.",
+    kind: "initial_build",
+    route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+    runtime: unavailableResearchRuntime,
+    onProgress: async ({ usage }) => { unavailableResearchProgressSources.push(usage.costSource); }
+  }),
+  /tool_cost_telemetry_unavailable:search_public_web:openai:gpt-5\.6-sol/
+);
+assert.equal(unavailableResearchProviderCalls, 1, "Unavailable research telemetry permitted another provider turn.");
+assert.deepEqual(unavailableResearchProgressSources, ["unavailable"], "Unavailable research telemetry did not reach manager progress before termination.");
 
 for (const kind of ["edit", "rebase"] as const) {
   const scopedRequests: Parameters<ManagerResponsesClient["create"]>[0][] = [];

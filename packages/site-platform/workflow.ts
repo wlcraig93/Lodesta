@@ -4789,7 +4789,21 @@ export class SiteAuthoringWorkflow {
         const value = { ok: false, error: "public_web_search_unavailable" };
         return { modelOutput: JSON.stringify(value), diagnosticOutput: value };
       }
-      await input.retainSource(researched.snapshot);
+      const metering = {
+        apiProvider: "openai" as const,
+        modelId: researched.usage.modelId,
+        usage: webResearchUsageForRun(researched.usage)
+      };
+      if ("error" in researched) {
+        const value = { ok: false, error: researched.error };
+        return { modelOutput: JSON.stringify(value), diagnosticOutput: value, metering };
+      }
+      try {
+        await input.retainSource(researched.snapshot);
+      } catch {
+        const value = { ok: false, error: "public_web_search_retention_failed" };
+        return { modelOutput: JSON.stringify(value), diagnosticOutput: value, metering };
+      }
       const value = {
         ok: true,
         sourceId: researched.snapshot.id,
@@ -4799,7 +4813,11 @@ export class SiteAuthoringWorkflow {
         provenance: researched.snapshot.payload.provenance,
         untrusted: true
       };
-      return { modelOutput: JSON.stringify(value), diagnosticOutput: { ...value, report: undefined } };
+      return {
+        modelOutput: JSON.stringify(value),
+        diagnosticOutput: { ...value, report: undefined },
+        metering
+      };
     }
     if (input.call.name === "inspect_assets") {
       const buildInput = input.getBuildInput();
@@ -5374,7 +5392,7 @@ function webResearchUsageForRun(usage: WebResearchUsage): SiteAgentRun["usage"] 
     reasoningTokens: 0,
     outputTokens: usage.outputTokens,
     costUsd: usage.estimatedCostUsd,
-    costSource: "catalog_estimate",
+    costSource: usage.costSource,
     upstreamInferenceCostUsd: 0,
     durationMs: usage.durationMs
   };

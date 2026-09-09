@@ -16,9 +16,14 @@ export type WebResearchUsage = {
   cachedInputTokens: number;
   outputTokens: number;
   estimatedCostUsd: number;
+  costSource: ReturnType<typeof usageForModel>["costSource"];
   searchCalls: number;
   durationMs: number;
 };
+
+export type BusinessResearchResult =
+  | { snapshot: SourceSnapshot; usage: WebResearchUsage }
+  | { error: "public_web_search_incomplete" | "public_web_search_unresolved"; usage: WebResearchUsage };
 
 export type GoogleAggregateRatingObservation = {
   kind: "google_aggregate_rating";
@@ -131,6 +136,7 @@ export async function researchGoogleAggregateRating(input: {
       cachedInputTokens: modelUsage.cachedInputTokens,
       outputTokens: modelUsage.outputTokens,
       estimatedCostUsd: modelUsage.costUsd + searchCalls * webSearchCallEstimateUsd,
+      costSource: "catalog_estimate",
       searchCalls,
       durationMs: modelUsage.durationMs
     };
@@ -230,24 +236,19 @@ export function googleAggregateRatingObservationFromSnapshot(
 
 export async function researchBusiness(input: {
   businessId: string;
-  sourceUrl?: string;
-  businessName?: string;
-  locality?: string;
-  query?: string;
+  query: string;
   domains?: string[];
   capturedAt?: string;
   signal?: AbortSignal;
-}): Promise<{ snapshot: SourceSnapshot; usage: WebResearchUsage } | undefined> {
+}): Promise<BusinessResearchResult | undefined> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return undefined;
+  const query = input.query.trim();
+  if (!query) return undefined;
   const queryIdentity = [
-    input.query ? `Research question: ${input.query}` : undefined,
-    input.businessName ? `Business: ${input.businessName}` : undefined,
-    input.locality ? `Locality: ${input.locality}` : undefined,
-    input.sourceUrl ? `First-party website: ${input.sourceUrl}` : undefined,
+    `Research question: ${query}`,
     input.domains?.length ? `Prefer these domains: ${input.domains.join(", ")}` : undefined
   ].filter(Boolean).join("\n");
-  if (!queryIdentity) return undefined;
 
   const startedAt = Date.now();
   try {
@@ -259,34 +260,45 @@ export async function researchBusiness(input: {
       include: ["web_search_call.action.sources"],
       max_output_tokens: maximumOutputTokens,
       instructions: [
-        "Research this US small business deeply enough to brief a website designer.",
-        "Prioritize the first-party website, then reputable directories, social profiles, news, and review platforms.",
-        "Summarize services, positioning, customer themes, reputation patterns, locality, differentiators, and useful design/copy context.",
-        "When visible Google Search or Maps evidence unambiguously matches the business and location, report the exact current Google rating, review count, Google Maps or reviews URL, and capture date; omit these values when identity or geography is ambiguous, and never reproduce individual third-party review text.",
+        "Answer only the stated research question; do not conduct a general business, reputation, or design/copy survey.",
+        "Use the smallest set of credible sources needed to answer the question. For consequential technical, regulatory, safety, or standards questions, prefer the applicable primary authority. Use the business's first-party website only when it is needed to answer a business-specific question.",
+        "If the question specifically requests a Google aggregate rating or reviews destination, report it only when visible Google Search or Maps evidence unambiguously matches the business and location; otherwise say that it is unresolved.",
         "Clearly distinguish first-party statements from third-party observations. Do not present research as verified public facts.",
-        "Cite the source URLs inline."
+        "Never reproduce individual third-party review text. Cite the source URLs inline."
       ].join(" "),
       input: queryIdentity
     }, input.signal ? { signal: input.signal } : undefined);
-    if (response.status !== "completed" || !response.output_text.trim()) return undefined;
-
     const sources = consultedUrls(response.output);
     const searchCalls = response.output.filter((item) => item.type === "web_search_call").length;
-    const modelUsage = usageForModel(researchModel, response.usage, Date.now() - startedAt);
+    const durationMs = Date.now() - startedAt;
+    const documentedUsage = response.usage ? {
+      input_tokens: response.usage.input_tokens,
+      input_tokens_details: response.usage.input_tokens_details,
+      output_tokens: response.usage.output_tokens,
+      output_tokens_details: response.usage.output_tokens_details
+    } : undefined;
+    const modelUsage = usageForModel(researchModel, documentedUsage, durationMs);
     const usage: WebResearchUsage = {
       modelId: researchModel,
       inputTokens: modelUsage.inputTokens,
       cachedInputTokens: modelUsage.cachedInputTokens,
       outputTokens: modelUsage.outputTokens,
       estimatedCostUsd: modelUsage.costUsd + searchCalls * webSearchCallEstimateUsd,
+      costSource: response.usage ? modelUsage.costSource : "unavailable",
       searchCalls,
       durationMs: modelUsage.durationMs
     };
+    if (response.status !== "completed" || !response.output_text.trim()) {
+      return { error: "public_web_search_incomplete", usage };
+    }
+    if (!searchCalls || !sources.length) {
+      return { error: "public_web_search_unresolved", usage };
+    }
     const capturedAt = input.capturedAt ?? new Date().toISOString();
     const payload = {
       report: response.output_text,
       sources,
-      coverage: sources.length ? "researched" : "report_only",
+      coverage: "researched",
       provenance: {
         provider: "openai",
         modelId: researchModel,
@@ -297,7 +309,7 @@ export async function researchBusiness(input: {
       usage
     };
     return {
-      snapshot: webResearchSnapshot(input.businessId, input.sourceUrl, capturedAt, payload),
+      snapshot: webResearchSnapshot(input.businessId, undefined, capturedAt, payload),
       usage
     };
   } catch {

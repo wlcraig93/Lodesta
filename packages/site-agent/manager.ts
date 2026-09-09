@@ -1394,7 +1394,7 @@ export const websiteManagerTools: Tool[] = [
       alt: { type: "string", maxLength: 500 }
     }
   }),
-  tool("search_public_web", "Research a required current fact only when owner, canonical-link, retained first-party evidence, and supplied structured provisional observations are insufficient. This may include a specifically requested current Google aggregate rating or reviews destination for an unambiguously matched business; never request or reproduce individual third-party review text. Never use this tool merely to revalidate or rediscover a supplied canonical destination. Selected results are retained as provisional web research.", {
+  tool("search_public_web", "Research a concrete unresolved factual or technical-accuracy question when the supplied evidence does not settle it. First-party wording alone does not certify consequential technical or safety advice; prefer relevant primary authorities for those questions. This may include a specifically requested current Google aggregate rating or reviews destination for an unambiguously matched business; never request or reproduce individual third-party review text. Never use this tool merely to revalidate or rediscover a supplied canonical destination. Selected results are retained as provisional web research.", {
     type: "object", additionalProperties: false, required: ["query", "domains"],
     properties: {
       query: { type: "string", minLength: 1, maxLength: 500 },
@@ -1430,7 +1430,7 @@ export const websiteManagerTools: Tool[] = [
       files: { type: "array", minItems: 1, maxItems: 80, items: { type: "object", additionalProperties: false, required: ["path", "content"], properties: { path: sourcePathSchema, content: { type: ["string", "null"] } } } }
     }
   }),
-  tool("edit_file", "Apply line-targeted edits to one existing source file. Use the content hash returned by read_files so unrelated code remains untouched. Multiline replacement content must contain real line breaks; never type the literal characters \\n between CSS, JSX, or TypeScript lines. For a one-line minified stylesheet, append with startLine 2 and endLine 1; replacing line 1 replaces the entire stylesheet.", {
+  tool("edit_file", "Apply line-targeted edits to one existing source file. Use that file's current content hash returned by a successful read or mutation. All ranges refer to the current original file: each edit replaces the entire inclusive startLine through endLine range. To insert before line N without replacing a line, use startLine N and endLine N-1. Set content to null to delete an inclusive range. Multiline replacement content must contain real line breaks; never type the literal characters \\n between CSS, JSX, or TypeScript lines. For a one-line minified stylesheet, use startLine 2 and endLine 1 to append; replacing line 1 may be rejected as destructive.", {
     type: "object", additionalProperties: false, required: ["path", "expectedContentHash", "edits"],
     properties: {
       path: sourcePathSchema,

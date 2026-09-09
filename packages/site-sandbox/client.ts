@@ -9,7 +9,6 @@ export type WorkspaceSourceFile = { path: string; content: string };
 const sandboxRequestTimeoutMs = 150_000;
 const sandboxBuildRequestTimeoutMs = 210_000;
 const sandboxOperationSubmitTimeoutMs = 30_000;
-const sandboxOperationStatusTimeoutMs = 10_000;
 const sandboxOperationPollIntervalMs = 500;
 const sandboxOperationReplayDelayMs = 250;
 
@@ -238,13 +237,17 @@ export class SiteSandboxClient {
       }
       if (lastStatus.status === "failed") throw operationFailure(action, sessionId, lastStatus);
       await wait(Math.min(sandboxOperationPollIntervalMs, Math.max(0, deadline - Date.now())));
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
       try {
         lastStatus = await this.call<SandboxOperationStatus>(
           sessionId,
           `operations/${submitted.operationId}`,
           "GET",
           undefined,
-          sandboxOperationStatusTimeoutMs
+          // A status request may prepare or promote a generation. Keep that
+          // work connected without extending the overall operation deadline.
+          Math.min(sandboxRequestTimeoutMs, remainingMs)
         );
       } catch (error) {
         if (error instanceof SiteSandboxRequestError && error.status < 500 && error.status !== 404) throw error;

@@ -59,6 +59,8 @@ await verifyQueuedJournalRace();
 await verifyPreparationObserver();
 await verifyCompletedOperationPoll();
 await verifyAmbiguousPromotionResponse();
+await verifyConcurrentFinalizationPoll();
+await verifyRequestBoundOperationLifetime();
 const fixture = await mkdtemp(join(tmpdir(), "lodesta-generation-protocol-"));
 try {
   for (const fault of generationPromotionBoundaries) {
@@ -181,11 +183,218 @@ async function verifyPreparationObserver() {
   const journal = { operationId: "same-operation", status: "running", phase: "preparing", phaseStartedAt: "1970-01-01T00:00:00.000Z" };
   const status = productionWorkerFunction("operationStatus", {
     readOperationJournal: async () => journal,
-    publicOperationStatus: (value: unknown) => value
+    publicOperationStatus: (value: unknown) => value,
+    startQueuedOperation: async () => { throw new Error("A preparing observer restarted preparation."); },
+    advanceRunningOperation: async () => { throw new Error("A preparing observer attempted destructive recovery."); }
   });
-  const result = await status({}, "session", "https://sandbox.example", journal.operationId,
-    () => { throw new Error("A status poll scheduled destructive preparation recovery."); });
+  const result = await status({}, "session", "https://sandbox.example", journal.operationId);
   assert.equal(result, journal, "A poll without proof of a completed preparation must not reset its journal or remove its lock.");
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+async function fixtureEntered(promise: Promise<void>, label: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([promise, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`Fixture did not enter ${label}.`)), 5_000);
+    })]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// An event-loop checkpoint drains already-runnable promise callbacks without
+// timing a real RPC or pretending a short sleep proves that work is blocked.
+function fixtureCheckpoint() {
+  return new Promise<void>(resolve => setImmediate(resolve));
+}
+
+function productionWorkerFetch(bindings: Record<string, unknown>) {
+  const source = ts.createSourceFile("worker.ts", workerSource, ts.ScriptTarget.Latest, true);
+  const exported = source.statements.find(statement => ts.isExportAssignment(statement) && !statement.isExportEquals);
+  assert(exported && ts.isExportAssignment(exported), "Missing production Worker default export.");
+  const compiled = ts.transpileModule(`const productionWorker = ${exported.expression.getText(source)};`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None }
+  }).outputText;
+  return new Function(...Object.keys(bindings), `${compiled}; return productionWorker.fetch;`)(...Object.values(bindings)) as
+    (request: Request, env: object, context: { waitUntil(work: Promise<unknown>): void }) => Promise<Response>;
+}
+
+async function verifyConcurrentFinalizationPoll() {
+  for (const fails of [false, true]) {
+    const promoting = { operationId: "concurrent-finalize", status: "running", phase: "promoting", candidateRevision: newRevision };
+    const completed = { ...promoting, status: "succeeded", phase: "complete", result: { revision: newRevision } };
+    let current = promoting;
+    let lockExists = false;
+    let removals = 0;
+    let finalizers = 0;
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const failure = new Error("deferred finalizer failed");
+    const advance = productionWorkerFunction("advanceRunningOperation", {
+      operationsRoot: "/fixture/operations",
+      readOperationJournal: async () => current,
+      finalizeBuiltOperation: async () => {
+        finalizers++;
+        entered.resolve();
+        await release.promise;
+        if (fails) throw failure;
+        current = completed;
+        return completed;
+      },
+      advanceBuildProcess: async () => { throw new Error("A promoting operation advanced a build process."); }
+    });
+    const sandbox = { exec: async (command: string) => {
+      if (command === "mkdir /fixture/operations/concurrent-finalize.finalize.lock") {
+        if (lockExists) return { success: false };
+        lockExists = true;
+        return { success: true };
+      }
+      assert.equal(command, "rm -rf /fixture/operations/concurrent-finalize.finalize.lock");
+      removals++;
+      lockExists = false;
+      return { success: true };
+    } };
+    const first = advance(sandbox, "session", "https://sandbox.example", promoting) as Promise<unknown>;
+    const observed = first.then(value => ({ value, error: undefined }), error => ({ value: undefined, error }));
+    try {
+      await fixtureEntered(entered.promise, "finalizer");
+      assert.equal(await advance(sandbox, "session", "https://sandbox.example", promoting), promoting);
+      assert.equal(finalizers, 1, "A second poll duplicated a still-running finalizer.");
+      assert.equal(removals, 0, "A losing poll removed the active finalization lock.");
+      assert.equal(lockExists, true, "A second poll stole a live finalization lock.");
+    } finally {
+      release.resolve();
+      await observed;
+    }
+    const result = await observed;
+    assert.equal(result.error, fails ? failure : undefined, "Finalizer failures must propagate after lock release.");
+    if (!fails) assert.equal(result.value, completed);
+    assert.equal(finalizers, 1);
+    assert.equal(removals, 1, "Only the finalization owner may release its lock, including on failure.");
+    assert.equal(lockExists, false);
+  }
+}
+
+async function verifyRequestBoundOperationLifetime() {
+  const failures: Error[] = [];
+  const check = async (name: string, run: () => Promise<void>) => {
+    try {
+      await run();
+      process.stdout.write(`${JSON.stringify({ fixture: name, status: "pass" })}\n`);
+    } catch (error) {
+      const failure = new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(failure);
+      process.stdout.write(`${JSON.stringify({ fixture: name, status: "fail", error: failure.message })}\n`);
+    }
+  };
+  await check("POST apply accepts without background mutation", async () => {
+    const accepted = { operationId: "c".repeat(64), status: "queued", phase: "queued" };
+    let starts = 0;
+    let scheduled = 0;
+    const fetch = productionWorkerFetch({
+      authorized: () => true,
+      sandboxFor: async () => ({}),
+      json: (body: unknown, status = 200) => Response.json(body, { status }),
+      validateApply: (body: unknown) => body,
+      applyGeneration: async () => accepted,
+      publicOperationStatus: productionWorkerFunction("publicOperationStatus", {}),
+      startQueuedOperation: async () => { starts++; return accepted; },
+      SandboxOperationError: class extends Error {}
+    });
+    const response = await fetch(new Request("http://127.0.0.1/v1/sessions/session/apply", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: oldRevision, files: [] })
+    }), {}, { waitUntil: work => { scheduled++; void work.catch(() => undefined); } });
+    assert.equal(response.status, 202);
+    assert.equal((await response.json() as { status: string }).status, "queued");
+    assert.equal(starts, 0, "POST acceptance started preparation outside a polling request.");
+    assert.equal(scheduled, 0, "POST acceptance used waitUntil for generation work.");
+  });
+  for (const phase of ["queued", "promoting"] as const) {
+    for (const fails of [false, true]) {
+      for (const viaFetch of [false, true]) {
+        await check(`${viaFetch ? "GET handler" : "operationStatus"} awaits ${phase} ${fails ? "failure" : "completion"}`,
+          () => verifyDeferredStatus(phase, fails, viaFetch));
+      }
+    }
+  }
+  assert.equal(failures.length, 0, `Request-bound lifecycle fixtures failed:\n${failures.map(error => error.message).join("\n")}`);
+}
+
+async function verifyDeferredStatus(phase: "queued" | "promoting", fails: boolean, viaFetch: boolean) {
+  const initial = { operationId: "d".repeat(64), status: phase === "queued" ? "queued" : "running", phase };
+  const updated = phase === "queued"
+    ? { ...initial, status: "running", phase: "validating" }
+    : { ...initial, status: "succeeded", phase: "complete", result: { revision: newRevision } };
+  const entered = deferred<void>();
+  const release = deferred<void>();
+  const failure = new Error(`deferred ${phase} failure`);
+  let starts = 0;
+  let advances = 0;
+  let scheduled = 0;
+  const work = async () => {
+    entered.resolve();
+    await release.promise;
+    if (fails) throw failure;
+    return updated;
+  };
+  const status = productionWorkerFunction("operationStatus", {
+    readOperationJournal: async () => initial,
+    publicOperationStatus: productionWorkerFunction("publicOperationStatus", {}),
+    startQueuedOperation: async () => { starts++; assert.equal(phase, "queued"); return work(); },
+    advanceRunningOperation: async () => { advances++; assert.equal(phase, "promoting"); return work(); }
+  });
+  const schedule = (background: Promise<unknown>) => { scheduled++; void background.catch(() => undefined); };
+  const fetch = productionWorkerFetch({
+    authorized: () => true,
+    sandboxFor: async () => ({}),
+    json: (body: unknown, status = 200) => Response.json(body, { status }),
+    operationStatus: status,
+    SandboxOperationError: class extends Error {}
+  });
+  // The extra callback captures the pre-fix signature for the red regression;
+  // after its removal it is ignored, and neither path may schedule background work.
+  const pending = (viaFetch
+    ? fetch(new Request(`http://127.0.0.1/v1/sessions/session/operations/${initial.operationId}`), {}, { waitUntil: schedule })
+    : status({}, "session", "https://sandbox.example", initial.operationId, schedule)) as Promise<unknown>;
+  let settled = false;
+  const observed = pending.then(value => { settled = true; return { value, error: undefined }; }, error => {
+    settled = true; return { value: undefined, error };
+  });
+  let returnedWhileDeferred = false;
+  try {
+    await fixtureEntered(entered.promise, `${phase} work`);
+    await fixtureCheckpoint();
+    returnedWhileDeferred = settled;
+  } finally {
+    release.resolve();
+    await observed;
+  }
+  const outcome = await observed;
+  assert.equal(returnedWhileDeferred, false, `${viaFetch ? "GET response" : "Status"} returned while ${phase} work was unfinished.`);
+  assert.equal(scheduled, 0, "Generation work escaped into a background request lifetime.");
+  assert.equal(starts, phase === "queued" ? 1 : 0);
+  assert.equal(advances, phase === "promoting" ? 1 : 0);
+  if (viaFetch) {
+    assert.equal(outcome.error, undefined);
+    const response = outcome.value as Response;
+    assert.equal(response.status, fails ? 500 : 200);
+    const body = await response.json();
+    assert.deepEqual(body, fails ? { error: "sandbox_operation_failed", detail: failure.message }
+      : JSON.parse(JSON.stringify(productionWorkerFunction("publicOperationStatus", {})(updated))));
+  } else if (fails) {
+    assert.equal(outcome.error, failure, "operationStatus swallowed its awaited operation failure.");
+  } else {
+    assert.equal(outcome.error, undefined);
+    assert.deepEqual(outcome.value, productionWorkerFunction("publicOperationStatus", {})(updated), "operationStatus returned its stale pre-advance journal.");
+  }
 }
 
 function productionWorkerFunction(name: string, bindings: Record<string, unknown>) {

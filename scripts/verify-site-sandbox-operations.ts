@@ -88,16 +88,50 @@ try {
   assert.equal(recoveredSubmission.submissionRecoveryCause, "TimeoutError");
   assert((recoveredSubmission.submissionPayloadBytes ?? 0) > 0);
 
+  await verifyRequestBoundStatusBudget(client);
+
   process.stdout.write(`${JSON.stringify({
     ok: true,
     acceptedSubmission: "pass",
     reconnectablePolling: "pass",
     retainedFailure: "pass",
     duplicateSubmissionReplay: "pass",
-    lostAcknowledgementRecovery: "pass"
+    lostAcknowledgementRecovery: "pass",
+    requestBoundStatusBudget: "pass"
   })}\n`);
 } finally {
   globalThis.fetch = originalFetch;
+}
+
+async function verifyRequestBoundStatusBudget(client: SiteSandboxClient) {
+  const originalNow = Date.now;
+  const originalTimeout = AbortSignal.timeout;
+  let now = 0;
+  const timeouts: number[] = [];
+  let polls = 0;
+  try {
+    Date.now = () => now;
+    AbortSignal.timeout = (milliseconds) => {
+      timeouts.push(milliseconds);
+      return new AbortController().signal;
+    };
+    globalThis.fetch = async (input) => {
+      if (String(input).endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+      if (++polls === 1) {
+        // Preparation/finalization now stays attached to the request. Simulate
+        // elapsed operation time without sleeping through a real deadline.
+        now = 200_000;
+        return Response.json(operation("running", "promoting"));
+      }
+      return Response.json({ ...operation("succeeded", "complete"), result });
+    };
+    assert.equal((await client.apply("operation_test", "revision-before", source)).revision, result.revision);
+    assert.deepEqual(timeouts, [30_000, 150_000, 10_000],
+      "Status work must use the normal request ceiling capped by the remaining 210-second operation deadline; submission acknowledgement stays 30 seconds.");
+  } finally {
+    Date.now = originalNow;
+    AbortSignal.timeout = originalTimeout;
+  }
 }
 
 function operation(

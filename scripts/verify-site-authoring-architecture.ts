@@ -229,6 +229,7 @@ function allowedBoundaryLabel(path: string, label: string) {
   }
   if (path === "packages/site-agent/font-library.ts") return label === "v1";
   if (path === "packages/site-agent/manager.ts") return label.endsWith("/v1");
-  if (path === "scripts/verify-site-sandbox-operations.ts") return label === "v1";
+  // Both fixtures exercise the retained sandbox HTTP API, not a generator name.
+  if (path === "scripts/verify-site-sandbox-operations.ts" || path === "scripts/verify-site-sandbox-generations.ts") return label === "v1";
   return false;
 }

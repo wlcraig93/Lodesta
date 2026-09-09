@@ -76,7 +76,7 @@ The stored-data report and confirmation make legacy cancellation explicit. The m
 
 ## Normal release
 
-1. CI verifies the exact `main` commit.
+1. CI verifies the exact `main` commit. Automatic release admission requires a successful originating `push` on `main` from this repository; a pull-request run whose branch happens to be named `main` is not trusted release provenance. Automatic releases reuse that exact CI success rather than repeating the full local preflight. A manual main-branch dispatch still runs full preflight. Both paths unconditionally verify checkout SHA, execution authority, deployed sandbox behavior, both controller identities and final health.
 2. The release reads the singleton pointer, selects the inactive slot, and calls `assert-slot-available`. A slot with a running execution pin or live sandbox session cannot be reused. There is no third slot fallback.
 3. The candidate is deployed directly to the inactive Worker. Its health, source policy, compilation, backup, restore, and exact manifest are canaried.
 4. An immutable deployment record is inserted and the inactive slot pointer is updated.
@@ -89,6 +89,8 @@ The accepted prelaunch consequence is a bounded authoring blackout between lease
 Development follows the same pinning rule. A checkout or development-Wrangler change makes the active deployment stale for the next development preflight, which deploys and promotes the inactive slot. It does not invalidate requests already pinned to the immutable active deployment. Restart `npm run dev` before expecting sandbox source changes to affect new runs; old executions continue on their pinned slot until they drain.
 
 Authenticated `/api/health?deep=1` checks only the active deployment and returns `503` when it is unhealthy or its registered manifest does not match. An unhealthy draining deployment creates recovery work but does not make the controller globally unready. Completed previews and public sites are artifact-backed and do not call either sandbox.
+
+Sandbox mutation submissions retain an operation and return `202`; the existing status request drives preparation and promotion while its response remains open. Compilation runs as an asynchronous container process. A submission that is never polled remains queued, and identical replay followed by polling drives the same journal. Status requests use the normal 150-second request ceiling capped by the remaining 210-second operation deadline, not post-response background execution. No new queue or retry layer is involved. See [request-bound sandbox operations](site-sandbox-request-bound-operations.md) for lifecycle rationale, tests and remaining disconnect limitations.
 
 ## Rollback
 

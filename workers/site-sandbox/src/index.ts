@@ -118,7 +118,7 @@ const sandboxManifest = {
 } as const;
 
 export default {
-  async fetch(request: Request, env: Env, context: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
       return json({
@@ -157,8 +157,7 @@ export default {
           sandbox,
           sessionId,
           url.origin,
-          operationMatch[2],
-          (work) => context.waitUntil(work.catch(() => undefined))
+          operationMatch[2]
         );
         return json(status);
       } catch (error) {
@@ -185,7 +184,6 @@ export default {
         const body = validateApply(await request.json());
         const accepted = await applyGeneration(sandbox, sessionId, body);
         if (accepted.status === "succeeded") return json(accepted.result);
-        context.waitUntil(startQueuedOperation(sandbox, sessionId, url.origin, accepted.operationId).catch(() => undefined));
         return json(publicOperationStatus(accepted), 202);
       }
 
@@ -199,7 +197,6 @@ export default {
           publicBuildInput: body.publicBuildInput
         });
         if (accepted.status === "succeeded") return json(accepted.result);
-        context.waitUntil(startQueuedOperation(sandbox, sessionId, url.origin, accepted.operationId).catch(() => undefined));
         return json(publicOperationStatus(accepted), 202);
       }
 
@@ -273,7 +270,6 @@ export default {
           archiveBytes
         });
         if (accepted.status === "succeeded") return json(accepted.result);
-        context.waitUntil(startQueuedOperation(sandbox, sessionId, url.origin, accepted.operationId).catch(() => undefined));
         return json(publicOperationStatus(accepted), 202);
       }
 
@@ -537,15 +533,17 @@ async function operationStatus(
   sandbox: ReturnType<typeof getSandbox>,
   sessionId: string,
   origin: string,
-  operationId: string,
-  schedule: (work: Promise<unknown>) => void
+  operationId: string
 ) {
-  const journal = await readOperationJournal(sandbox, operationId);
+  let journal = await readOperationJournal(sandbox, operationId);
   if (!journal) throw new SandboxOperationError(404, { error: "operation_not_found", operationId });
+  // Keep preparation and promotion inside the polling request. Post-response
+  // waitUntil work can be canceled after 30 seconds, stranding filesystem locks.
+  // Compilation itself remains an asynchronous container process.
   if (journal.status === "queued") {
-    schedule(startQueuedOperation(sandbox, sessionId, origin, operationId));
+    journal = await startQueuedOperation(sandbox, sessionId, origin, operationId);
   } else if (journal.status === "running" && ["validating", "compiling", "promoting"].includes(journal.phase)) {
-    schedule(advanceRunningOperation(sandbox, sessionId, origin, journal));
+    journal = await advanceRunningOperation(sandbox, sessionId, origin, journal);
   }
   return publicOperationStatus(journal);
 }

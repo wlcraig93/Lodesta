@@ -120,7 +120,39 @@ assert(!existsSync(".github/workflows/generation-architecture.yml"), "The stale 
 for (const check of ["npm run verify:static", "npm run verify:sandbox"]) {
   assert(continuousIntegration.includes(check), `Continuous integration must run ${check}.`);
 }
-assert(productionRelease.includes("npm run verify:preflight"), "Production release must run the composed static, browser, and sandbox preflight.");
+const releaseJobIf = productionRelease.match(/jobs:\n  release:\n    if: >-\n([\s\S]*?)\n    runs-on:/)?.[1]?.replace(/\s+/g, " ").trim();
+const expectedReleaseJobIf = "(github.event_name == 'workflow_run' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')";
+assert.equal(releaseJobIf, expectedReleaseJobIf, "Production release must admit only a successful same-repository main push or a manual main dispatch.");
+const releaseAuthorityStep = productionRelease.match(/- name: Verify exact release and authority matrix\n        run: \|([\s\S]*?)\n      - name:/);
+assert(releaseAuthorityStep?.[1]?.includes('test "$(git rev-parse HEAD)" = "$RELEASE_SHA"')
+  && releaseAuthorityStep[1].includes("npm run verify:execution-authority")
+  && !releaseAuthorityStep[1].includes("npm run verify:preflight"),
+"Exact SHA and execution-authority verification must remain unconditional and must not embed the manual preflight.");
+const manualPreflightStep = productionRelease.match(/- name: Verify full preflight for manual dispatch\n        if: github\.event_name == 'workflow_dispatch'\n        run: \|\n          set -Eeuo pipefail\n          LODESTA_REPOSITORY=local npm run verify:preflight/);
+assert(manualPreflightStep, "Only a main-guarded manual dispatch must repeat the full local preflight.");
+
+// This mirrors expectedReleaseJobIf. The exact normalized YAML assertion above
+// binds these cases to the production condition without introducing a YAML or
+// expression evaluator solely for this workflow fixture.
+function releaseJobStarts(input: { eventName: "workflow_run" | "workflow_dispatch"; conclusion?: string; sourceEvent?: string; headBranch?: string; headRepository?: string; repository: string; ref?: string }) {
+  return input.eventName === "workflow_run"
+    ? input.conclusion === "success" && input.sourceEvent === "push" && input.headBranch === "main" && input.headRepository === input.repository
+    : input.ref === "refs/heads/main";
+}
+for (const scenario of [
+  { name: "successful same-repository main push", input: { eventName: "workflow_run", conclusion: "success", sourceEvent: "push", headBranch: "main", headRepository: "lodesta/lodesta", repository: "lodesta/lodesta" }, expected: true },
+  { name: "same-repository PR whose head is named main", input: { eventName: "workflow_run", conclusion: "success", sourceEvent: "pull_request", headBranch: "main", headRepository: "lodesta/lodesta", repository: "lodesta/lodesta" }, expected: false },
+  { name: "fork PR whose head is named main", input: { eventName: "workflow_run", conclusion: "success", sourceEvent: "pull_request", headBranch: "main", headRepository: "attacker/lodesta", repository: "lodesta/lodesta" }, expected: false },
+  { name: "missing originating event", input: { eventName: "workflow_run", conclusion: "success", headBranch: "main", headRepository: "lodesta/lodesta", repository: "lodesta/lodesta" }, expected: false },
+  { name: "missing head repository", input: { eventName: "workflow_run", conclusion: "success", sourceEvent: "push", headBranch: "main", repository: "lodesta/lodesta" }, expected: false },
+  { name: "foreign push provenance", input: { eventName: "workflow_run", conclusion: "success", sourceEvent: "push", headBranch: "main", headRepository: "attacker/lodesta", repository: "lodesta/lodesta" }, expected: false },
+  { name: "non-main push", input: { eventName: "workflow_run", conclusion: "success", sourceEvent: "push", headBranch: "release-candidate", headRepository: "lodesta/lodesta", repository: "lodesta/lodesta" }, expected: false },
+  { name: "failed main push", input: { eventName: "workflow_run", conclusion: "failure", sourceEvent: "push", headBranch: "main", headRepository: "lodesta/lodesta", repository: "lodesta/lodesta" }, expected: false },
+  { name: "manual main dispatch", input: { eventName: "workflow_dispatch", repository: "lodesta/lodesta", ref: "refs/heads/main" }, expected: true },
+  { name: "manual non-main dispatch", input: { eventName: "workflow_dispatch", repository: "lodesta/lodesta", ref: "refs/heads/release-candidate" }, expected: false }
+] as const) {
+  assert.equal(releaseJobStarts(scenario.input), scenario.expected, `Unexpected production-release eligibility for ${scenario.name}.`);
+}
 assert(continuousIntegration.includes("npm run verify:browser")
   && continuousIntegration.includes("verify-static:")
   && continuousIntegration.includes("verify-browser:")

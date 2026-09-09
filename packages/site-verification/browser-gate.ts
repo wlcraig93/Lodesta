@@ -389,7 +389,7 @@ async function runArtifactBrowserGateOnce(input: {
           const families = metrics.smallBodyTextFamilies.map((family) => `${family.selector} (${family.count} element${family.count === 1 ? "" : "s"}, min ${family.minFontSizePx}px)`).join("; ");
           routeFindings.push(finding(
             "render.body_font",
-            `${metrics.smallBodyTextCount} body-copy element(s) compute below 16px at ${viewport.name}. The examples are representative, not an exhaustive repair list; correct the shared type token or component rules for every affected family before reinspecting. Affected families: ${families}. Examples: ${examples}.`,
+            `${metrics.smallBodyTextCount} possible body-copy element(s) compute below 16px at ${viewport.name}. This is advisory: utility labels at 12px or above may be intentional. Judge text role and readability in the supplied pixels. For an owner edit, preserve presentation outside the requested scope, including other consumers of shared CSS. The examples are representative, not exhaustive. Affected families: ${families}. Examples: ${examples}.`,
             route.path,
             "render",
             "warning"

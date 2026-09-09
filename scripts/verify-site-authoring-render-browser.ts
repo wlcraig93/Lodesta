@@ -527,7 +527,9 @@ assert(
   "Readable canonical tel: actions were incorrectly reported as cramped Call labels."
 );
 
-const linkedServiceDescriptionMarkup = '<p class="section-label" style="font-size:12px">Decorative section label</p><p class="contact-details"><span style="font-size:12px;letter-spacing:.12em">NEXT STEP</span><span style="font-size:12px;letter-spacing:.12em">SERVICE AREA</span></p><div class="tiny-index-family" style="font-size:11px"><span>01</span><span>02</span></div><a class="linked-service-card" href="/contact"><h2>Residential pest control</h2><p style="font-size:14px">Thoughtful protection for the places you live.</p></a>';
+const longUtilityLabelText = "REGULAR MAINTENANCE AND REPAIRS FOR SHARED SPACES";
+assert(longUtilityLabelText.length > 40, "The utility-label fixture must exercise the unchanged long-label heuristic.");
+const linkedServiceDescriptionMarkup = `<p class="section-label" style="font-size:12px">Decorative section label</p><p class="contact-details"><span style="font-size:12px;letter-spacing:.12em">NEXT STEP</span><span style="font-size:12px;letter-spacing:.12em">SERVICE AREA</span></p><p class="service-group-label" style="font-size:12px;letter-spacing:.12em;text-transform:uppercase">${longUtilityLabelText}</p><div class="tiny-index-family" style="font-size:11px"><span>01</span><span>02</span></div><a class="linked-service-card" href="/contact"><h2>Residential pest control</h2><p style="font-size:14px">Thoughtful protection for the places you live.</p></a>`;
 const unstructuredFooterMarkup = '<div class="site-footer__grid"><div style="min-height:96px"><a href="/">Company</a></div><div style="min-height:96px"><a href="/contact">Services</a></div><div style="min-height:96px"><a href="/contact">Contact</a></div></div>';
 const linkedServiceDescriptionPrepared = {
   ...prepared,
@@ -549,14 +551,26 @@ const linkedServiceDescriptionBrowser = await runArtifactBrowserGate({
 const linkedServiceDescriptionFinding = linkedServiceDescriptionBrowser.findings.find((finding) => finding.id === "render.body_font");
 assert(
   linkedServiceDescriptionFinding?.severity === "warning"
-    && linkedServiceDescriptionFinding.message.includes("1 body-copy element(s)")
-    && linkedServiceDescriptionFinding.message.includes("examples are representative, not an exhaustive repair list")
+    && linkedServiceDescriptionFinding.message.startsWith("2 ")
     && linkedServiceDescriptionFinding.message.includes("p within a.linked-service-card (1 element, min 14px)")
+    && linkedServiceDescriptionFinding.message.includes("p within p.service-group-label (1 element, min 12px)")
+    && linkedServiceDescriptionFinding.message.includes(longUtilityLabelText)
     && linkedServiceDescriptionFinding.message.includes("Thoughtful protection for the places you live.")
     && !linkedServiceDescriptionFinding.message.includes("NEXT STEP")
     && !linkedServiceDescriptionFinding.message.includes("SERVICE AREA")
     && !linkedServiceDescriptionFinding.message.includes("Decorative section label"),
-  "Undersized body copy inside a linked service card escaped the launch-floor advisory."
+  "The body-font advisory lost measured body copy or long-label evidence, or stopped excluding compact utility labels."
+);
+assert(
+  linkedServiceDescriptionFinding.message.includes("2 possible body-copy element(s) compute below 16px")
+    && linkedServiceDescriptionFinding.message.includes("This is advisory: utility labels at 12px or above may be intentional.")
+    && linkedServiceDescriptionFinding.message.includes("Judge text role and readability in the supplied pixels.")
+    && linkedServiceDescriptionFinding.message.includes("For an owner edit, preserve presentation outside the requested scope, including other consumers of shared CSS.")
+    && linkedServiceDescriptionFinding.message.includes("The examples are representative, not exhaustive.")
+    && !linkedServiceDescriptionFinding.message.includes("correct the shared type token")
+    && !linkedServiceDescriptionFinding.message.includes("before reinspecting")
+    && !isTechnicalReleaseBlocker(linkedServiceDescriptionFinding),
+  "The actual body-font advisory prescribed global repair instead of qualifying text role and preserving the owner's edit scope."
 );
 const unstructuredFooterFinding = linkedServiceDescriptionBrowser.findings.find((finding) => finding.id === "render.footer_group_layout");
 assert(

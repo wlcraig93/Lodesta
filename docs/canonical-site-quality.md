@@ -83,6 +83,14 @@ The four-slot sample is a bounded visual-judgment and comparison surface, not th
 
 ## Calibration
 
+### Authoring advisories must acknowledge heuristic limits
+
+Body-font detection reports possible body copy below 16px, not proof that every reported element needs that size. A September 9 retained edit exposed the distinction: a 42-character uppercase utility label fell outside the existing compact-label exemption and the warning prescribed a shared CSS repair. The author enlarged unrelated FAQ/Story labels while fixing the requested Services/Contact routes. Initial edits had preserved the shared size; the change followed inspection feedback. This supports a feedback-induced scope-drift hypothesis, not access to the author's internal motivation.
+
+The correction qualifies the existing warning: utility labels at 12px or above may be intentional, visual role/readability need judgment, and owner-edit scope includes other consumers of shared CSS. It removes the instruction to repair every affected family before reinspecting. Counts, examples, grouping, classifier, thresholds, severity and hard-release disposition are unchanged; small form text, sub-12px text and actual accessibility findings remain available. Do not add class-name exceptions, a larger character cutoff or an automatic repair stage to make this sample pass.
+
+The actual browser fixture retains both the long 12px uppercase label and a 14px body paragraph in the advisory, and proves the old overconfident wording fails the new expectation. Behavioral improvement still requires a new hosted observation. Platform and verification identities distinguish the changed feedback; prompt bytes, skill, compiler and retained public runtime bytes do not change.
+
 Calibration is intentionally not manufactured in code. The next calibration corpus must include multiple verticals, source-quality levels, route counts, and visual directions. Reviewers label the canonical criteria against frozen native-viewport evidence before seeing model labels. Promotion of an automated criterion requires criterion-level agreement, false-positive and false-negative review, opportunity precision, reviewer agreement, readiness-disposition agreement, and explicit owner approval. Calibration does not maintain a competing numeric human score.
 
 Until then:

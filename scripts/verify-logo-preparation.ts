@@ -194,6 +194,19 @@ assert.equal(canonical.revision.provenance.origin, "source_website");
 assert.equal(canonical.revision.provenance.sourceSnapshotId, snapshot.id);
 assert.equal(canonical.revision.provenance.sourceResourceId, undefined);
 
+const opaque = sourceLogoEntry("opaque_crest", whitePadded, "opaque-cdn-resource");
+const missed = await materializeCanonicalSourceLogo({ snapshot, pages: [page], resources: [opaque], businessName: "Example" });
+assert.equal(missed.status, "unavailable", "Reproduce filename-based intake missing a visible mark.");
+const selected = await materializeCanonicalSourceLogo({ snapshot, pages: [page], resources: [opaque],
+  businessName: "Example", selectedResourceId: opaque.resource.id });
+assert.equal(selected.status, "canonical");
+if (selected.status !== "canonical") throw new Error("Selected source logo was not materialized.");
+assert.deepEqual(selected.ref, canonical.ref, "Explicit recognition must use the same canonical identity and presentation, not a second logo path.");
+assert.deepEqual(selected.materialization.bytes, canonical.materialization.bytes);
+assert.equal((await materializeCanonicalSourceLogo({ snapshot, pages: [], resources: [opaque],
+  businessName: "Example", selectedResourceId: opaque.resource.id })).status, "unavailable",
+  "Explicit selection cannot bypass retained first-party page association.");
+
 process.stdout.write(`${JSON.stringify({
   ok: true,
   transparentCanvasTrim: "pass",

@@ -168,7 +168,7 @@ import { sendOwnerOperationalEmail } from "@/lib/owner-notifications";
 import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
 import { scopedVisualInspectionRoutePaths } from "./visual-inspection-scope";
 import { logoPresentationRecipeVersion } from "./logo-preparation";
-import { materializeSourceLogo } from "./source-logo-materialization";
+import { canonicalSourceLogoAssetId, canonicalSourceLogoRevisionId, materializeCanonicalSourceLogo, materializeSourceLogo } from "./source-logo-materialization";
 
 export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
 const idleLeaseMs = 10 * 60_000;
@@ -2350,6 +2350,43 @@ export class SiteAuthoringWorkflow {
             throw new Error("source_asset_not_adoptable");
           }
           if (mimeType !== "image/png" && mimeType !== "image/jpeg" && mimeType !== "image/webp") throw new Error("source_asset_mime_unsupported");
+          if (kind === "logo") {
+            // Recognition can miss opaque CDN filenames. The author can select
+            // retained pixels, but preparation and existing identity stay owned
+            // by the platform; this is not a logo replacement operation.
+            if (snapshot.businessId !== effectiveBuildInput.businessId || snapshot.sourceType !== "website"
+              || !input.buildInput.sourceSnapshotIds.includes(sourceId)
+              || page.sourceSnapshotId !== sourceId
+              || !resource.initiatorUrls.some((url) => url === page.requestedUrl || url === page.finalUrl)) {
+              throw new Error("source_logo_provenance_invalid");
+            }
+            const existingLogo = effectiveBuildInput.business.assets.find((asset) => asset.kind === "logo" && asset.activeForFutureBuilds);
+            if (existingLogo) {
+              if (existingLogo.assetId === canonicalSourceLogoAssetId(snapshot.businessId)
+                && existingLogo.revisionId === canonicalSourceLogoRevisionId({ sourceSnapshotId: sourceId, sourceContentHash: asContentHash(resource.rawContentHash) })) {
+                return existingLogo;
+              }
+              throw new Error("canonical_logo_already_available");
+            }
+            const retained = await this.blobStore.get(resource.storageKey);
+            if (!retained) throw new Error("source_asset_blob_missing");
+            const canonical = await materializeCanonicalSourceLogo({
+              snapshot, resources: [{ resource, bytes: retained.bytes }], pages: [page],
+              businessName: effectiveBuildInput.business.name, selectedResourceId: resourceId
+            });
+            if (canonical.status !== "canonical") throw new Error(`source_logo_unusable:${canonical.reason}`);
+            // Do not rewrite an already-retained non-logo revision's authority
+            // or violate the business/content uniqueness contract.
+            if (effectiveBuildInput.business.assets.some((asset) => asset.contentHash === canonical.ref.contentHash)) {
+              throw new Error("source_logo_already_adopted_as_media");
+            }
+            await this.blobStore.putImmutable({ key: canonical.ref.storageKey, bytes: canonical.materialization.bytes,
+              contentType: canonical.ref.mimeType, contentHash: asContentHash(canonical.ref.contentHash) });
+            generatedRevisions.push(canonical.revision);
+            generatedRefs.push(canonical.ref);
+            refreshEffectiveMedia(generatedRefs);
+            return canonical.ref;
+          }
           const assetId = deterministicId("asset", { sourceId, resourceId });
           const blob = await this.blobStore.get(resource.storageKey);
           if (!blob) throw new Error("source_asset_blob_missing");
@@ -4532,7 +4569,7 @@ export class SiteAuthoringWorkflow {
     neutralAssetSemantics: boolean;
     getBuildInput: () => SitePublicBuildInput;
     retainSource: (snapshot: SourceSnapshot) => Promise<SourceSnapshot>;
-    adoptAsset: (input: { sourceId: string; resourceId: string; sourcePageId: string; kind: "photo" | "icon" | "other"; alt: string }) => Promise<AssetRevisionRef>;
+    adoptAsset: (input: { sourceId: string; resourceId: string; sourcePageId: string; kind: "logo" | "photo" | "icon" | "other"; alt: string }) => Promise<AssetRevisionRef>;
     signal?: AbortSignal;
   }): Promise<ManagerToolExecution> {
     if (input.call.name === "search_sources") {
@@ -4729,7 +4766,7 @@ export class SiteAuthoringWorkflow {
           sourceId: String(input.call.arguments.sourceId),
           resourceId: String(input.call.arguments.resourceId),
           sourcePageId: String(input.call.arguments.sourcePageId),
-          kind: input.call.arguments.kind as "photo" | "icon" | "other",
+          kind: input.call.arguments.kind as "logo" | "photo" | "icon" | "other",
           alt: String(input.call.arguments.alt)
         });
         const value = { ok: true, asset, guidance: `Use asset://${asset.assetId} or the managed Asset component with id ${asset.assetId}.` };

@@ -127,11 +127,15 @@ export async function materializeCanonicalSourceLogo(input: {
   resources: RetainedSourceResource[];
   pages: SourceSnapshotPage[];
   businessName: string;
+  /** An author may identify a missed mark from retained pixels only when no active logo exists. */
+  selectedResourceId?: string;
 }): Promise<CanonicalSourceLogo | CanonicalSourceLogoUnavailable> {
   const candidates = rankSourceAssetCandidates({
     resources: input.resources.map(({ resource }) => resource),
     pages: input.pages
-  }).filter((candidate) => candidate.likelyKind === "logo");
+  }).filter((candidate) => input.selectedResourceId
+    ? candidate.resource.id === input.selectedResourceId
+    : candidate.likelyKind === "logo");
   if (!candidates.length) {
     return { status: "unavailable", reason: "no_logo_candidate", unusableCandidates: [] };
   }

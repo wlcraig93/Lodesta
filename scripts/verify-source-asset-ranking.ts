@@ -86,8 +86,10 @@ assert.match(workflowSource, /Asset preview \$\{labeledPreview\.previewIndex\}/)
 assert.match(workflowSource, /previews,\s*previewCount: previews\.length/);
 assert.match(workflowSource, /filter\(\(candidate\) => candidate\.likelyKind !== "logo"\)/,
   "Raw source-logo alternatives remain visible to the author.");
-assert.doesNotMatch(contractsSource.match(/adopt_source_asset:[\s\S]*?\n  \}\)\.strict\(\),/)?.[0] ?? "", /"logo"/,
-  "The author can still adopt an arbitrary raw source logo.");
+assert.match(contractsSource.match(/adopt_source_asset:[\s\S]*?\n  \}\)\.strict\(\),/)?.[0] ?? "", /"logo"/,
+  "A visually identified missed logo needs an honest adoption kind.");
+assert.doesNotMatch(managerSource, /The official logo is already supplied/,
+  "The tool must not claim that intake always found a logo.");
 assert.equal(ranked[1]?.resource.id, "technician");
 assert.equal(ranked[1]?.likelyKind, "photo");
 assert.equal(ranked[1]?.sourcePageId, about.id);

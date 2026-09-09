@@ -127,7 +127,7 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
       type: "input_text" as const,
       text: JSON.stringify({
         kind: "retained-first-party-visual-evidence",
-        instruction: "These paired pixels come from retained first-party website media other than the platform-managed canonical logo. Judge what is visibly present before choosing the visual direction. Adopt a photograph only when its visible subject genuinely supports the intended section. Do not infer people, work, credentials, or meaning that is not visible.",
+        instruction: "These paired pixels come from retained first-party website media. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. Judge what is visibly present before choosing the visual direction. Adopt photographs only where their visible subjects support the section. Do not infer people, work, credentials, locations, or meaning that is not visible.",
         references: sourceEvidence.map(({ resourceId, sourceId, sourcePageId, mimeType, contentHash }) => ({
           resourceId,
           sourceId,

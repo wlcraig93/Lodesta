@@ -14,6 +14,16 @@ The mutable `BusinessState` contains at most one active source-derived logo. A n
 
 Authors receive the canonical logo through the unchanged managed `Asset` interface. Source visual evidence and source-resource browsing omit raw logo alternatives, and `adopt_source_asset` accepts only non-logo media.
 
+## September 8 amendment: explicitly identify a missed source mark
+
+The August decision assumed logo recognition had succeeded whenever source media reached the author. HD Electric disproved that assumption: a clear crest with an opaque CDN filename appeared in the initial contact sheet, while the managed asset set contained no logo. The tool nevertheless asserted that the logo was already supplied and rejected the logo kind. An earlier author worked around this by calling the crest an icon. Subsequent Luna and Terra attempts omitted or replaced it. This is an interface contradiction, not proof that it alone explains every model choice.
+
+`adopt_source_asset` now permits `kind=logo` only to identify a missed business mark from retained website evidence when no active logo exists. It uses the same canonical materializer, business-stable asset identity, content/snapshot/recipe-bound revision, preparation receipt and verified-finalization transaction as existing source assets. Repeating the same adoption returns the same active canonical ref. A different source logo cannot replace an active source-derived or owner-uploaded logo. The selected resource must belong to a website snapshot already in the authoring input for this business and have an actual retained page/initiator association. New web research cannot confer identity authority through this operation.
+
+Filename labels remain advisory identification hints. The model judges the retained pixels; no detector, model stage, automatic restoration, registry or presentation policy is added. Recognized raw alternatives remain excluded from source browsing. Existing managed logos remain authoritative. Owner intent and existing source still outrank initial-build guidance. If a resource was already retained as non-logo media with the same prepared content, this operation fails rather than rewriting its authority or bypassing content uniqueness.
+
+This is a new-tool-argument capability, not a strict stored-data assertion or migration. Retained assets, public inputs, workspaces, versions and runtime bytes are unchanged. Executable fixtures cover the opaque-resource miss, shared canonical output, invalid page association, idempotent adoption, rejection of source and owner-logo replacement, unchanged source bytes, and form/media authority separation.
+
 ## Stored-data review
 
 The pre-change non-production review found:

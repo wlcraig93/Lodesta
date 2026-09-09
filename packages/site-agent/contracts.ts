@@ -209,7 +209,7 @@ export const managerToolArguments = {
     sourceId: z.string().min(1).max(160),
     resourceId: z.string().min(1).max(160),
     sourcePageId: z.string().min(1).max(160),
-    kind: z.enum(["photo", "icon", "other"]),
+    kind: z.enum(["logo", "photo", "icon", "other"]),
     alt: z.string().max(500)
   }).strict(),
   search_public_web: z.object({

@@ -11,6 +11,7 @@ import { businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, source
 import { resolveApprovedSourceDocuments } from "../packages/business-data/owner-documents";
 import { sha256, stableJson } from "../packages/business-data";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
+import { canonicalSourceLogoAssetId } from "../packages/site-platform/source-logo-materialization";
 
 // Exercise the actual workflow closure and local transactional repository. No
 // model/network calls, no replacement implementation of form/media behavior.
@@ -104,6 +105,18 @@ try {
     usage: { inputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0, outputTokens: 0, costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 0 }, startedAt: now });
   await repository.saveAgentRun(run);
   const mediaBytes = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#285649" } }).webp().toBuffer();
+  const logoBytes = await sharp({ create: { width: 160, height: 100, channels: 4, background: "transparent" } })
+    .composite([{ input: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100"><rect x="40" y="20" width="80" height="60" fill="#183957"/></svg>') }]).png().toBuffer();
+  const logoResource = sourceSnapshotResourceSchema.parse({
+    schemaVersion: 1, id: "resource_opaque_crest", sourceSnapshotId: originalSnapshot.id,
+    captureKind: "http_response", role: "image", requestedUrl: "https://cdn.example/opaque123",
+    finalUrl: "https://cdn.example/opaque123", outcome: "fetched", status: 200, contentType: "image/png",
+    storedEncoding: "identity", rawContentHash: sha256(logoBytes), blobContentHash: sha256(logoBytes),
+    storageKey: "fixture/opaque123", rawBytes: logoBytes.length, storedBytes: logoBytes.length,
+    headers: {}, redirectChain: [], initiatorUrls: [homepage.requestedUrl], capturedAt: now, metadata: {}
+  });
+  await store.putImmutable({ key: logoResource.storageKey!, bytes: logoBytes, contentType: "image/png", contentHash: sha256(logoBytes) });
+  await repository.saveSourceSnapshotResources([logoResource, { ...logoResource, id: "resource_other_crest", rawContentHash: sha256("different") }]);
   const rebased: SitePublicBuildInput[] = [];
   const sandbox = {
     rebase: async (_id: string, _revision: string, next: SitePublicBuildInput) => {
@@ -125,13 +138,31 @@ try {
     await runtime.execute({ callId: "unrelated_edit", name: "write_file", arguments: { path: "src/styles.css", content: "body{color:#222}" } });
     assert.equal((await readDocument()).files[0].contentHash, sha256(approvedDocument), "Ordinary edits must preserve read-only document authority.");
     await assert.rejects(() => runtime.execute({ callId: "forged_authority", name: "write_file", arguments: { path: documentPath, content: "forged" } }));
+    const logoArgs = { sourceId: originalSnapshot.id, resourceId: logoResource.id,
+      sourcePageId: homepage.id, kind: "logo", alt: "Official source mark" };
+    const unassociated = await runtime.execute({ callId: "bad_logo_page", name: "adopt_source_asset",
+      arguments: { ...logoArgs, sourcePageId: documentPage.id } });
+    assert.equal(unassociated.diagnosticOutput.error, "source_logo_provenance_invalid");
+    const logo = await runtime.execute({ callId: "source_logo", name: "adopt_source_asset", arguments: logoArgs });
+    assert.equal(logo.diagnosticOutput.ok, true);
+    const logoRef = logo.diagnosticOutput.asset as SitePublicBuildInput["business"]["assets"][number];
+    assert.equal(logoRef.kind, "logo");
+    assert.equal(logoRef.assetId, canonicalSourceLogoAssetId(input.businessId));
+    assert(logoRef.width! < 160, "Opaque source mark must receive canonical presentation preparation.");
+    const replay = await runtime.execute({ callId: "source_logo_again", name: "adopt_source_asset", arguments: logoArgs });
+    assert.deepEqual(replay.diagnosticOutput.asset, logoRef, "Repeated adoption must reuse the same canonical revision.");
+    const replacement = await runtime.execute({ callId: "replace_logo", name: "adopt_source_asset",
+      arguments: { ...logoArgs, resourceId: "resource_other_crest" } });
+    assert.equal(replacement.diagnosticOutput.error, "canonical_logo_already_available");
+    assert.deepEqual((await store.get(logoResource.storageKey!))!.bytes, logoBytes, "Retained source bytes must stay unchanged.");
     const image = await runtime.execute({ callId: "media", name: "create_image", arguments: {
       action: "generate", purpose: "background", prompt: "Synthetic test texture", sourceAssetIds: [], size: "1024x1024", alt: "Test texture"
     } });
     assert.equal(image.diagnosticOutput.ok, true);
     assert.equal((await runtime.execute({ callId: "build1", name: "build_preview", arguments: {} })).diagnosticOutput.ok, true);
     assert.equal(rebased.length, 1);
-    assert.equal(rebased[0]!.business.assets.length, 1);
+    assert.equal(rebased[0]!.business.assets.length, 2);
+    assert.equal(rebased[0]!.business.assets.filter(asset => asset.kind === "logo").length, 1);
     const configuration = { ...input.forms[0]!, expectedRevision: 1, submitLabel: "Ask about a repair" };
     const first = await runtime.execute({ callId: "form1", name: "configure_lead_form", arguments: configuration });
     assert.equal(first.diagnosticOutput.ok, true);
@@ -161,6 +192,30 @@ try {
     snapshots, sourcePages, sandboxRevision: "initial", kind: "edit", instruction: "Add a texture and change the form button label.",
     currentFiles: [{ path: "src/site.tsx", content: 'export const siteDefinition = { routes: [{path:"/",element:<main><h1>Home</h1></main>}] };' }, { path: "src/styles.css", content: "body{color:#111}" }]
   }), (error: unknown) => error === complete);
+  // Exercise the same closure with an owner-uploaded identity, not just a
+  // source-derived logo. An explicit source selection cannot replace either.
+  const ownerLogo = { ...rebased[0]!.business.assets.find(asset => asset.kind === "logo")!,
+    assetId: "asset_owner_logo", revisionId: "asset_revision_owner_logo", origin: "owner_upload" as const };
+  const currentState = (await repository.getBusinessState(input.businessId))!;
+  const { stateHash: _stateHash, ...ownerStateBody } = { ...currentState, revision: currentState.revision + 1, assets: [ownerLogo] };
+  await repository.saveBusinessState(businessStateSchema.parse({ ...ownerStateBody, stateHash: sha256(stableJson(ownerStateBody)) }));
+  const { inputHash: _inputHash, ...ownerInputBody } = { ...input, business: { ...input.business, assets: [ownerLogo] }, assetRevisionIds: [ownerLogo.revisionId] };
+  const ownerInput = { ...ownerInputBody, inputHash: sha256(stableJson(ownerInputBody)) };
+  const ownerComplete = new Error("owner_logo_fixture_complete");
+  const ownerManager = { run: async ({ runtime }: Parameters<WebsiteManagerAgent["run"]>[0]) => {
+    const denied = await runtime.execute({ callId: "replace_owner_logo", name: "adopt_source_asset",
+      arguments: { sourceId: originalSnapshot.id, resourceId: logoResource.id, sourcePageId: homepage.id, kind: "logo", alt: "Source logo" } });
+    assert.equal(denied.diagnosticOutput.error, "canonical_logo_already_available");
+    assert.deepEqual((await repository.getBusinessState(input.businessId))!.assets, [ownerLogo]);
+    throw ownerComplete;
+  } };
+  const ownerWorkflow = new SiteAuthoringWorkflow(repository, store, sandbox as never, ownerManager as never);
+  await assert.rejects(() => Reflect.get(ownerWorkflow, "runAuthoring").call(ownerWorkflow, {
+    run, session, buildInput: ownerInput,
+    authoringContext: createSiteAuthoringContext({ buildInput: ownerInput, snapshots, pages: sourcePages, sourceInventoryPages }),
+    snapshots, sourcePages, sandboxRevision: "initial", kind: "edit", instruction: "Inspect the source logo.",
+    currentFiles: [{ path: "src/site.tsx", content: 'export const siteDefinition = { routes: [{path:"/",element:<main><h1>Home</h1></main>}] };' }]
+  }), (error: unknown) => error === ownerComplete);
   console.log("Owner-approved documents reach the normal runtime read tools and survive unrelated edits. Form changes preserve retained authority and provisional media across consecutive builds.");
 } finally {
   await rm(directory, { recursive: true, force: true });

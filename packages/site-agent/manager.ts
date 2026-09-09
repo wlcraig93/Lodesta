@@ -1384,13 +1384,13 @@ export const websiteManagerTools: Tool[] = [
       limit: { type: "integer", minimum: 1, maximum: 60 }
     }
   }),
-  tool("adopt_source_asset", "Adopt one retained non-logo PNG, JPEG, or WebP source image as a managed asset without downloading it again. The official logo is already supplied as a canonical managed asset.", {
+  tool("adopt_source_asset", "Adopt one retained PNG, JPEG, or WebP source image without downloading it again. Use an existing managed logo when supplied. If none exists and the source pixels clearly show this business's official logo, use kind=logo: the platform prepares the canonical logo with retained provenance. This cannot replace an existing logo. Never invent a replacement mark or label a logo as a photo/icon to bypass its identity semantics.", {
     type: "object", additionalProperties: false, required: ["sourceId", "resourceId", "sourcePageId", "kind", "alt"],
     properties: {
       sourceId: { type: "string" },
       resourceId: { type: "string" },
       sourcePageId: { type: "string" },
-      kind: { type: "string", enum: ["photo", "icon", "other"] },
+      kind: { type: "string", enum: ["logo", "photo", "icon", "other"] },
       alt: { type: "string", maxLength: 500 }
     }
   }),

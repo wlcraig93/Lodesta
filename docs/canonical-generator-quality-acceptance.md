@@ -14,6 +14,14 @@ Close the demonstrated source-name and Google rating/link gaps, separating deplo
 
 The earlier experiment chronology below is retained; this current model constraint supersedes any prospective suggestion to select Astra. The separate browser-only research authorization question remains unresolved and is not implicitly overridden by permission to compare authoring models using retained evidence.
 
+### Latest evidence — September 9
+
+The corrected-source HD pair on release `5afcfbb3` is complete: Luna seven routes / $0.23949779 / 21.16 minutes; Terra five routes / $0.92296635 / 8.34 minutes. All 36 responsive route captures and shared menu states were reviewed. Both technical gates pass, but neither meets delivery acceptance. The captured Google rating/link and exact first-party quote bodies work; official identity, specific useful copy, contact hierarchy and business evidence still need improvement. Independent architecture/acquisition variation prevents causal model ranking. Keep Luna as the default and retain both rejected attempts.
+
+The new diagnosis is an inconsistent logo contract, not another reason to increase model price. An opaque source crest reached the visual input without becoming a canonical asset, while the tool asserted it was already supplied and excluded logo adoption. The earlier Luna's icon workaround exposed that mismatch. The [source-logo amendment](decisions/2026-08-14-canonical-source-logo-authority.md) corrects the existing tool, preserving canonical preparation and owner-logo authority without a detector or new stage. Local regression/preflight checks and one explicit Luna crest-selection probe pass; full-site behavior and coordinated deployment remain unverified for this correction. The probe costs $0.0010173, uses the original eight image bodies in a locally regenerated sheet, and is not a fresh-build acceptance arm.
+
+Next separate judgments: verify the corrected identity boundary in normal authoring; improve route-specific copy and action hierarchy through the existing authoring context/tools; then reopen the fixed multi-business screen. Do not substitute another technical pass, hand-directed edit, or subjective numerical score for first-pass delivery acceptance. Detailed run IDs, failure chronology and release identities are in [current status](generated-site-authoring-status.md).
+
 ### Executing affordable-model screen
 
 The first Luna/Terra pair uses release `4656e1276d33737c1da85c21cdd92189d722a33b`, the same current canonical authoring guidance, high reasoning, and a $5 ceiling per run. Both start blank through `bootstrapFromRetainedSite` and the ordinary hosted queue consumer, from private tree-service input `input_174f156002b94ddcac3a4f5fe7b76a30`. This input carries the corrected owner-approved disclosure documents and an existing browser-observed Google aggregate with its exact reviews URL. No new research, publication, inquiry, or notification is performed.

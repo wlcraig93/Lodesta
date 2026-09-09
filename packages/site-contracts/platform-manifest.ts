@@ -1,7 +1,7 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
-// Descriptor: site-authoring-platform:source-backed-service-scope:explicit-narrative-service-areas:cdn-visual-candidates:functional-header-evidence:2026-09-08
-export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:3ed9fab15a6c1e42d130b4622c6d4f05f696ac4dac90f64f39c0fe09552cb776";
+// Descriptor: site-authoring-platform:source-backed-service-scope:explicit-narrative-service-areas:cdn-visual-candidates:functional-header-evidence:explicit-missed-logo-adoption:2026-09-09
+export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:e54c3fbae602edbae77c3a841668a8cad0cf19e422e7e8d8c8fb1f3cb7f1e7b5";
 export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
@@ -10,7 +10,8 @@ export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:495
 // Checked-in release identity for the compiler scaffold, including platform capability CSS.
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
 export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:4035a9c30f9143fa4d57ad4ef012df70c88321c2b6da25d9096b58ee96d26a5c";
-export const websiteManagerPromptIdentity = "website-manager@sha256:44661e8fa2ca98c76c43c46b73607ed7461531d4bb8a75c2e5123128cce3c3c4";
+// Descriptor: website-manager:truthful-source-media-context:guarded-missed-logo-adoption:2026-09-09
+export const websiteManagerPromptIdentity = "website-manager@sha256:7d71b07c6f1dffc5bea77e13cbafc007de0414a2af450ca517c75382cb0144e1";
 // Descriptor: fact-binding-validator:exact-markers-and-bindings:advisory-prose-evidence:2026-09-05
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:e560da37c4418c025b62803388a62cf34a50358b0a6c7ec64436ef6552e71eaa";
 // Descriptor: site-verification-policy:controlled-panel-navigation:advisory-prose-evidence:owner-approved-documents:no-header-line-count-advisory:2026-09-08

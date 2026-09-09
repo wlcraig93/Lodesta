@@ -50,7 +50,7 @@ type WorkspaceSnapshot = {
     currentWorkspaceRevisionId?: string;
     publishedVersionId?: string;
   } | null;
-  versions?: Array<{ id?: string; status?: string }>;
+  versions?: Array<{ id?: string; number?: number; status?: string }>;
   runs?: Array<{ id?: string; status?: string; kind?: string; startedAt?: string; inputQuestion?: string }>;
   versionRoutes?: Record<string, Array<{ path?: string; title?: string }>>;
 };
@@ -170,12 +170,17 @@ try {
   evidence.siteId = siteId;
   const initialRevision = await workspaceRevision(admin, initialWorkspace.site?.currentWorkspaceRevisionId);
   assert(initialRevision.files.length >= 2, "The initial authoring workspace is not multi-file.");
-  const initialRoutes = Object.values(initialWorkspace.versionRoutes ?? {}).flat();
+  const initialCandidate = initialWorkspace.versions?.find((version) => version.status === "candidate");
+  assert(initialCandidate?.id, "The initial authoring run did not retain a candidate version.");
+  const initialRoutes = initialWorkspace.versionRoutes?.[initialCandidate.id] ?? [];
   assert(initialRoutes.length > 0, "The initial candidate exposes no preview routes.");
-  const preview = page.frameLocator('iframe[title="Website preview"]');
-  await preview.locator("body").waitFor({ timeout: 60_000 });
+  const initialHome = initialRoutes.find((route) => route.path === "/");
+  assert(initialHome?.title, "The initial candidate does not expose a titled homepage.");
+  const initialPreview = await waitForCandidatePreview(page, { versionId: initialCandidate.id, routeTitle: initialHome.title });
   await screenshot("03-editor-handoff");
   evidence.initialWorkspace = {
+    candidateVersionId: initialCandidate.id,
+    preview: initialPreview,
     revisionId: initialRevision.id,
     files: initialRevision.files.length,
     routes: initialRoutes.length
@@ -202,8 +207,14 @@ try {
   const editRun = (editedWorkspace.runs ?? []).find((run) => run.id && !previousRunIds.has(run.id));
   assert(editRun, "The exact edit did not create a new run.");
   assert.equal(editRun.status, "succeeded", `The exact edit ended as ${editRun.status}.`);
+  const editedCandidate = editedWorkspace.versions?.find((version) => version.status === "candidate");
+  assert(editedCandidate?.id && editedCandidate.number !== undefined, "The exact edit did not retain an identified candidate version.");
+  const editedCandidateId = editedCandidate.id;
+  const editedHome = editedWorkspace.versionRoutes?.[editedCandidate.id]?.find((route) => route.path === "/");
+  assert(editedHome?.title, "The edited candidate does not expose a titled homepage.");
 
   await page.reload({ waitUntil: "domcontentloaded" });
+  const editedPreview = await waitForCandidatePreview(page, { versionId: editedCandidate.id, routeTitle: editedHome.title });
   await page.frameLocator('iframe[title="Website preview"]').getByText(exactEditText, { exact: true }).waitFor({
     timeout: 60_000
   });
@@ -212,6 +223,8 @@ try {
   assert.notEqual(editedRevision.id, initialRevision.id, "The exact edit did not create a new workspace revision.");
   await screenshot("04-exact-edit");
   evidence.exactEdit = {
+    candidateVersionId: editedCandidate.id,
+    preview: editedPreview,
     text: exactEditText,
     runId: editRun.id,
     revisionId: editedRevision.id,
@@ -219,18 +232,121 @@ try {
   };
   step("exact_edit", { status: "passed", runId: editRun.id });
 
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  const mobilePublishButton = page.locator(".site-agent-publish-mobile");
+  let publishRequests = 0;
+  const countPublishRequest = (request: { method(): string; url(): string }) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === `/api/site-versions/${encodeURIComponent(editedCandidateId)}/publish`) publishRequests += 1;
+  };
+  page.on("request", countPublishRequest);
+  await mobilePublishButton.click();
+  await page.getByRole("dialog").getByRole("heading", { name: `Publish version ${editedCandidate.number}?` }).waitFor();
+  assert.equal(publishRequests, 0, "Opening publication confirmation sent a promotion request.");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.waitForFunction(() => document.activeElement?.classList.contains("site-agent-publish-mobile"));
+  assert.equal(publishRequests, 0, "Cancelling publication sent a promotion request.");
+  await page.setViewportSize({ width: 1440, height: 1100 });
   const publishButton = page.locator(".site-agent-publish-desktop");
   // The preview can load before the parent editor finishes its workspace
   // refresh. Normal click actionability waits for readiness without bypassing
   // a disabled publish button or any publication requirement.
   await publishButton.click({ timeout: 60_000 });
-  await page.getByText("Published version is live.", { exact: true }).waitFor({ timeout: 60_000 });
-  const publishedWorkspace = await waitForWorkspace(page, siteId, (snapshot) =>
-    Boolean(snapshot.site?.publishedVersionId),
+  await page.getByRole("dialog").getByRole("heading", { name: `Publish version ${editedCandidate.number}?` }).waitFor();
+  assert.equal(publishRequests, 0, "Opening desktop publication confirmation sent a promotion request.");
+  await page.getByRole("dialog").getByRole("button", { name: "Publish website", exact: true }).click();
+  await page.locator(".site-agent-inline-notice").getByText("Published version is live.", { exact: true }).waitFor({ timeout: 60_000 });
+  page.off("request", countPublishRequest);
+  assert.equal(publishRequests, 1, "Publication did not make exactly one confirmed promotion request.");
+  const initiallyPublishedWorkspace = await waitForWorkspace(page, siteId, (snapshot) =>
+    snapshot.site?.publishedVersionId === editedCandidateId,
   60_000);
-  const publishedVersionId = publishedWorkspace.site?.publishedVersionId;
-  assert(publishedVersionId, "Publication did not set a published version.");
-  evidence.publishedVersionId = publishedVersionId;
+  const initiallyPublishedVersionId = initiallyPublishedWorkspace.site?.publishedVersionId;
+  assert.equal(initiallyPublishedVersionId, editedCandidateId, "Publication did not promote the confirmed candidate.");
+  evidence.initialPublication = { versionId: initiallyPublishedVersionId, confirmedRequests: publishRequests };
+  step("initial_publication", { status: "passed", publishedVersionId: initiallyPublishedVersionId });
+
+  const postLiveEditText = `Lodesta post-live canary verification ${canaryId}`;
+  const postLiveRunIds = new Set((initiallyPublishedWorkspace.runs ?? []).flatMap((run) => run.id ? [run.id] : []));
+  await composer.fill([
+    `Add the exact visible text "${postLiveEditText}" once in the homepage footer.`,
+    "Keep it as a small standalone verification note and make no other content changes."
+  ].join(" "));
+  await page.getByRole("button", { name: "Build requested change" }).click();
+  const postLiveWorkspace = await waitForWorkspace(page, siteId, (snapshot) => {
+    const newRun = (snapshot.runs ?? []).find((run) => run.id && !postLiveRunIds.has(run.id));
+    return Boolean(newRun && ["succeeded", "failed", "needs_input", "cancelled"].includes(newRun.status ?? ""));
+  }, editTimeoutMs);
+  const postLiveRun = (postLiveWorkspace.runs ?? []).find((run) => run.id && !postLiveRunIds.has(run.id));
+  assert(postLiveRun, "The post-live edit did not create a new run.");
+  assert.equal(postLiveRun.status, "succeeded", `The post-live edit ended as ${postLiveRun.status}.`);
+  const postLiveCandidate = postLiveWorkspace.versions?.find((version) => version.status === "candidate");
+  assert(postLiveCandidate?.id && postLiveCandidate.number !== undefined, "The post-live edit did not retain an identified candidate version.");
+  const postLiveCandidateId = postLiveCandidate.id;
+  const postLiveCandidateNumber = postLiveCandidate.number;
+  assert.notEqual(postLiveCandidateId, initiallyPublishedVersionId, "The post-live edit did not create a distinct candidate.");
+  assert.equal(postLiveWorkspace.site?.publishedVersionId, initiallyPublishedVersionId,
+    "The post-live edit changed the public version before publication confirmation.");
+  const postLiveHome = postLiveWorkspace.versionRoutes?.[postLiveCandidateId]?.find((route) => route.path === "/");
+  assert(postLiveHome?.title, "The post-live candidate does not expose a titled homepage.");
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const postLivePreview = await waitForCandidatePreview(page, { versionId: postLiveCandidateId, routeTitle: postLiveHome.title });
+  await page.frameLocator('iframe[title="Website preview"]').getByText(postLiveEditText, { exact: true }).waitFor({ timeout: 60_000 });
+  await page.getByRole("button", { name: "More", exact: true }).click();
+  const compareButton = page.getByRole("button", { name: /Compare with live/ });
+  await compareButton.waitFor();
+  assert.equal(await compareButton.isDisabled(), false, "The post-live candidate cannot be compared with the current public version.");
+  await compareButton.click();
+  const liveComparison = page.frameLocator('iframe[title="Published website comparison"]');
+  await liveComparison.getByText(exactEditText, { exact: true }).waitFor({ timeout: 60_000 });
+  assert.equal(await liveComparison.getByText(postLiveEditText, { exact: true }).count(), 0,
+    "The published comparison exposed the unconfirmed post-live candidate.");
+  await screenshot("05-live-before-republish-compare");
+
+  const publicBeforeRepublish = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString());
+  assert.equal(publicBeforeRepublish.status(), 200, "The initial published public route is unavailable before re-publication.");
+  const publicBeforeRepublishHtml = await publicBeforeRepublish.text();
+  assert(publicBeforeRepublishHtml.includes(exactEditText), "The initial published public artifact omitted its approved edit.");
+  assert(!publicBeforeRepublishHtml.includes(postLiveEditText), "The public route exposed the unconfirmed post-live candidate.");
+  evidence.postLiveCandidate = {
+    candidateVersionId: postLiveCandidateId,
+    runId: postLiveRun.id,
+    preview: postLivePreview,
+    text: postLiveEditText,
+    comparedPublishedVersionId: initiallyPublishedVersionId,
+    publicBeforeRepublish: { containsInitialEdit: true, containsPostLiveEdit: false }
+  };
+  step("post_live_candidate_compare", { status: "passed", candidateVersionId: postLiveCandidateId, publishedVersionId: initiallyPublishedVersionId });
+
+  let republishRequests = 0;
+  const countRepublishRequest = (request: { method(): string; url(): string }) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname === `/api/site-versions/${encodeURIComponent(postLiveCandidateId)}/publish`) republishRequests += 1;
+  };
+  page.on("request", countRepublishRequest);
+  await publishButton.click({ timeout: 60_000 });
+  await page.getByRole("dialog").getByRole("heading", { name: `Publish version ${postLiveCandidateNumber}?` }).waitFor();
+  assert.equal(republishRequests, 0, "Opening re-publication confirmation sent a promotion request.");
+  await page.getByRole("dialog").getByRole("button", { name: "Publish website", exact: true }).click();
+  await page.locator(".site-agent-inline-notice").getByText("Published version is live.", { exact: true }).waitFor({ timeout: 60_000 });
+  page.off("request", countRepublishRequest);
+  assert.equal(republishRequests, 1, "Re-publication did not make exactly one confirmed promotion request.");
+  const republishedWorkspace = await waitForWorkspace(page, siteId, (snapshot) =>
+    snapshot.site?.publishedVersionId === postLiveCandidateId,
+  60_000);
+  const finalPublishedVersionId = republishedWorkspace.site?.publishedVersionId;
+  assert.equal(finalPublishedVersionId, postLiveCandidateId, "Re-publication did not promote the post-live candidate.");
+  const publicAfterRepublish = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString());
+  assert.equal(publicAfterRepublish.status(), 200, "The public route is unavailable after re-publication.");
+  assert((await publicAfterRepublish.text()).includes(postLiveEditText), "The public route did not advance to the confirmed post-live candidate.");
+  evidence.republication = {
+    previousPublishedVersionId: initiallyPublishedVersionId,
+    publishedVersionId: finalPublishedVersionId,
+    candidateVersionId: postLiveCandidateId,
+    confirmedRequests: republishRequests,
+    publicAfterRepublish: { containsPostLiveEdit: true }
+  };
+  step("republication", { status: "passed", publishedVersionId: finalPublishedVersionId, previousPublishedVersionId: initiallyPublishedVersionId });
 
   // A customer submits anonymously. The authenticated owner is intentionally
   // classified as internal traffic, so using their browser here is not a
@@ -245,6 +361,7 @@ try {
   const livePage = await visitorContext.newPage();
   await livePage.goto(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { waitUntil: "networkidle" });
   await livePage.getByText(exactEditText, { exact: true }).waitFor();
+  await livePage.getByText(postLiveEditText, { exact: true }).waitFor();
   evidence.visitorStorage = {
     cookies: (await visitorContext.cookies()).map(({ name, domain, httpOnly, secure, sameSite }) => ({ name, domain, httpOnly, secure, sameSite })),
     localStorage: await livePage.evaluate(() => Object.keys(localStorage).map(key => {
@@ -258,12 +375,12 @@ try {
   assert.deepEqual(await livePage.evaluate(() => Object.keys(localStorage)), [], "Published runtime retained browser identifiers.");
   assert.deepEqual(await livePage.evaluate(() => Object.keys(sessionStorage)), [], "Published runtime retained session identifiers.");
   await livePage.screenshot({ path: join(evidenceDirectory, "05-published.png"), fullPage: true });
-  step("publication", { status: "passed", publishedVersionId });
+  step("publication", { status: "passed", publishedVersionId: finalPublishedVersionId });
 
   // Exercise the real retained runtime, public endpoint, and inbox. A browser
   // gate's mocked response cannot prove that a customer's message is stored.
-  evidence.leadDelivery = await verifyPublishedLead(livePage, siteId, publishedVersionId,
-    [...new Set(Object.values(publishedWorkspace.versionRoutes ?? {}).flat()
+  evidence.leadDelivery = await verifyPublishedLead(livePage, siteId, finalPublishedVersionId,
+    [...new Set(Object.values(republishedWorkspace.versionRoutes ?? {}).flat()
       .flatMap((route) => route.path ? [route.path] : []))]);
   await livePage.close();
   await visitorContext.close();
@@ -615,6 +732,29 @@ async function waitForWorkspace(
     await targetPage.waitForTimeout(2_000);
   }
   throw new Error(`Owner canary timed out waiting for workspace state after ${timeoutMs}ms.`);
+}
+
+async function waitForCandidatePreview(targetPage: Page, input: { versionId: string; routeTitle: string }) {
+  const expectedUrl = new URL(`/api/site-versions/${encodeURIComponent(input.versionId)}/artifact/`, targetPage.url()).href;
+  await targetPage.waitForFunction(({ expectedUrl, routeTitle }) => {
+    const frame = document.querySelector('iframe[title="Website preview"]');
+    if (!(frame instanceof HTMLIFrameElement) || frame.src !== expectedUrl) return false;
+    const previewDocument = frame.contentDocument;
+    const previewWindow = frame.contentWindow;
+    if (!previewDocument || !previewWindow || previewWindow.location.href !== expectedUrl || previewDocument.title !== routeTitle) return false;
+    const heading = previewDocument.querySelector("main h1");
+    if (!heading || !heading.textContent?.trim() || !heading.getClientRects().length) return false;
+    for (let element: Element | null = heading; element; element = element.parentElement) {
+      const style = previewWindow.getComputedStyle(element);
+      if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || Number.parseFloat(style.opacity) === 0) return false;
+    }
+    return true;
+  }, { expectedUrl, routeTitle: input.routeTitle }, { timeout: 60_000, polling: 100 });
+  const heading = targetPage.frameLocator('iframe[title="Website preview"]').locator("main h1:visible").first();
+  await heading.waitFor({ state: "visible", timeout: 60_000 });
+  const h1Text = (await heading.innerText()).trim();
+  assert(h1Text, "The candidate preview did not expose a visible nonempty homepage heading.");
+  return { versionId: input.versionId, url: expectedUrl, routeTitle: input.routeTitle, h1Text };
 }
 
 async function cleanupCanaryState(input: {

@@ -56,6 +56,23 @@ for (const requiredBehavior of [
   "files.length >= 2",
   "The initial authoring run ended as",
   '"Build requested change"',
+  "waitForCandidatePreview",
+  "candidateVersionId",
+  "frame.src !== expectedUrl",
+  "previewWindow.location.href !== expectedUrl",
+  "for (let element: Element | null = heading",
+  'locator("main h1:visible")',
+  "h1Text",
+  "Publish website",
+  "Opening publication confirmation sent a promotion request.",
+  "Cancelling publication sent a promotion request.",
+  "post_live_candidate_compare",
+  "republication",
+  "Published website comparison",
+  "publicBeforeRepublish",
+  "publicAfterRepublish",
+  "postLiveEditText",
+  "republishRequests",
   '"Published version is live."',
   "method: \"DELETE\"",
   "cleanupCanaryState",
@@ -80,8 +97,11 @@ assert(source.includes("visitorContext = await browser.newContext") && source.in
   "Published lead acceptance must use an anonymous visitor, not the internally classified owner session.");
 assert(source.includes('userAgent: devices["Desktop Chrome"].userAgent'),
   "Published lead acceptance must explicitly emulate an ordinary browser; HeadlessChrome remains bot traffic.");
-assert(source.includes("publishButton.click({ timeout: 60_000 })") && !source.includes("publishButton.isEnabled()"),
+assert(source.includes("mobilePublishButton.click()") && source.includes("publishButton.click({ timeout: 60_000 })") && !source.includes("publishButton.isEnabled()"),
   "Publication must wait for normal button actionability rather than racing the editor's loading state.");
+assert(source.includes("postLiveCandidateId") && source.includes("liveComparison.getByText(postLiveEditText")
+  && source.includes("!publicBeforeRepublishHtml.includes(postLiveEditText)") && source.includes("publishedVersionId === postLiveCandidateId"),
+  "The canary does not prove a post-live candidate stays private until its own confirmation.");
 assert(source.includes('step("bootstrap_response"') && source.includes('step("browser_navigation"'),
   "The owner canary must retain safe handoff diagnostics and the created site's cleanup target.");
 assert(source.includes("LODESTA_OWNER_CANARY_CONFIRMED_NONPRODUCTION")

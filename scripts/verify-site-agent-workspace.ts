@@ -115,6 +115,11 @@ assert(
 );
 assert(component.includes("site-agent-starter-prompts") && component.includes("editorStarterPrompts"), "Empty editor does not provide contextual starter prompts");
 assert(component.includes("publishDisabledReason") && component.includes("aria-describedby"), "Disabled Publish does not explain its requirement");
+assert(component.includes("publishTargetError") && component.includes("target.id !== latestCandidate.id"), "Publish does not reject a captured candidate after it becomes stale.");
+assert(/setPublishTarget\(\{\s*id: selectedVersion.id/.test(component) && component.includes("encodeURIComponent(target.id)"), "Publish does not bind its request to the confirmed candidate.");
+assert(component.includes('title={`Publish version ${publishTarget?.number ?? ""}?`}') && component.includes('returnFocusRef={publishTriggerRef}'), "Publish confirmation does not identify the reviewed version or restore trigger focus.");
+assert(component.includes('error={publishError}') && component.includes("setPublishError(error instanceof Error"), "Publication errors do not remain inside the confirmation dialog.");
+assert(component.includes("This makes this reviewed draft public.") && component.includes("This replaces the current live website with this reviewed draft."), "Publish confirmation does not distinguish first publication from replacement.");
 assert(frame.includes("site-agent-mobile-back") && component.includes("site-agent-mobile-more") && component.includes("site-agent-publish-mobile"), "Mobile editor topbar controls are incomplete");
 assert(adminShell.includes('label: "Manage sites"') && adminShell.includes("<span>Admin</span>"), "Admin navigation and identity are not explicit");
 assert(adminSites.includes('title="Manage sites"'), "The admin inventory is not named Manage sites");

@@ -1,12 +1,24 @@
 # Generated-site authoring status
 
-Date: 2026-09-08
+Date: 2026-09-09
 
 ## Current decision: generator still under evaluation
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current continuation: affordable authoring and source-context corrections
+### Current checkpoint: normal Luna logo correction works; delivery evaluation continues
+
+Commit `02f070bb7b1a4b76ad6aba13201598959a29992a` passed CI `34341316335` and coordinated release `34341859313`. Independent verification confirms web `703d2684-be2e-4e14-ad45-56a9fdc92490`, worker `bbbfef7c-4657-4582-abbb-b64f8a203b26` and sandbox `sandbox_deployment_dd8f95efc90c6b70545af37e8b818680` on that exact SHA; deep health has no errors, maintenance is released and email notifications are disabled. The earlier failed prompt-hash CI remains recorded below.
+
+Ordinary private Luna/high/medium run `run_34fc38ae6c7a68e5de5fdf28717c0051` completed for HD Electric (`site_434181d2f8201b198bd0c989eef3a473`), producing seven-route candidate `version_5304e2592ba8a4d6f71fd54bdc2736b1` at $0.1636734 estimated model cost and 17.24 minutes recorded execution. Normal URL intake and no special logo instruction produced explicit canonical logo adoption and actual recognizable header/footer use. The hard gate passed after one Services contrast repair; no sandbox timeout, replay or recycle was recorded. No prospect is published or contacted.
+
+All 21 retained route/viewport captures and shared menus were reviewed by root and an independent reviewer. Identity, authentic work imagery, ordinary family-owned history, and captured Google rating/exact URL are positive. Delivery is not yet accepted: the phone form remains buried behind repeated introduction/address content, its instruction falsely says required fields are visually marked, generic values/conversation copy remains, and some source-copied electrical explanations need correction. Source fidelity does not certify technical accuracy. A local focus-screenshot timing error was corrected in separately retained unchanged-artifact captures; it is not a product field failure. The independent reviewer's proposed restoration of scraped licensing/relative tenure was rejected because those claims lack the required current authority. HD remains a development case, not an unseen holdout or a fixed-screen pass.
+
+Two independent Terra engineering audits separate generator quality from product usability. The deployed owner canary can mistakenly accept an iframe's initial `about:blank` body, and its screenshots do not prove a usable handoff. Deployed publication lacks the shared consequential confirmation. The local correction now uses the existing confirmation dialog, captures the exact candidate, preserves failure/focus behavior, and verifies the actual candidate URL, title and visible heading before preview capture. Full preflight passes, including the real-component browser fixture. Independent review also found and corrected successful-publication focus loss and misleading refresh-error handling: the API-returned promoted version updates local state, and a later refresh failure cannot pretend publication failed or offer it again. Eight responsive/theme/error dialog captures and the phone-success/desktop-refresh-warning states were reviewed; these isolated captures do not include the hosted root font injection. Coordinated deployment and the hosted owner journey remain pending. The existing canary now covers editing an already-live site and confirming draft/live isolation before republishing, followed by its single anonymous inquiry; no new runtime or production review stage is implied.
+
+A private two-response Luna copy probe compared the existing guidance with a shorter replacement on identical retained HD evidence for $0.0068094 estimated total. Independent blinded review and root found no material winner: repeated service inventory remains. The proposal is not adopted. The experiment removes coding and tool pressure and cannot establish full-site quality or model superiority. HD is now explicitly a development case, not a holdout; the unchanged six-business/eight-build declaration retains two declared untuned cases.
+
+### Earlier checkpoint: affordable authoring and source-context corrections
 
 **September 8 update:** source-context correction `5afcfbb39bb1ea70fe52ae906863275b938e1d13` passed CI `34245446433` and coordinated release `34246105862`. The inactive sandbox passed its first canary attempt. Web and worker reported the exact SHA before sandbox `sandbox_deployment_585a4e34e0ad38a9aaf859b5b283f713` promotion; independent deep health passed, maintenance was released and notifications remained disabled.
 

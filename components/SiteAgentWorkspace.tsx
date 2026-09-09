@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type {
   OperatorQueueItem,
   PlatformSiteRecord,
@@ -129,6 +129,8 @@ export function SiteAgentWorkspace({
   const [copiedIdentifier, setCopiedIdentifier] = useState<string>();
   const [previewMoreOpen, setPreviewMoreOpen] = useState(false);
   const [publishHintOpen, setPublishHintOpen] = useState(false);
+  const [publishTarget, setPublishTarget] = useState<(Pick<SiteVersion, "id" | "number"> & { replacesLiveWebsite: boolean; origin: "desktop" | "mobile" })>();
+  const [publishError, setPublishError] = useState("");
   const [voiceSupport, setVoiceSupport] = useState<VoiceSupport>("checking");
   const [listening, setListening] = useState(false);
   const [activitySnapshots, setActivitySnapshots] = useState<Record<string, OwnerActivitySnapshot>>({});
@@ -147,6 +149,8 @@ export function SiteAgentWorkspace({
   const previewMoreRef = useRef<HTMLDivElement>(null);
   const previewMoreTriggerRef = useRef<HTMLButtonElement>(null);
   const previewMoreMobileTriggerRef = useRef<HTMLButtonElement>(null);
+  const publishTriggerRef = useRef<HTMLButtonElement>(null);
+  const publishSuccessFocusOriginRef = useRef<"desktop" | "mobile" | undefined>(undefined);
   const previewListenerCleanupRef = useRef<(() => void) | undefined>(undefined);
   const previewHoverCleanupRef = useRef<(() => void) | undefined>(undefined);
   const previewSelectionCleanupRef = useRef<(() => void) | undefined>(undefined);
@@ -242,6 +246,24 @@ export function SiteAgentWorkspace({
             ? "The current preview has a technical integrity issue and must be rebuilt."
           : undefined;
   const publishBlocked = Boolean(publishDisabledReason);
+
+  useLayoutEffect(() => {
+    const origin = publishSuccessFocusOriginRef.current;
+    if (!origin || publishTarget) return;
+    const focusTarget = origin === "mobile"
+      ? previewMoreMobileTriggerRef.current
+      : previewMoreTriggerRef.current;
+    if (!focusTarget) return;
+    publishTriggerRef.current = focusTarget;
+    publishSuccessFocusOriginRef.current = undefined;
+  }, [mobilePane, publishTarget]);
+
+  function publishTargetError(target: Pick<SiteVersion, "id">) {
+    if (!selectedVersion || !latestCandidate || selectedVersion.id !== latestCandidate.id || target.id !== latestCandidate.id) {
+      return "A newer candidate is available. Review it before publishing.";
+    }
+    return publishDisabledReason;
+  }
   const voiceStatus = initialBuildActive
     ? "Voice input is available when your first draft is ready."
     : voiceSupport === "checking"
@@ -873,17 +895,61 @@ export function SiteAgentWorkspace({
     }
   }
 
+  function requestPublish(trigger: HTMLButtonElement) {
+    if (publishDisabledReason) {
+      setPublishHintOpen((current) => !current);
+      return;
+    }
+    if (!selectedVersion || !selectedIsCurrentCandidate) return;
+    publishTriggerRef.current = trigger;
+    setPublishError("");
+    setPublishTarget({
+      id: selectedVersion.id,
+      number: selectedVersion.number,
+      replacesLiveWebsite: Boolean(published),
+      origin: trigger.classList.contains("site-agent-publish-mobile") ? "mobile" : "desktop"
+    });
+  }
+
+  function closePublishDialog() {
+    if (busy) return;
+    setPublishTarget(undefined);
+    setPublishError("");
+  }
+
   async function publish() {
-    if (!selectedVersion || !selectedIsCurrentCandidate || busy) return;
+    const target = publishTarget;
+    if (!target || busy) return;
+    const blockedReason = publishTargetError(target);
+    if (blockedReason) {
+      setPublishError(blockedReason);
+      return;
+    }
     setBusy(true);
+    setPublishError("");
     setNotice(undefined);
     try {
-      const response = await fetch(`/api/site-versions/${encodeURIComponent(selectedVersion.id)}/publish`, { method: "POST" });
+      const response = await fetch(`/api/site-versions/${encodeURIComponent(target.id)}/publish`, { method: "POST" });
       if (!response.ok) throw new Error(await responseMessage(response));
-      await refresh();
+      const result = await response.json() as { version?: SiteVersion };
+      if (!result.version || result.version.id !== target.id) throw new Error("Published version could not be confirmed.");
+      const promotedVersion = result.version;
+      setWorkspace((current) => ({
+        ...current,
+        site: { ...current.site, publishedVersionId: promotedVersion.id },
+        versions: current.versions.map((version) => version.id === target.id ? promotedVersion : version)
+      }));
+      publishSuccessFocusOriginRef.current = target.origin;
+      if (target.origin === "mobile") setMobilePane("preview");
+      setPublishTarget(undefined);
       setNotice("Published version is live.");
+      try {
+        await refresh();
+      } catch {
+        setNotice("Published version is live. The editor could not refresh; reload to see the latest workspace.");
+      }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setPublishError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -989,7 +1055,7 @@ export function SiteAgentWorkspace({
           ) : null}
         </> : undefined
       }
-      mobileNotice={publishDisabledReason && publishHintOpen ? publishDisabledReason : undefined}
+      mobileNotice={publishDisabledReason && publishHintOpen ? publishDisabledReason : notice}
       mobileOutcomeAction={
         showPublish ? <>
           {publishDisabledReason ? <span className="site-agent-visually-hidden" id={`${publishReasonId}-mobile`}>{publishDisabledReason}</span> : null}
@@ -998,13 +1064,8 @@ export function SiteAgentWorkspace({
             type="button"
             aria-disabled={publishDisabledReason ? true : undefined}
             aria-describedby={publishDisabledReason ? `${publishReasonId}-mobile` : undefined}
-            onClick={() => {
-              if (publishDisabledReason) {
-                setPublishHintOpen((current) => !current);
-                return;
-              }
-              void publish();
-            }}
+            aria-haspopup="dialog"
+            onClick={(event) => requestPublish(event.currentTarget)}
           >
             Publish
           </button>
@@ -1081,7 +1142,7 @@ export function SiteAgentWorkspace({
             </div> : null}
             {showPublish ? <div className="site-agent-publish-wrap">
               {publishDisabledReason ? <span id={publishReasonId}>{publishDisabledReason}</span> : null}
-              <button className="button primary site-agent-publish site-agent-publish-desktop" type="button" disabled={Boolean(publishDisabledReason)} aria-describedby={publishDisabledReason ? publishReasonId : undefined} onClick={() => void publish()}>Publish</button>
+              <button className="button primary site-agent-publish site-agent-publish-desktop" type="button" disabled={Boolean(publishDisabledReason)} aria-describedby={publishDisabledReason ? publishReasonId : undefined} aria-haspopup="dialog" onClick={(event) => requestPublish(event.currentTarget)}>Publish</button>
             </div> : null}
           </div>
         </> : (
@@ -1274,6 +1335,20 @@ export function SiteAgentWorkspace({
           </div>
         </>
       }
+      />
+      <ConfirmDialog
+        open={Boolean(publishTarget)}
+        title={`Publish version ${publishTarget?.number ?? ""}?`}
+        description={publishTarget?.replacesLiveWebsite
+          ? "This replaces the current live website with this reviewed draft."
+          : "This makes this reviewed draft public."}
+        confirmLabel="Publish website"
+        confirmPendingLabel="Publishing…"
+        pending={busy}
+        error={publishError}
+        returnFocusRef={publishTriggerRef}
+        onConfirm={() => void publish()}
+        onClose={closePublishDialog}
       />
       <ConfirmDialog
         open={Boolean(cancelRunTarget)}

@@ -38,7 +38,7 @@ export type ManagerAuthoringProfile = {
   sourceEvidenceReferences?: readonly ManagerSourceEvidenceReference[];
   sourceEvidenceLimit: 8;
   sourceEvidencePresentation: "contact-sheet";
-  assetEvidenceLimit: 2;
+  assetEvidenceLimit: 2 | 8;
   assetEvidencePresentation: "contact-sheet";
   assetEvidenceReferences?: readonly ManagerAssetEvidenceReference[];
   sourceInventoryMode: "representative-customer-index";
@@ -63,7 +63,7 @@ export function canonicalAuthoringProfile(kind: ManagerTaskKind): ManagerAuthori
     architectureBrowserCoverage: "all-routes",
     sourceEvidenceLimit: 8,
     sourceEvidencePresentation: "contact-sheet",
-    assetEvidenceLimit: 2,
+    assetEvidenceLimit: kind === "initial_build" ? 8 : 2,
     assetEvidencePresentation: "contact-sheet",
     sourceInventoryMode: "representative-customer-index",
     visualInspectionImageDetail: "high",

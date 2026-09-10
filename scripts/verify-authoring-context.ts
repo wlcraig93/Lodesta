@@ -177,10 +177,11 @@ for (const contract of [
   /Preserve geographic qualifiers/,
   /primary action without an oversized headline crowding it out/,
   /Give a form its purpose and essential safety context first, not a backlog of secondary reference details/,
-  /exact excerpts with their exact attribution/,
+  /exact contiguous excerpts with their exact attribution/,
   /one clear role rather than repeating adjacent versions of the same phone number/,
   /distribute useful distinct images across relevant routes without an image quota/,
   /LeadField label and control class props/,
+  /LeadField adds no required\/optional decoration.*schema status visible through field labels or adjacent copy naming the required and optional fields/,
   /full-column controls/,
   /opened phone navigation and the complete form/
 ]) assert.match(initialBuildSkill, contract);

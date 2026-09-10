@@ -176,7 +176,7 @@ for (const contract of [
   /distinct truthful title and description.*never one global fallback/i,
   /substantive retained guide needs its explanatory arc/i,
   /copy.*sibling route or competitor.*mapped evidence/i,
-  /exact excerpts with their exact attribution.*do not paraphrase quotations/i,
+  /exact contiguous excerpts with their exact attribution.*Show any internal omission.*never silently join separated passages.*paraphrase quotations/i,
   /Do not copy individual review text from Google, Yelp, Facebook/i,
   /provisionalObservations\.googleAggregateRating.*displayText exactly.*homepage/i,
   /Do not infer, round, refresh, or fabricate a rating/i,
@@ -215,6 +215,12 @@ assert.match(taskSkills.initial_build.objective, /specific customer copy and rou
 const toolNames = new Set(managerToolNameSchema.options);
 const offeredToolNames = new Set(websiteManagerTools.flatMap((tool) => tool.type === "function" ? [tool.name] : []));
 assert.equal("disabledTools" in canonicalAuthoringProfile("initial_build"), false, "The canonical profile must not retain a dormant image-tool selector.");
+assert.equal(canonicalAuthoringProfile("initial_build").assetEvidenceLimit, 8,
+  "The canonical profile must retain the expanded bounded asset-evidence cap.");
+for (const kind of ["edit", "rebase"] as const) {
+  assert.equal(canonicalAuthoringProfile(kind).assetEvidenceLimit, 2,
+    "Initial-build image exposure must not expand unrelated edit/rebase context.");
+}
 assert.deepEqual(
   [...offeredToolNames].sort(),
   [...toolNames].filter((name) => name !== "build_preview").sort(),
@@ -1062,6 +1068,63 @@ const managerResult = await new WebsiteManagerAgent(client).run({
 assert.equal(requests.length, 2);
 assert.equal(requests[0]?.text?.verbosity, "medium", "Initial authoring must not request a minimal whole-site implementation.");
 assert.equal(requests[1]?.text?.verbosity, "medium");
+const assetEvidenceReferences = Array.from({ length: 8 }, (_, index) => ({
+  assetId: `asset_evidence_${index + 1}`,
+  revisionId: `asset_revision_evidence_${index + 1}`,
+  kind: index === 0 ? "logo" as const : "photo" as const,
+  alt: "Retained visual candidate; inspect the pixels.",
+  mimeType: "image/webp" as const,
+  contentHash: sha256(`asset-evidence-${index + 1}`),
+  // The workflow supplies a single curated contact sheet paired with all eight
+  // mappings. The manager must keep both the sheet and the full mapping list.
+  dataUrl: "data:image/webp;base64,YXNzZXQtZXZpZGVuY2Utc2hlZXQ="
+}));
+const assetEvidenceRequests: Parameters<ManagerResponsesClient["create"]>[0][] = [];
+await new WebsiteManagerAgent({ create: async (params) => {
+  assetEvidenceRequests.push(params);
+  return {
+    id: "response_asset_evidence",
+    model: "gpt-5.6-sol",
+    output_text: "",
+    status: "completed",
+    error: null,
+    incomplete_details: null,
+    output: [{
+      type: "function_call",
+      call_id: "call_finish_asset_evidence",
+      name: "finish",
+      arguments: JSON.stringify({ ownerMessage: "Candidate ready for owner review." }),
+      status: "completed"
+    }]
+  } as never;
+}}).run({
+  buildInput,
+  authoringContext: context,
+  instruction: "Build a private candidate.",
+  kind: "initial_build",
+  route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+  authoringProfile: {
+    ...canonicalAuthoringProfile("initial_build"),
+    assetEvidenceReferences
+  },
+  runtime
+});
+const assetEvidenceBlocks = (assetEvidenceRequests[0]?.input as Array<{
+  role?: string;
+  content?: Array<{ type: string; text?: string; image_url?: string }>;
+}>)[0]?.content ?? [];
+const assetEvidenceText = assetEvidenceBlocks.find((block) => block.type === "input_text" && block.text?.includes("canonical-retained-asset-visual-evidence"));
+const assetEvidenceImage = assetEvidenceBlocks.find((block) => block.type === "input_image");
+assert(assetEvidenceText, "The initial manager request omitted canonical asset mappings.");
+const deliveredAssetEvidence = JSON.parse(assetEvidenceText.text!) as {
+  references: Array<{ assetId: string; revisionId: string }>;
+};
+assert.equal(deliveredAssetEvidence.references.length, 8,
+  "The initial manager request clipped curated asset mappings at the former two-item limit.");
+assert.deepEqual(deliveredAssetEvidence.references.map((reference) => reference.assetId),
+  assetEvidenceReferences.map((reference) => reference.assetId));
+assert.equal(assetEvidenceImage?.image_url, assetEvidenceReferences[0]?.dataUrl,
+  "The mapping list was delivered without its paired contact-sheet pixels.");
 await assert.rejects(() => new WebsiteManagerAgent(client).run({
   buildInput, authoringContext: context, instruction: "Build a private candidate.",
   kind: "initial_build", route: { apiProvider: "openai", modelId: "gpt-6-astra" }, runtime

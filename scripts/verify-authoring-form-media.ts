@@ -6,7 +6,7 @@ import sharp from "sharp";
 import { LocalSitePlatformRepository } from "../packages/platform-data/repository";
 import { LocalArtifactBlobStore } from "../packages/site-artifacts";
 import { SiteAuthoringWorkflow, mediaProvenanceClosure, operatorHomepageContextPages, withRetainedAssetRevisionIds } from "../packages/site-platform/workflow";
-import { createSiteAuthoringContext, imageCreationModel, siteAgentRunGuardrailsForKind, type WebsiteManagerAgent } from "../packages/site-agent";
+import { canonicalAuthoringProfile, createSiteAuthoringContext, imageCreationModel, siteAgentRunGuardrailsForKind, type WebsiteManagerAgent } from "../packages/site-agent";
 import { assetRevisionSchema, businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, siteBuildArtifactSchema, sitePublicBuildInputSchema, siteVersionSchema, siteWorkspaceRevisionSchema, sourceSnapshotSchema, sourceSnapshotPageSchema, sourceSnapshotResourceSchema, type AssetRevision, type AssetRevisionRef, type SitePublicBuildInput } from "../packages/site-contracts";
 import { resolveApprovedSourceDocuments } from "../packages/business-data/owner-documents";
 import { sha256, stableJson } from "../packages/business-data";
@@ -107,6 +107,77 @@ try {
   const mediaBytes = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#285649" } }).webp().toBuffer();
   const logoBytes = await sharp({ create: { width: 160, height: 100, channels: 4, background: "transparent" } })
     .composite([{ input: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100"><rect x="40" y="20" width="80" height="60" fill="#183957"/></svg>') }]).png().toBuffer();
+  // Exercise the production evidence builder with the full canonical cap. The
+  // manager request test separately proves these references and their shared
+  // contact-sheet pixels reach the provider input.
+  const assetEvidenceRefs: AssetRevisionRef[] = [];
+  for (const [index, color] of ["#183957", "#285649", "#8a5a3b", "#ad8a52", "#5a6f48", "#3e6d82", "#9b4c44", "#66567b"].entries()) {
+    const bytes = await sharp({ create: { width: 24 + index, height: 16 + index, channels: 3, background: color } }).webp().toBuffer();
+    const revision = assetRevisionSchema.parse({
+      schemaVersion: 1,
+      id: `asset_revision_evidence_${index + 1}`,
+      assetId: `asset_evidence_${index + 1}`,
+      businessId: canary.buildInput.businessId,
+      contentHash: sha256(bytes),
+      storageKey: `fixture/asset-evidence-${index + 1}.webp`,
+      mimeType: "image/webp",
+      bytes: bytes.length,
+      width: 24 + index,
+      height: 16 + index,
+      origin: "source_website",
+      provenance: {
+        origin: "source_website",
+        sourceUrl: `https://northstar.example/assets/evidence-${index + 1}.webp`,
+        sourcePageUrl: "https://northstar.example/",
+        sourceSnapshotId: originalSnapshot.id,
+        sourceResourceId: `resource_asset_evidence_${index + 1}`
+      },
+      createdAt: now
+    });
+    await repository.saveAssetRevision(revision);
+    await store.putImmutable({ key: revision.storageKey, bytes, contentType: revision.mimeType, contentHash: revision.contentHash as `sha256:${string}` });
+    assetEvidenceRefs.push({
+      assetId: revision.assetId,
+      revisionId: revision.id,
+      kind: index === 0 ? "logo" : "photo",
+      contentHash: revision.contentHash,
+      storageKey: revision.storageKey,
+      mimeType: revision.mimeType,
+      alt: "Fixture retained visual candidate",
+      width: revision.width,
+      height: revision.height,
+      origin: revision.origin,
+      sourceFactIds: [],
+      activeForFutureBuilds: true
+    });
+  }
+  const { inputHash: _assetEvidenceInputHash, ...assetEvidenceInputBody } = {
+    ...canary.buildInput,
+    business: { ...canary.buildInput.business, assets: assetEvidenceRefs },
+    assetRevisionIds: assetEvidenceRefs.map((asset) => asset.revisionId)
+  };
+  const assetEvidenceInput = sitePublicBuildInputSchema.parse({
+    ...assetEvidenceInputBody,
+    inputHash: sha256(stableJson(assetEvidenceInputBody))
+  });
+  const canonicalProfile = canonicalAuthoringProfile("initial_build");
+  const assetEvidence = await Reflect.get(canaryWorkflow, "createOperatorAssetEvidence").call(
+    canaryWorkflow,
+    assetEvidenceInput,
+    canonicalProfile.assetEvidenceLimit,
+    canonicalProfile.assetEvidencePresentation
+  ) as Array<{ assetId: string; revisionId: string; dataUrl: string; contentHash: string }>;
+  assert.equal(assetEvidence.length, 8,
+    "The production asset-evidence builder did not deliver all eight curated mappings.");
+  assert.deepEqual(assetEvidence.map((asset) => asset.assetId), assetEvidenceRefs.map((asset) => asset.assetId));
+  assert.deepEqual(assetEvidence.map((asset) => asset.revisionId), assetEvidenceRefs.map((asset) => asset.revisionId));
+  assert(assetEvidence.every((asset) => asset.dataUrl === assetEvidence[0]?.dataUrl),
+    "Curated mappings must remain paired with one shared contact-sheet image.");
+  const sheetBytes = Buffer.from(assetEvidence[0]!.dataUrl.split(",")[1]!, "base64");
+  const sheetMetadata = await sharp(sheetBytes).metadata();
+  assert.equal(sheetMetadata.format, "webp");
+  assert(sheetMetadata.width && sheetMetadata.height,
+    "The production asset-evidence builder returned mappings without decodable contact-sheet pixels.");
   const logoResource = sourceSnapshotResourceSchema.parse({
     schemaVersion: 1, id: "resource_opaque_crest", sourceSnapshotId: originalSnapshot.id,
     captureKind: "http_response", role: "image", requestedUrl: "https://cdn.example/opaque123",

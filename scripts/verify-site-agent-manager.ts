@@ -246,6 +246,13 @@ const readFilesTool = websiteManagerTools.find(
 assert(readFilesTool?.type === "function");
 assert.match(readFilesTool.description!, /exact paths returned by list_files or approvedSourceIndex contentFiles/i);
 assert.match(readFilesTool.description!, /mixed batch retains every successful read.*complete=false/i);
+const searchFilesTool = websiteManagerTools.find(
+  (tool) => tool.type === "function" && tool.name === "search_files"
+);
+assert(searchFilesTool?.type === "function");
+assert.match(searchFilesTool.description!, /bounded excerpts centered on each match/i);
+assert.match(searchFilesTool.description!, /contentTruncated marks each excerpt.*top-level truncated marks any excerpt or omitted match/i);
+assert.match(searchFilesTool.description!, /read_files provides complete lines/i);
 const editFileTool = websiteManagerTools.find(
   (tool) => tool.type === "function" && tool.name === "edit_file"
 );
@@ -265,6 +272,15 @@ const validMutationSite = [
   '  routes: [{ path: "/", element: <main><h1>Home</h1></main> }]',
   "};"
 ].join("\n");
+const shortSearchLine = "const shortMatch = 'needle short line';";
+const earlySearchLine = `const earlyMatch = 'needle ${"a".repeat(2_100)} trailing-content-must-not-look-complete';`;
+const lateSearchLine = `const lateMatch = '${"b".repeat(2_100)} needle trailing';`;
+const unicodeSearchLine = `${"İ".repeat(1_001)}needle ${"z".repeat(1_100)}`;
+const surrogateStartSearchLine = `${"a".repeat(1_000)}😀${"b".repeat(999)}needle ${"c".repeat(1_000)}`;
+const surrogateEndSearchLine = `needle${"a".repeat(1_993)}😀${"b".repeat(100)}`;
+const searchFixture = [shortSearchLine, earlySearchLine, lateSearchLine, unicodeSearchLine, surrogateStartSearchLine, surrogateEndSearchLine].join("\n");
+const cappedSearchFixture = Array.from({ length: 201 }, (_, index) => `const result${index} = 'needle';`).join("\n");
+const exactCappedSearchFixture = Array.from({ length: 200 }, (_, index) => `const exact${index} = 'needle';`).join("\n");
 const mutationRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
   publicBuildInputId: "input_source_mutation",
@@ -273,7 +289,10 @@ const mutationRuntime = new WorkspaceManagerRuntime<string>({
   initialSandboxRevision: "sandbox_source_mutation_1",
   initialFiles: [
     { path: "src/site.tsx", content: validMutationSite },
-    { path: "src/styles.css", content: "body { color: #123; }" }
+    { path: "src/styles.css", content: "body { color: #123; }" },
+    { path: "src/search-fixture.ts", content: searchFixture },
+    { path: "src/search-cap.ts", content: cappedSearchFixture },
+    { path: "src/search-exact-cap.ts", content: exactCappedSearchFixture }
   ],
   applyBuild: async () => ({ revision: "unused", buildDurationMs: 0, previewPath: "/preview" }),
   inspect: async () => ({
@@ -284,6 +303,79 @@ const mutationRuntime = new WorkspaceManagerRuntime<string>({
     checkpoint: "unused"
   })
 });
+const searchExcerpt = await mutationRuntime.execute({
+  callId: "search-excerpt",
+  name: "search_files",
+  arguments: { query: "NEEDLE", paths: ["src/search-fixture.ts"], caseSensitive: false }
+});
+assert.equal(searchExcerpt.diagnosticOutput.ok, true);
+assert.equal(searchExcerpt.diagnosticOutput.truncated, true);
+const excerptMatches = searchExcerpt.diagnosticOutput.matches as Array<{
+  path: string;
+  line: number;
+  content: string;
+  contentTruncated: boolean;
+}>;
+assert.equal(excerptMatches.length, 6);
+assert.deepEqual(excerptMatches[0], {
+  path: "src/search-fixture.ts", line: 1, content: shortSearchLine, contentTruncated: false
+});
+assert.equal(excerptMatches[1]?.contentTruncated, true);
+assert.equal(excerptMatches[1]?.content, earlySearchLine.slice(0, 2_000));
+assert.match(excerptMatches[1]?.content ?? "", /needle/i);
+assert.doesNotMatch(excerptMatches[1]?.content ?? "", /trailing-content-must-not-look-complete/);
+assert.equal(excerptMatches[2]?.contentTruncated, true);
+assert.equal(excerptMatches[2]?.content, lateSearchLine.slice(lateSearchLine.length - 2_000));
+assert.match(excerptMatches[2]?.content ?? "", /needle/i);
+assert.equal(excerptMatches[3]?.contentTruncated, true);
+assert.equal(excerptMatches[3]?.content, unicodeSearchLine.slice(1, 2_001));
+assert.match(excerptMatches[3]?.content ?? "", /needle/i,
+  "Case-insensitive search must center the raw excerpt on the visible match when lowercasing expands earlier characters.");
+assert.equal(excerptMatches[4]?.content, surrogateStartSearchLine.slice(1_000, 3_000));
+assert.notEqual((excerptMatches[4]?.content ?? "").charCodeAt(0), 0xDE00,
+  "An excerpt start must not split a surrogate pair.");
+assert.equal(excerptMatches[5]?.content, surrogateEndSearchLine.slice(0, 1_999));
+assert.notEqual((excerptMatches[5]?.content ?? "").charCodeAt((excerptMatches[5]?.content.length ?? 1) - 1), 0xD83D,
+  "An excerpt end must not split a surrogate pair.");
+const exactSearchLineRead = await mutationRuntime.execute({
+  callId: "read-full-search-line",
+  name: "read_files",
+  arguments: { files: [{ path: "src/search-fixture.ts", startLine: 2, endLine: 2 }] }
+});
+assert.equal(
+  (JSON.parse(String(exactSearchLineRead.modelOutput)).files as Array<{ lines?: Array<{ content: string }> }>)[0]?.lines?.[0]?.content,
+  earlySearchLine,
+  "read_files must return the complete line represented by a truncated search excerpt."
+);
+const cappedSearch = await mutationRuntime.execute({
+  callId: "search-cap",
+  name: "search_files",
+  arguments: { query: "needle", paths: ["src/search-cap.ts"], caseSensitive: true }
+});
+assert.equal(cappedSearch.diagnosticOutput.matchCount, 200);
+assert.equal(cappedSearch.diagnosticOutput.truncated, true);
+assert((cappedSearch.diagnosticOutput.matches as Array<{ contentTruncated: boolean }>).every((match) => !match.contentTruncated));
+const exactCappedSearch = await mutationRuntime.execute({
+  callId: "search-exact-cap",
+  name: "search_files",
+  arguments: { query: "needle", paths: ["src/search-exact-cap.ts"], caseSensitive: true }
+});
+assert.equal(exactCappedSearch.diagnosticOutput.matchCount, 200);
+assert.equal(exactCappedSearch.diagnosticOutput.truncated, false);
+const missingAfterExcerpt = await mutationRuntime.execute({
+  callId: "search-missing-after-excerpt",
+  name: "search_files",
+  arguments: { query: "needle", paths: ["src/search-fixture.ts", "src/zz-missing.tsx"], caseSensitive: true }
+});
+assert.equal(missingAfterExcerpt.diagnosticOutput.ok, false);
+assert.deepEqual(missingAfterExcerpt.diagnosticOutput.missingPaths, ["src/zz-missing.tsx"]);
+const missingSearchPath = await mutationRuntime.execute({
+  callId: "search-missing-path",
+  name: "search_files",
+  arguments: { query: "needle", paths: ["src/missing.tsx"], caseSensitive: true }
+});
+assert.equal(missingSearchPath.diagnosticOutput.ok, false);
+assert.deepEqual(missingSearchPath.diagnosticOutput.missingPaths, ["src/missing.tsx"]);
 const partialRead = await mutationRuntime.execute({
   callId: "partial-read",
   name: "read_files",

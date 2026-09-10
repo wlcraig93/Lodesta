@@ -311,9 +311,10 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     const selected = parsed.paths.length
       ? parsed.paths.map((path) => [path, this.readableFile(path)] as const)
       : [...this.files.entries(), ...this.referenceFiles.entries()];
-    const matches: Array<{ path: string; line: number; content: string }> = [];
+    const matches: Array<{ path: string; line: number; content: string; contentTruncated: boolean }> = [];
     const missingPaths: string[] = [];
     let truncated = false;
+    let matchLimitReached = false;
     for (const [path, content] of selected.sort(([left], [right]) => left.localeCompare(right))) {
       if (content === undefined) {
         missingPaths.push(path);
@@ -321,14 +322,44 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       }
       for (const [index, line] of content.split("\n").entries()) {
         const candidate = parsed.caseSensitive ? line : line.toLocaleLowerCase();
-        if (!candidate.includes(query)) continue;
+        const matchIndex = candidate.indexOf(query);
+        if (matchIndex < 0) continue;
         if (matches.length >= 200) {
           truncated = true;
+          matchLimitReached = true;
           break;
         }
-        matches.push({ path, line: index + 1, content: line.slice(0, 2_000) });
+        const contentTruncated = line.length > 2_000;
+        let sourceMatchIndex = matchIndex;
+        if (!parsed.caseSensitive && candidate.length !== line.length) {
+          sourceMatchIndex = 0;
+          let normalizedIndex = 0;
+          for (const character of line) {
+            const nextNormalizedIndex = normalizedIndex + character.toLocaleLowerCase().length;
+            if (nextNormalizedIndex > matchIndex) break;
+            normalizedIndex = nextNormalizedIndex;
+            sourceMatchIndex += character.length;
+          }
+        }
+        const requestedExcerptStart = contentTruncated
+          ? Math.max(0, Math.min(sourceMatchIndex - 1_000, line.length - 2_000))
+          : 0;
+        const excerptStart = requestedExcerptStart > 0 && /[\uDC00-\uDFFF]/.test(line[requestedExcerptStart] ?? "")
+          ? requestedExcerptStart - 1
+          : requestedExcerptStart;
+        const requestedExcerptEnd = Math.min(line.length, excerptStart + 2_000);
+        const excerptEnd = requestedExcerptEnd < line.length && /[\uD800-\uDBFF]/.test(line[requestedExcerptEnd - 1] ?? "")
+          ? requestedExcerptEnd - 1
+          : requestedExcerptEnd;
+        matches.push({
+          path,
+          line: index + 1,
+          content: line.slice(excerptStart, excerptEnd),
+          contentTruncated
+        });
+        truncated ||= contentTruncated;
       }
-      if (truncated) break;
+      if (matchLimitReached) break;
     }
     return result({
       ok: missingPaths.length === 0,

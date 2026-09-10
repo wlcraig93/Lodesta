@@ -1308,7 +1308,7 @@ const readablePathSchema = { type: "string", pattern: "^(?:src/[a-zA-Z0-9_./-]+\
 
 export const websiteManagerTools: Tool[] = [
   tool("list_files", "List authored src/ files and read-only source-site/ reference files with hashes and sizes.", { type: "object", additionalProperties: false, properties: {}, required: [] }),
-  tool("search_files", "Find literal text across authored src/ files and the read-only source-site/ corpus. Pass an empty paths array to search every file.", {
+  tool("search_files", "Find literal text across authored src/ files and the read-only source-site/ corpus. Results are bounded excerpts centered on each match; contentTruncated marks each excerpt and top-level truncated marks any excerpt or omitted match. read_files provides complete lines. Pass an empty paths array to search every file.", {
     type: "object", additionalProperties: false, required: ["query", "paths", "caseSensitive"],
     properties: {
       query: { type: "string", minLength: 1, maxLength: 500 },

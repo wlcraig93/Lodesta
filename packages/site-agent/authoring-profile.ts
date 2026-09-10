@@ -35,7 +35,6 @@ export type ManagerAuthoringProfile = {
   architectureMode: "commercial-core-message-target";
   architectureEvidenceMode: "indexed-pull-preview-readable";
   architectureBrowserCoverage: "all-routes";
-  disabledTools: readonly ["create_image"];
   sourceEvidenceReferences?: readonly ManagerSourceEvidenceReference[];
   sourceEvidenceLimit: 8;
   sourceEvidencePresentation: "contact-sheet";
@@ -62,7 +61,6 @@ export function canonicalAuthoringProfile(kind: ManagerTaskKind): ManagerAuthori
     architectureMode: "commercial-core-message-target",
     architectureEvidenceMode: "indexed-pull-preview-readable",
     architectureBrowserCoverage: "all-routes",
-    disabledTools: ["create_image"],
     sourceEvidenceLimit: 8,
     sourceEvidencePresentation: "contact-sheet",
     assetEvidenceLimit: 2,
@@ -89,7 +87,6 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
     profileId: profile.profileId,
     taskSkillIdentity: profile.taskSkill.identity,
     systemPrompt: profile.systemPrompt,
-    disabledTools: [...profile.disabledTools].sort(),
     sourceEvidenceLimit: profile.sourceEvidenceLimit,
     sourceEvidencePresentation: profile.sourceEvidencePresentation,
     assetEvidenceLimit: profile.assetEvidenceLimit,

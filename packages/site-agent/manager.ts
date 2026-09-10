@@ -48,6 +48,7 @@ import {
   managerAuthoringProfileIdentity,
   managerReferenceContext
 } from "./authoring-profile";
+import { imageCreationModel, imageCreationPurposes } from "./image-creation";
 import { openRouterAnthropicMessagesClient } from "./openrouter-anthropic-messages";
 import {
   assertOpenAiStrictFunctionTools,
@@ -159,10 +160,7 @@ export class WebsiteManagerAgent {
     // Whole-site source needs complete content and readable code. Keep narrow
     // edits, rebases, and the separate structured architect output concise.
     const textVerbosity = input.kind === "initial_build" ? "medium" : siteAgentTextVerbosity;
-    const availableTools = authoringProfile.disabledTools.length
-      ? websiteManagerTools.filter((tool) => tool.type !== "function" || !authoringProfile.disabledTools.includes(tool.name as "create_image"))
-      : websiteManagerTools;
-    const providerTools = projectToolsForProvider(availableTools, providerCapability.descriptor);
+    const providerTools = projectToolsForProvider(websiteManagerTools, providerCapability.descriptor);
     const guardrails = guardrailsFor(input, input.guardrails);
     const startedAt = Date.now();
     const usage = emptyUsage();
@@ -1479,11 +1477,11 @@ export const websiteManagerTools: Tool[] = [
       expectedRevision: { type: ["integer", "null"], minimum: 1 }
     }
   }),
-  tool("create_image", "Generate a new image or edit 1-4 available business assets with GPT Image 2. Use this only when it materially improves the site; return value includes the new asset ID and image pixels.", {
+  tool("create_image", `Generate a supporting image or edit 1-4 available non-logo assets with ${imageCreationModel.label}. Do not generate or edit official logos through this tool. Use this only when it materially improves the site; return value includes the new asset ID and image pixels.`, {
     type: "object", additionalProperties: false, required: ["action", "purpose", "prompt", "sourceAssetIds", "size", "alt"],
     properties: {
       action: { type: "string", enum: ["generate", "edit"] },
-      purpose: { type: "string", enum: ["hero", "section", "background", "gallery", "logo", "other"] },
+      purpose: { type: "string", enum: imageCreationPurposes },
       prompt: { type: "string", minLength: 1, maxLength: 8000 },
       sourceAssetIds: { type: "array", minItems: 0, maxItems: 4, items: { type: "string" } },
       size: { type: "string", enum: ["1536x1024", "1024x1536", "1024x1024"] },

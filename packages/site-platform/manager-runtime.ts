@@ -204,7 +204,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       }
       case "create_image": {
         if (!this.options.createImage) return result({ ok: false, error: "image_generation_unavailable" });
-        const created = await this.options.createImage(call.arguments);
+        const created = await this.options.createImage(managerToolArguments.create_image.parse(call.arguments));
         if (created.diagnosticOutput.ok !== false) {
           this.successfulBuild = undefined;
           this.failedBuild = undefined;

@@ -30,6 +30,7 @@ import {
 import {
   classifySiteAuthoringFailure,
   createImageBytes,
+  imageCreationModel,
   createSourceWorkspace,
   createSiteAuthoringContext,
   buildSiteArchitectureInventory,
@@ -42,6 +43,7 @@ import {
   mergeArchitectureEvidenceFiles,
   managerGuardrailsAfterPriorUsage,
   managerAuthoringProfileIdentity,
+  managerToolArguments,
   liveAuthoringProfile,
   retainedContentModeForAuthoringProfile,
   parseApprovedArchitectureModule,
@@ -61,7 +63,6 @@ import {
   type ManagerRunRequest,
   type ManagerAssetEvidenceReference,
   type ManagerSourceEvidenceReference,
-  type CreateImageRequest,
   type WorkspaceSourceFile
 } from "@/packages/site-agent";
 import {
@@ -89,6 +90,7 @@ import {
   siteAgentMessageSchema,
   siteAgentSessionSchema,
   siteAgentWorkspaceCheckpointSchema,
+  sitePublicBuildInputSchema,
   siteIntentSchema,
   sourceSnapshotSchema,
   websiteSourceSnapshotPayloadSchema,
@@ -2130,21 +2132,28 @@ export class SiteAuthoringWorkflow {
     const retainedSourceIds = new Set(input.buildInput.sourceSnapshotIds);
     const generatedRevisions: AssetRevision[] = [];
     const generatedRefs: AssetRevisionRef[] = [];
-    const refreshEffectiveMedia = (refs: AssetRevisionRef[]) => {
+    const refreshEffectiveMedia = (refs: AssetRevisionRef[], retainedDependencyRevisionIds: string[] = []) => {
       if (!refs.length) {
+        if (retainedDependencyRevisionIds.length) {
+          throw new Error("media_provenance_dependencies_require_a_rendered_asset");
+        }
         effectiveState = baseState;
         effectiveBuildInput = retainedBuildInput;
         return;
       }
       const revisionIds = new Set(refs.map((item) => item.revisionId));
       const sourceSnapshotIds = [...retainedSourceIds].sort();
+      const retainedDependencies = [...new Set(retainedDependencyRevisionIds)]
+        .filter((revisionId) => !revisionIds.has(revisionId))
+        .sort();
       effectiveState = prospectiveMediaState(baseState, refs);
-      effectiveBuildInput = createPublicBuildInput({
+      const projected = createPublicBuildInput({
         id: deterministicId("input", {
           schemaVersion: 1,
           runId: run.id,
           retainedPublicBuildInputId: retainedBuildInput.id,
           generatedAssetRevisionIds: generatedRevisions.filter((item) => revisionIds.has(item.id)).map((item) => item.id),
+          retainedMediaDependencyRevisionIds: retainedDependencies,
           sourceSnapshotIds
         }),
         state: effectiveState,
@@ -2153,7 +2162,16 @@ export class SiteAuthoringWorkflow {
         sourceSnapshotIds,
         runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
       });
+      // Keep provenance-only ancestors in the immutable candidate manifest so
+      // its asset references delete-restrict their rows/blobs, without making
+      // an unused intermediate a current business-library asset.
+      effectiveBuildInput = withRetainedAssetRevisionIds(projected, retainedDependencies);
     };
+    const resolveProvisionalMediaClosure = (roots: AssetRevisionRef[]) => mediaProvenanceClosure({
+      roots,
+      provisionalRevisions: generatedRevisions,
+      getRetainedRevision: (revisionId) => this.repository.getAssetRevision(revisionId)
+    });
     const recorder = new SiteAgentEventRecorder(this.repository, this.blobStore, run.id);
     const runEvent = await recorder.open({
       kind: "run",
@@ -2494,10 +2512,11 @@ export class SiteAuthoringWorkflow {
         };
       },
       createImage: async (rawArgs) => {
-        const args = rawArgs as CreateImageRequest;
+        const args = managerToolArguments.create_image.parse(rawArgs);
         const sources = await Promise.all(args.sourceAssetIds.map(async (assetId) => {
           const asset = effectiveBuildInput.business.assets.find((candidate) => candidate.assetId === assetId);
           if (!asset) throw new Error(`Unknown source asset ${assetId}.`);
+          if (asset.kind === "logo") throw new Error("official_logo_image_edit_unsupported");
           const blob = await this.blobStore.get(asset.storageKey);
           if (!blob) throw new Error(`Source asset bytes are unavailable for ${assetId}.`);
           return { revisionId: asset.revisionId, mimeType: asset.mimeType, bytes: blob.bytes };
@@ -2522,7 +2541,7 @@ export class SiteAuthoringWorkflow {
           provenance: {
             origin: "platform_generated",
             provider: "openai",
-            model: "gpt-image-2",
+            model: imageCreationModel.id,
             action: args.action,
             purpose: args.purpose,
             prompt: args.prompt,
@@ -2533,7 +2552,7 @@ export class SiteAuthoringWorkflow {
         const ref: AssetRevisionRef = {
           assetId,
           revisionId,
-          kind: args.purpose === "logo" ? "logo" : "photo",
+          kind: "photo",
           contentHash,
           storageKey,
           mimeType: created.mimeType,
@@ -2566,8 +2585,8 @@ export class SiteAuthoringWorkflow {
           },
           metering: {
             apiProvider: "openai",
-            modelId: "gpt-image-2",
-            servedModelId: "gpt-image-2",
+            modelId: imageCreationModel.id,
+            servedModelId: imageCreationModel.id,
             usage: {
               inputTokens: created.usage.inputTokens,
               cachedInputTokens: 0,
@@ -2724,9 +2743,14 @@ export class SiteAuthoringWorkflow {
         if (finalized.artifact.qa.hardGate === "passed" && generatedRefs.length) {
           const source = files.map((file) => file.content).join("\n");
           const usedGeneratedRefs = generatedRefs.filter((asset) => source.includes(asset.assetId) || source.includes(asset.revisionId));
-          const activeRunGeneratedCount = generatedRefs.filter((asset) => effectiveBuildInput.assetRevisionIds.includes(asset.revisionId)).length;
-          if (usedGeneratedRefs.length !== activeRunGeneratedCount) {
-            refreshEffectiveMedia(usedGeneratedRefs);
+          const retainedClosure = await resolveProvisionalMediaClosure(usedGeneratedRefs);
+          const renderedRevisionIds = new Set(usedGeneratedRefs.map((asset) => asset.revisionId));
+          const ancestorRevisionIds = retainedClosure
+            .map((revision) => revision.id)
+            .filter((revisionId) => !renderedRevisionIds.has(revisionId));
+          const publicBuildInputIdBeforeMediaSelection = effectiveBuildInput.id;
+          refreshEffectiveMedia(usedGeneratedRefs, ancestorRevisionIds);
+          if (effectiveBuildInput.id !== publicBuildInputIdBeforeMediaSelection) {
             const rebased = await this.sandbox.rebase(activeSession.sandboxId!, activeSandboxRevision, effectiveBuildInput);
             activeSandboxRevision = rebased.revision;
             sandboxPublicBuildInputId = effectiveBuildInput.id;
@@ -4923,7 +4947,10 @@ export class SiteAuthoringWorkflow {
       for (const asset of previewable.slice(0, 4)) {
         const blob = await this.blobStore.get(asset.storageKey).catch(() => undefined);
         if (!blob || blob.bytes.length > 4_000_000) continue;
-        const previewBytes = await sharp(blob.bytes, { limitInputPixels: 80_000_000, animated: false })
+        const original = sharp(blob.bytes, { limitInputPixels: 80_000_000, animated: false });
+        const dimensions = (await original.metadata().catch(() => undefined))?.autoOrient;
+        if (!dimensions) continue;
+        const previewBytes = await original
           .rotate()
           .resize({ width: 960, height: 960, fit: "inside", withoutEnlargement: true })
           .webp({ quality: 82, effort: 4 })
@@ -4938,6 +4965,9 @@ export class SiteAuthoringWorkflow {
         const labeledPreview = {
           previewIndex: previews.length + 1,
           ...preview,
+          // Describe the oriented original, not the resized preview or retained hints.
+          width: dimensions.width,
+          height: dimensions.height,
           previewMimeType: "image/webp",
           previewBytes: previewBytes.length
         };
@@ -5518,6 +5548,58 @@ function prospectiveMediaState(base: BusinessState, generatedAssets: AssetRevisi
   };
   const { stateHash: _previousHash, ...withoutHash } = next;
   return businessStateSchema.parse({ ...withoutHash, stateHash: sha256(stableJson(withoutHash)) });
+}
+
+export function withRetainedAssetRevisionIds(buildInput: SitePublicBuildInput, dependencyRevisionIds: string[]) {
+  const assetRevisionIds = [...new Set([...buildInput.assetRevisionIds, ...dependencyRevisionIds])].sort();
+  if (
+    assetRevisionIds.length === buildInput.assetRevisionIds.length
+    && assetRevisionIds.every((revisionId, index) => revisionId === buildInput.assetRevisionIds[index])
+  ) {
+    return buildInput;
+  }
+  const { inputHash: _previousInputHash, ...withoutHash } = buildInput;
+  return sitePublicBuildInputSchema.parse({
+    ...withoutHash,
+    assetRevisionIds,
+    inputHash: sha256(stableJson({ ...withoutHash, assetRevisionIds }))
+  });
+}
+
+export async function mediaProvenanceClosure(input: {
+  roots: AssetRevisionRef[];
+  provisionalRevisions: AssetRevision[];
+  getRetainedRevision: (revisionId: string) => Promise<AssetRevision | undefined>;
+}) {
+  const provisionalByRevisionId = new Map(input.provisionalRevisions.map((revision) => [revision.id, revision]));
+  if (provisionalByRevisionId.size !== input.provisionalRevisions.length) {
+    throw new Error("generated_media_revision_id_conflict");
+  }
+  const retainedProvisionalRevisionIds = new Set<string>();
+  const resolved = new Set<string>();
+  const visiting = new Set<string>();
+  const visit = async (revisionId: string): Promise<void> => {
+    if (resolved.has(revisionId)) return;
+    if (visiting.has(revisionId)) throw new Error(`generated_media_provenance_cycle:${revisionId}`);
+    const provisional = provisionalByRevisionId.get(revisionId);
+    if (!provisional) {
+      const retained = await input.getRetainedRevision(revisionId);
+      if (!retained) throw new Error(`generated_media_provenance_missing:${revisionId}`);
+      resolved.add(revisionId);
+      return;
+    }
+    visiting.add(revisionId);
+    if (provisional.provenance.origin === "platform_generated") {
+      for (const sourceRevisionId of provisional.provenance.sourceAssetRevisionIds) {
+        await visit(sourceRevisionId);
+      }
+    }
+    visiting.delete(revisionId);
+    resolved.add(revisionId);
+    retainedProvisionalRevisionIds.add(revisionId);
+  };
+  for (const root of input.roots) await visit(root.revisionId);
+  return input.provisionalRevisions.filter((revision) => retainedProvisionalRevisionIds.has(revision.id));
 }
 
 function stateWithCanonicalSourceLogo(base: BusinessState, canonical: AssetRevisionRef) {

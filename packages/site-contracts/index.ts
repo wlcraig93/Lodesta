@@ -254,7 +254,7 @@ const assetProvenanceSchema = z.discriminatedUnion("origin", [
   z.object({
     origin: z.literal("platform_generated"),
     provider: z.literal("openai"),
-    model: z.literal("gpt-image-2"),
+    model: z.enum(["gpt-image-2", "gpt-image-2.5-flare"]),
     action: z.enum(["generate", "edit"]),
     purpose: z.enum(["hero", "section", "background", "gallery", "logo", "other"]),
     prompt: z.string().min(1).max(8000),

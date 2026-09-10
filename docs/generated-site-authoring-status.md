@@ -1,12 +1,18 @@
 # Generated-site authoring status
 
-Date: 2026-09-09
+Date: 2026-09-10
 
 ## Current decision: generator still under evaluation
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current checkpoint: diagnostic release verified; fresh Terra reviewed; search excerpt defect isolated
+### Current checkpoint: image-context corrections and Image 2.5 screen
+
+The [media policy and evidence](media-authoring-policy.md#september-10-image-evidence-and-decision) records the new local changes: original oriented image dimensions, contact sheets that do not enlarge thumbnails, a corrected image-edit request, and Image 2.5 Flare selected for the existing image tool. Nine private image requests completed for $0.782914 estimated total. Flare was cheaper and faster in this small screen, not uniformly better at composition. The subsequent owner-approved integration makes `create_image` optional in the sole canonical authoring path, removes obsolete exclusion dispatch, and reconciles the source-first prompt/skill boundary. It does not yet prove a generated-site quality gain. An eight-call source-photo probe did not justify restoring old semantic hints. Existing business-site photo reuse remains allowed without new approval machinery.
+
+These image changes are not yet deployed. The last recorded verified release is `ff61bc01bc62d714354d443d44ecb6c97bec8d2f` (CI `34427722065`, coordinated release `34428117463`; evidence `.design/v4-production-readiness-2026-09-04/release-ff61bc01/`). The fixed multi-business acceptance screen remains incomplete. Neither API compatibility, unit/browser fixtures, nor sequential corrections count as fresh-build acceptance.
+
+### Earlier checkpoint: diagnostic release verified; fresh Terra reviewed; search excerpt defect isolated
 
 Release `1bcf1ee7941f35d713223622992a66c5d1fd9609` passed CI `34418195911` and coordinated release `34418639399`. Independent readback matches Railway web `c93af0a0-23d4-4b07-9d84-fbcfd4b33a4e`, worker `f5ed27cc-0df7-4da0-a947-125b82caf08d`, and active sandbox `sandbox_deployment_e15abf51c2aae271f98f8862e9aaf3ea` to that SHA. Its first ten-pair mutation canary passed; deep health has no errors, maintenance is released, and email is disabled. This deploys the document-mismatch and pending-resource diagnostics, not a proven transport fix.
 

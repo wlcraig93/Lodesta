@@ -5,9 +5,9 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { LocalSitePlatformRepository } from "../packages/platform-data/repository";
 import { LocalArtifactBlobStore } from "../packages/site-artifacts";
-import { SiteAuthoringWorkflow, operatorHomepageContextPages } from "../packages/site-platform/workflow";
-import { createSiteAuthoringContext, siteAgentRunGuardrailsForKind, type WebsiteManagerAgent } from "../packages/site-agent";
-import { businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, sourceSnapshotSchema, sourceSnapshotPageSchema, sourceSnapshotResourceSchema, type SitePublicBuildInput } from "../packages/site-contracts";
+import { SiteAuthoringWorkflow, mediaProvenanceClosure, operatorHomepageContextPages, withRetainedAssetRevisionIds } from "../packages/site-platform/workflow";
+import { createSiteAuthoringContext, imageCreationModel, siteAgentRunGuardrailsForKind, type WebsiteManagerAgent } from "../packages/site-agent";
+import { assetRevisionSchema, businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, sourceSnapshotSchema, sourceSnapshotPageSchema, sourceSnapshotResourceSchema, type AssetRevision, type AssetRevisionRef, type SitePublicBuildInput } from "../packages/site-contracts";
 import { resolveApprovedSourceDocuments } from "../packages/business-data/owner-documents";
 import { sha256, stableJson } from "../packages/business-data";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
@@ -211,6 +211,7 @@ try {
     apply: async () => ({ revision: `build_${rebased.length}`, buildDurationMs: 1, previewPath: "/preview" })
   };
   const complete = new Error("fixture_complete");
+  let imageCreatorCalls = 0;
   const manager = { run: async ({ runtime }: Parameters<WebsiteManagerAgent["run"]>[0]) => {
     const documentPath = authoringContext.ownerAuthority.approvedDocuments![0]!.contentFile;
     const readDocument = async () => {
@@ -241,10 +242,15 @@ try {
       arguments: { ...logoArgs, resourceId: "resource_other_crest" } });
     assert.equal(replacement.diagnosticOutput.error, "canonical_logo_already_available");
     assert.deepEqual((await store.get(logoResource.storageKey!))!.bytes, logoBytes, "Retained source bytes must stay unchanged.");
+    await assert.rejects(() => runtime.execute({ callId: "edit_logo", name: "create_image", arguments: {
+      action: "edit", purpose: "section", prompt: "Rework this mark.", sourceAssetIds: [logoRef.assetId], size: "1024x1024", alt: "Edited mark"
+    } }), /official_logo_image_edit_unsupported/);
+    assert.equal(imageCreatorCalls, 0, "Editing a managed official logo reached the image API handler.");
     const image = await runtime.execute({ callId: "media", name: "create_image", arguments: {
       action: "generate", purpose: "background", prompt: "Synthetic test texture", sourceAssetIds: [], size: "1024x1024", alt: "Test texture"
     } });
     assert.equal(image.diagnosticOutput.ok, true);
+    assert.equal(imageCreatorCalls, 1);
     assert.equal((await runtime.execute({ callId: "build1", name: "build_preview", arguments: {} })).diagnosticOutput.ok, true);
     assert.equal(rebased.length, 1);
     assert.equal(rebased[0]!.business.assets.length, 2);
@@ -270,9 +276,12 @@ try {
     throw complete;
   } };
   const workflow = new SiteAuthoringWorkflow(repository, store, sandbox as never, manager as never, undefined,
-    (async () => ({ bytes: mediaBytes, mimeType: "image/webp", width: 16, height: 16, sourceAssetRevisionIds: [],
+    (async () => {
+      imageCreatorCalls += 1;
+      return { bytes: mediaBytes, mimeType: "image/webp", width: 16, height: 16, sourceAssetRevisionIds: [],
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 1 }
-    })) as never);
+      };
+    }) as never);
   await assert.rejects(() => Reflect.get(workflow, "runAuthoring").call(workflow, {
     run, session, buildInput: input, authoringContext,
     snapshots, sourcePages, sandboxRevision: "initial", kind: "edit", instruction: "Add a texture and change the form button label.",
@@ -302,7 +311,169 @@ try {
     snapshots, sourcePages, sandboxRevision: "initial", kind: "edit", instruction: "Inspect the source logo.",
     currentFiles: [{ path: "src/site.tsx", content: 'export const siteDefinition = { routes: [{path:"/",element:<main><h1>Home</h1></main>}] };' }]
   }), (error: unknown) => error === ownerComplete);
+  await verifyGeneratedMediaProvenanceFinalization();
   console.log("Owner-approved documents reach the normal runtime read tools and survive unrelated edits. Form changes preserve retained authority and provisional media across consecutive builds.");
 } finally {
   await rm(directory, { recursive: true, force: true });
+}
+
+async function verifyGeneratedMediaProvenanceFinalization() {
+  const provenanceDirectory = await mkdtemp(join(tmpdir(), "lodesta-media-provenance-"));
+  try {
+    const repository = new LocalSitePlatformRepository(join(provenanceDirectory, "repository.json"));
+    const input = buildSyntheticSiteInput();
+    const now = "2026-09-10T12:00:00.000Z";
+    const owner = "58c3a17e-6ad5-4e2c-9eb3-90e71527a054";
+    const initialStateBody = {
+      schemaVersion: 1 as const, businessId: input.businessId, siteId: input.siteId,
+      revision: 1, ownerOperationalRevision: input.ownerOperationalRevision, updatedAt: now,
+      identity: { name: input.business.name, status: input.business.identityStatus, description: input.business.description, categories: [] },
+      contacts: input.business.contacts, locations: input.business.locations, serviceAreas: input.business.serviceAreas,
+      offerings: input.business.offerings, proof: input.business.proof, assets: input.business.assets,
+      links: input.business.links, facts: input.publicFacts
+    };
+    await repository.createSite({ id: input.siteId, ownerUserId: owner, businessId: input.businessId,
+      sourceUrl: "https://northstar.example/", slug: "media-provenance-test", status: "draft", reportingTimezone: "UTC",
+      currentPublicBuildInputId: input.id, createdAt: now, updatedAt: now });
+    await repository.saveBusinessState(businessStateSchema.parse({ ...initialStateBody, stateHash: sha256(stableJson(initialStateBody)) }));
+    await repository.saveSiteIntent(input.intent);
+    for (const form of input.forms) await repository.saveFormDefinition(form);
+    await repository.savePublicBuildInput(input);
+
+    const ancestor = fixtureAdoptedSourceRevision("asset_revision_provenance_ancestor");
+    const edited = fixtureGeneratedRevision("asset_revision_provenance_edited", [ancestor.id]);
+    const sibling = fixtureGeneratedRevision("asset_revision_provenance_sibling", [ancestor.id]);
+    const renderedRefs = [edited, sibling].map(fixtureGeneratedRef);
+    const closure = await mediaProvenanceClosure({
+      roots: renderedRefs,
+      provisionalRevisions: [ancestor, edited, sibling],
+      getRetainedRevision: async () => undefined
+    });
+    assert.deepEqual(closure.map((revision) => revision.id), [ancestor.id, edited.id, sibling.id],
+      "A rendered edit and sibling edit must retain their shared provisional source revision.");
+    await assert.rejects(() => mediaProvenanceClosure({
+      roots: [fixtureGeneratedRef(edited)], provisionalRevisions: [edited], getRetainedRevision: async () => undefined
+    }), /generated_media_provenance_missing:asset_revision_provenance_ancestor/);
+    const retainedSource = fixtureAdoptedSourceRevision("asset_revision_provenance_retained_source");
+    const editFromRetainedSource = fixtureGeneratedRevision("asset_revision_provenance_retained_edit", [retainedSource.id]);
+    let retainedSourceLookedUp = false;
+    const retainedSourceClosure = await mediaProvenanceClosure({
+      roots: [fixtureGeneratedRef(editFromRetainedSource)], provisionalRevisions: [editFromRetainedSource],
+      getRetainedRevision: async (revisionId) => {
+        retainedSourceLookedUp ||= revisionId === retainedSource.id;
+        return revisionId === retainedSource.id ? retainedSource : undefined;
+      }
+    });
+    assert.equal(retainedSourceLookedUp, true, "An edit from a retained source must prove that source revision exists.");
+    assert.deepEqual(retainedSourceClosure.map((revision) => revision.id), [editFromRetainedSource.id]);
+    const cycleA = fixtureGeneratedRevision("asset_revision_provenance_cycle_a", ["asset_revision_provenance_cycle_b"]);
+    const cycleB = fixtureGeneratedRevision("asset_revision_provenance_cycle_b", [cycleA.id]);
+    await assert.rejects(() => mediaProvenanceClosure({
+      roots: [fixtureGeneratedRef(cycleA)], provisionalRevisions: [cycleA, cycleB], getRetainedRevision: async () => undefined
+    }), /generated_media_provenance_cycle:asset_revision_provenance_cycle_a/);
+
+    const { inputHash: _baseInputHash, ...adoptionInputBody } = {
+      ...input,
+      id: "input_media_provenance",
+      createdAt: now,
+      business: { ...input.business, assets: renderedRefs },
+      assetRevisionIds: renderedRefs.map((asset) => asset.revisionId)
+    };
+    const adoptionInput = withRetainedAssetRevisionIds({
+      ...adoptionInputBody,
+      inputHash: sha256(stableJson(adoptionInputBody))
+    }, [ancestor.id]);
+    assert.deepEqual(adoptionInput.assetRevisionIds, [ancestor.id, edited.id, sibling.id]);
+    const { inputHash: adoptionInputHash, ...adoptionInputWithoutHash } = adoptionInput;
+    assert.equal(adoptionInputHash, sha256(stableJson(adoptionInputWithoutHash)),
+      "The augmented immutable asset manifest must retain a canonical candidate input hash.");
+    assert.deepEqual(adoptionInput.business.assets.map((asset) => asset.revisionId), [edited.id, sibling.id],
+      "Provenance-only ancestors must remain outside the visible business media library.");
+
+    const adoptionStateBody = {
+      ...initialStateBody, revision: 2, updatedAt: now, assets: renderedRefs
+    };
+    const adoptionState = businessStateSchema.parse({ ...adoptionStateBody, stateHash: sha256(stableJson(adoptionStateBody)) });
+    const session = siteAgentSessionSchema.parse({ schemaVersion: "site-agent-session", id: "session_media_provenance",
+      siteId: input.siteId, principal: { kind: "owner", id: owner }, status: "active", publicBuildInputId: input.id,
+      sandboxProvider: "cloudflare", sandboxId: "sandbox_media_provenance", leaseTokenHash: sha256("media-provenance-lease"),
+      leaseExpiresAt: "2026-09-10T13:00:00.000Z", rotateAt: "2026-09-10T14:00:00.000Z", createdAt: now, updatedAt: now });
+    const runningRun = siteAgentRunSchema.parse({ schemaVersion: "site-agent-run", id: "run_media_provenance", sessionId: session.id,
+      siteId: input.siteId, publicBuildInputId: input.id, request: { kind: "owner_instruction", messageIds: ["message_media_provenance"] },
+      origin: "owner_request", requestedBy: owner, kind: "edit", status: "running", stage: "authoring", executionNumber: 1,
+      apiProvider: "openai", modelId: "gpt-5.6-sol", skillVersions: {}, guardrails: siteAgentRunGuardrailsForKind("edit", now),
+      usage: { inputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0, outputTokens: 0, costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 0 },
+      startedAt: now });
+    await repository.saveAgentSession(session);
+    await repository.saveAgentRun(runningRun);
+    const source = "export const siteDefinition = { routes: [{ path: '/', element: <main><h1>Northstar</h1></main> }] };";
+    const workspace = {
+      schemaVersion: 1 as const, id: "workspace_media_provenance", siteId: input.siteId, publicBuildInputId: adoptionInput.id,
+      ownerOperationalRevision: input.ownerOperationalRevision, ownerIntentRevision: input.ownerIntentRevision, revisionNumber: 1,
+      sourceHash: sha256(source), sourceArchiveKey: "workspace-backups/media-provenance.tar.gz",
+      files: [{ path: "src/site.tsx", contentHash: sha256(source), bytes: Buffer.byteLength(source) }],
+      createdAt: now, createdBy: { kind: "agent" as const, id: runningRun.id }
+    };
+    const artifact = {
+      schemaVersion: 1 as const, id: "artifact_media_provenance", siteId: input.siteId, workspaceRevisionId: workspace.id,
+      publicBuildInputId: adoptionInput.id, ownerOperationalRevision: input.ownerOperationalRevision, ownerIntentRevision: input.ownerIntentRevision,
+      createdAt: now, artifactHash: sha256("media-provenance-artifact"), storagePrefix: "site-artifacts/media-provenance",
+      files: [{ path: "index.html", contentType: "text/html", contentHash: sha256("<main>Northstar</main>"), bytes: 22, storageKey: "site-artifacts/media-provenance/index.html" }],
+      routes: [{ path: "/", htmlFile: "index.html", title: "Northstar", description: "Fixture candidate" }],
+      factBindings: [], capabilityBindings: [], runtimeSeriesId: input.capabilityConfiguration.trustedRuntimeSeries,
+      runtimePatchAtFinalization: "runtime_patch_media_provenance", toolchainVersion: "fixture", sandboxImageDigest: sha256("fixture-sandbox"),
+      qa: { hardGate: "passed" as const, checkedAt: now, routesChecked: 1, linksChecked: 0, findings: [], screenshotKeys: [] }
+    };
+    const requestedVersion = {
+      schemaVersion: 1 as const, id: "version_media_provenance", siteId: input.siteId, number: 1, status: "candidate" as const,
+      artifactId: artifact.id, artifactHash: artifact.artifactHash, workspaceRevisionId: workspace.id, publicBuildInputId: adoptionInput.id,
+      ownerOperationalRevision: input.ownerOperationalRevision, ownerIntentRevision: input.ownerIntentRevision,
+      formDefinitionIds: adoptionInput.forms.map((form) => form.id), sourceSnapshotIds: adoptionInput.sourceSnapshotIds,
+      assetRevisionIds: adoptionInput.assetRevisionIds, createdAt: now, createdBy: { kind: "agent" as const, id: runningRun.id }
+    };
+    const completedRun = siteAgentRunSchema.parse({ ...runningRun, status: "succeeded", stage: "candidate_ready", completedAt: now });
+    const completedSession = siteAgentSessionSchema.parse({ ...session, status: "closed", publicBuildInputId: adoptionInput.id, updatedAt: now });
+    const finalized = await repository.finalizeVerifiedAuthoring({
+      finalizationKey: sha256("media-provenance-finalization"), revision: workspace, artifact, version: requestedVersion,
+      run: completedRun, session: completedSession,
+      mediaAdoption: { expectedBusinessRevision: 1, assetRevisions: closure, businessState: adoptionState, publicBuildInput: adoptionInput }
+    });
+    assert.deepEqual(finalized.version.assetRevisionIds, [ancestor.id, edited.id, sibling.id]);
+    assert.deepEqual((await repository.getPublicBuildInput(adoptionInput.id))!.assetRevisionIds, [ancestor.id, edited.id, sibling.id]);
+    assert.deepEqual((await repository.getBusinessState(input.businessId))!.assets.map((asset) => asset.revisionId), [edited.id, sibling.id]);
+    assert(await repository.getAssetRevision(ancestor.id), "Finalization did not persist the provenance-only ancestor revision.");
+  } finally {
+    await rm(provenanceDirectory, { recursive: true, force: true });
+  }
+}
+
+function fixtureGeneratedRevision(id: string, sourceAssetRevisionIds: string[]): AssetRevision {
+  return assetRevisionSchema.parse({
+    schemaVersion: 1, id, assetId: id.replace("asset_revision_", "asset_"), businessId: "business_synthetic_verification",
+    contentHash: sha256(id), storageKey: `site-assets/business_synthetic_verification/${id}`, mimeType: "image/webp",
+    bytes: 16, width: 16, height: 16, origin: "platform_generated",
+    provenance: { origin: "platform_generated", provider: "openai", model: imageCreationModel.id,
+      action: sourceAssetRevisionIds.length ? "edit" : "generate", purpose: "background",
+      prompt: "Fixture generated supporting image.", sourceAssetRevisionIds },
+    createdAt: "2026-09-10T00:00:00.000Z"
+  });
+}
+
+function fixtureAdoptedSourceRevision(id: string): AssetRevision {
+  return assetRevisionSchema.parse({
+    schemaVersion: 1, id, assetId: id.replace("asset_revision_", "asset_"), businessId: "business_synthetic_verification",
+    contentHash: sha256(id), storageKey: `site-assets/business_synthetic_verification/${id}`, mimeType: "image/webp",
+    bytes: 16, width: 16, height: 16, origin: "source_website",
+    provenance: { origin: "source_website", sourceUrl: "https://northstar.example/source.webp",
+      sourcePageUrl: "https://northstar.example/gallery", sourceSnapshotId: "source_owner", sourceResourceId: "resource_fixture_source" },
+    createdAt: "2026-09-10T00:00:00.000Z"
+  });
+}
+
+function fixtureGeneratedRef(revision: AssetRevision): AssetRevisionRef {
+  return {
+    assetId: revision.assetId, revisionId: revision.id, kind: "photo", contentHash: revision.contentHash,
+    storageKey: revision.storageKey, mimeType: revision.mimeType, alt: "Fixture generated image", width: revision.width,
+    height: revision.height, origin: revision.origin, sourceFactIds: [], activeForFutureBuilds: true
+  };
 }

@@ -17,9 +17,9 @@ export async function createMediaContactSheet(
     const sourcePath = options.neutralSemantics ? undefined : sourcePathFor(item.sourceAssetUrl);
     return {
       bytes: item.bytes,
-      labels: [
+      labels: ({ width, height }: { width: number; height: number }) => [
         item.asset.assetId,
-        `${item.asset.kind} · ${item.asset.width ?? "?"}×${item.asset.height ?? "?"} · ${item.asset.origin.replaceAll("_", " ")}`,
+        `${item.asset.kind} · ${width}×${height} · ${item.asset.origin.replaceAll("_", " ")}`,
         options.neutralSemantics ? "judge the visible pixels; semantics are unverified" : `alt: ${item.asset.alt || "(empty)"}`.slice(0, 58),
         sourcePath ? `file: ${sourcePath}` : "",
         sourceHost ? `page: ${sourceHost}` : ""
@@ -33,11 +33,11 @@ export async function createSourceMediaContactSheet(
 ) {
   return createLabeledMediaContactSheet(resources.map((item) => ({
     bytes: item.bytes,
-    labels: [item.resourceId, `${item.likelyKind} · retained first-party candidate`, "judge the visible pixels; semantics are unverified"]
+    labels: ({ width, height }: { width: number; height: number }) => [item.resourceId, `${item.likelyKind} · ${width}×${height} · retained first-party candidate`, "judge the visible pixels; semantics are unverified"]
   })));
 }
 
-async function createLabeledMediaContactSheet(items: Array<{ bytes: Buffer; labels: string[] }>) {
+async function createLabeledMediaContactSheet(items: Array<{ bytes: Buffer; labels: (dimensions: { width: number; height: number }) => string[] }>) {
   if (!items.length) return undefined;
   const rows = Math.ceil(items.length / columns);
   const width = columns * tileWidth;
@@ -56,13 +56,16 @@ async function createLabeledMediaContactSheet(items: Array<{ bytes: Buffer; labe
     const row = Math.floor(index / columns);
     const left = column * tileWidth + 20;
     const top = headerHeight + row * tileHeight + 12;
-    const thumbnail = await sharp(item.bytes, { limitInputPixels: 80_000_000, animated: false })
-      .resize(imageWidth, imageHeight, { fit: "contain", background: "#ece9e2" })
+    const original = sharp(item.bytes, { limitInputPixels: 80_000_000, animated: false });
+    const dimensions = (await original.metadata()).autoOrient;
+    const thumbnail = await original
+      .rotate()
+      .resize(imageWidth, imageHeight, { fit: "contain", withoutEnlargement: true, background: "#ece9e2" })
       .png()
       .toBuffer();
     composites.push({ input: thumbnail, left, top });
     composites.push({
-      input: Buffer.from(svgText(imageWidth, 112, item.labels.map((line, lineIndex) =>
+      input: Buffer.from(svgText(imageWidth, 112, item.labels(dimensions).map((line, lineIndex) =>
         `<text x="0" y="${18 + lineIndex * 19}" class="${lineIndex === 0 ? "id" : "meta"}">${escapeXml(line)}</text>`
       ).join(""))),
       left,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import sharp from "sharp";
 import { summarizeCrawlHtml } from "../lib/crawler";
 import { sha256 } from "../packages/business-data";
-import { createImageBytes, managerToolArguments } from "../packages/site-agent";
+import { createImageBytes, imageCreationModel, managerToolArguments, websiteManagerTools } from "../packages/site-agent";
 import { assetRevisionSchema, type AssetRevisionRef } from "../packages/site-contracts";
 import { WorkspaceManagerRuntime } from "../packages/site-platform/manager-runtime";
 import { reusableActiveSourceAssetRef } from "../packages/site-platform/workflow";
@@ -54,6 +54,19 @@ assert.throws(() => managerToolArguments.create_image.parse({
   size: "1536x1024",
   alt: "Workshop"
 }));
+assert.throws(() => managerToolArguments.create_image.parse({
+  action: "generate",
+  purpose: "logo",
+  prompt: "A business logo.",
+  sourceAssetIds: [],
+  size: "1024x1024",
+  alt: "Business logo"
+}), "New generated images must not claim a logo purpose.");
+assert.equal(imageCreationModel.id, "gpt-image-2.5-flare");
+const imageTool = websiteManagerTools.find((tool): tool is Extract<typeof tool, { type: "function" }> => tool.type === "function" && tool.name === "create_image");
+if (!imageTool || typeof imageTool.description !== "string") throw new Error("The create_image tool was not registered.");
+assert.match(imageTool.description, new RegExp(imageCreationModel.label));
+assert.equal((((imageTool.parameters as { properties: { purpose: { enum: readonly string[] } } }).properties.purpose.enum)).includes("logo"), false);
 
 const generatedWebp = await sharp({
   create: { width: 1024, height: 1024, channels: 3, background: "#24463e" }
@@ -84,7 +97,7 @@ const generated = await createImageBytes({
     }
   } as never
 });
-assert.equal(generatedRequest?.model, "gpt-image-2");
+assert.equal(generatedRequest?.model, imageCreationModel.id);
 assert.equal(generatedRequest?.quality, "high");
 assert.equal(generatedRequest?.output_format, "webp");
 assert.equal(generatedRequest?.moderation, "auto");
@@ -92,7 +105,86 @@ assert.equal(generated.width, 1024);
 assert.equal(generated.usage.costSource, "catalog_estimate");
 assert.equal(generated.usage.costUsd, 0.2106);
 
+const generatedAssetBase = {
+  schemaVersion: 1,
+  id: "asset_revision_generated",
+  assetId: "asset_generated",
+  businessId: "business_test",
+  contentHash: `sha256:${"a".repeat(64)}`,
+  storageKey: "site-assets/business_test/generated.webp",
+  mimeType: "image/webp",
+  bytes: generatedWebp.length,
+  width: 1024,
+  height: 1024,
+  origin: "platform_generated" as const,
+  provenance: {
+    origin: "platform_generated" as const,
+    provider: "openai" as const,
+    model: imageCreationModel.id,
+    action: "generate" as const,
+    purpose: "background" as const,
+    prompt: "A subtle, text-free background texture.",
+    sourceAssetRevisionIds: []
+  },
+  createdAt: "2026-09-10T00:00:00.000Z"
+};
+assert.doesNotThrow(() => assetRevisionSchema.parse(generatedAssetBase));
+assert.doesNotThrow(() => assetRevisionSchema.parse({
+  ...generatedAssetBase,
+  id: "asset_revision_historical_image2",
+  provenance: { ...generatedAssetBase.provenance, model: "gpt-image-2" }
+}), "Historical GPT Image 2 provenance must remain readable.");
+assert.doesNotThrow(() => assetRevisionSchema.parse({
+  ...generatedAssetBase,
+  id: "asset_revision_historical_image2_logo",
+  provenance: { ...generatedAssetBase.provenance, model: "gpt-image-2", purpose: "logo" }
+}), "Historical generated-logo provenance must remain readable.");
+assert.throws(() => assetRevisionSchema.parse({
+  ...generatedAssetBase,
+  id: "asset_revision_unselected_image_model",
+  provenance: { ...generatedAssetBase.provenance, model: "gpt-image-2.5-sunburst" }
+}), "Generated provenance must reject unselected image models.");
+
+let editedRequest: Record<string, unknown> | undefined;
+const edited = await createImageBytes({
+  action: "edit",
+  purpose: "gallery",
+  prompt: "Retain the scene while improving the crop.",
+  sourceAssetIds: ["asset_source"],
+  size: "1024x1024",
+  alt: "Improved gallery image"
+}, [{
+  revisionId: "asset_revision_source",
+  mimeType: "image/webp",
+  bytes: generatedWebp
+}], {
+  client: {
+    images: {
+      edit: async (request: Record<string, unknown>) => {
+        editedRequest = request;
+        return {
+          data: [{ b64_json: generatedWebp.toString("base64") }],
+          usage: {
+            input_tokens: 620,
+            input_tokens_details: { text_tokens: 120, image_tokens: 500 },
+            output_tokens: 7_000,
+            total_tokens: 7_620
+          }
+        };
+      }
+    }
+  } as never
+});
+assert.equal(editedRequest?.model, imageCreationModel.id);
+assert.equal(editedRequest?.quality, "high");
+assert.equal(editedRequest?.output_format, "webp");
+assert.equal(Object.hasOwn(editedRequest ?? {}, "input_fidelity"), false, "Image edits must omit unsupported input_fidelity.");
+assert.equal((editedRequest?.image as unknown[])?.length, 1);
+assert.deepEqual(edited.sourceAssetRevisionIds, ["asset_revision_source"]);
+assert.equal(edited.usage.costSource, "catalog_estimate");
+
 let builds = 0;
+let runtimeImageCreatorCalls = 0;
 const runtime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
   publicBuildInputId: "input_media",
@@ -115,10 +207,13 @@ const runtime = new WorkspaceManagerRuntime<string>({
     diagnosticSummary: {},
     checkpoint: "verified"
   }),
-  createImage: async () => ({
-    modelOutput: JSON.stringify({ ok: true, assetId: "asset_generated" }),
-    diagnosticOutput: { ok: true, assetId: "asset_generated" }
-  })
+  createImage: async () => {
+    runtimeImageCreatorCalls += 1;
+    return {
+      modelOutput: JSON.stringify({ ok: true, assetId: "asset_generated" }),
+      diagnosticOutput: { ok: true, assetId: "asset_generated" }
+    };
+  }
 });
 const listedWorkspace = await runtime.execute({ callId: "list", name: "list_files", arguments: {} });
 assert.equal((listedWorkspace.diagnosticOutput.files as Array<{ path: string; readOnly: boolean }>).find((file) => file.path.startsWith("source-site/"))?.readOnly, true);
@@ -140,7 +235,18 @@ await assert.rejects(() => runtime.execute({
   arguments: { path: "source-site/source_test/pages/source_page_home.md", content: "overwrite" }
 }));
 await runtime.execute({ callId: "build", name: "build_preview", arguments: {} });
-await runtime.execute({ callId: "image", name: "create_image", arguments: {} });
+await assert.rejects(() => runtime.execute({
+  callId: "image-logo",
+  name: "create_image",
+  arguments: { action: "generate", purpose: "logo", prompt: "A business logo.", sourceAssetIds: [], size: "1024x1024", alt: "Business logo" }
+}));
+assert.equal(runtimeImageCreatorCalls, 0, "An invalid logo-purpose call reached the image handler.");
+await runtime.execute({
+  callId: "image",
+  name: "create_image",
+  arguments: { action: "generate", purpose: "background", prompt: "A restrained, text-free background.", sourceAssetIds: [], size: "1024x1024", alt: "Abstract background" }
+});
+assert.equal(runtimeImageCreatorCalls, 1);
 assert.throws(() => managerToolArguments.finish.parse({
   ownerMessage: "Done",
   redirects: [{ sourcePath: "/?p=8024", destinationPath: "/", reason: "Invalid query route." }]
@@ -511,7 +617,7 @@ process.stdout.write(`${JSON.stringify({
   contactSheet: "pass",
   crawlSummaryMediaBounds: "pass",
   imageToolContract: "pass",
-  gptImage2Request: "pass",
+  imageModelRequest: "pass",
   generatedAssetInvalidatesBuild: "pass",
   selectionAwareVisualInspection: "pass",
   repeatedSourceAssetAdoption: "pass",

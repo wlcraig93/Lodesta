@@ -2,9 +2,13 @@ import OpenAI, { toFile } from "openai";
 import sharp from "sharp";
 
 export const imageCreationActions = ["generate", "edit"] as const;
-export const imageCreationPurposes = ["hero", "section", "background", "gallery", "logo", "other"] as const;
+export const imageCreationPurposes = ["hero", "section", "background", "gallery", "other"] as const;
 export const imageCreationSizes = ["1536x1024", "1024x1536", "1024x1024"] as const;
-export const gptImage2Pricing = {
+export const imageCreationModel = {
+  id: "gpt-image-2.5-flare",
+  label: "GPT Image 2.5 Flare"
+} as const;
+export const imageCreationPricing = {
   textInputUsdPerMillion: 5,
   imageInputUsdPerMillion: 8,
   imageOutputUsdPerMillion: 30
@@ -47,7 +51,7 @@ export async function createImageBytes(
   const startedAt = Date.now();
   const client = options.client ?? new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const common = {
-    model: "gpt-image-2",
+    model: imageCreationModel.id,
     prompt: input.prompt,
     n: 1,
     size: input.size,
@@ -59,7 +63,6 @@ export async function createImageBytes(
     ? await client.images.generate({ ...common, moderation: "auto" }, { signal: options.signal })
     : await client.images.edit({
         ...common,
-        input_fidelity: "high",
         image: await Promise.all(sources.map((source, index) =>
           toFile(source.bytes, `source-${index + 1}.${extensionFor(source.mimeType)}`, { type: source.mimeType })
         ))
@@ -112,9 +115,9 @@ export function imageCreationUsage(value: unknown, durationMs: number): ImageCre
     imageInputTokens,
     outputTokens,
     costUsd: (
-      textInputTokens * gptImage2Pricing.textInputUsdPerMillion
-      + imageInputTokens * gptImage2Pricing.imageInputUsdPerMillion
-      + outputTokens * gptImage2Pricing.imageOutputUsdPerMillion
+      textInputTokens * imageCreationPricing.textInputUsdPerMillion
+      + imageInputTokens * imageCreationPricing.imageInputUsdPerMillion
+      + outputTokens * imageCreationPricing.imageOutputUsdPerMillion
     ) / 1_000_000,
     costSource: "catalog_estimate",
     durationMs

@@ -100,7 +100,7 @@ Every Responses model-request event, and every metered GPT Image tool event, rec
 
 Dashboards display `provider_reported` cost as billed and `catalog_estimate` cost as estimated. They never present a catalog estimate as an invoice amount. A Responses API authoring run stops with `cost_telemetry_unavailable` rather than continuing without enforceable cost accounting.
 
-GPT Image 2 uses the Image API's returned token breakdown and the local standard-rate catalog: $5 per million text-input tokens, $8 per million image-input tokens, and $30 per million image-output tokens. The generated asset retains its provider/model provenance, while the tool event retains its own token and cost telemetry.
+GPT Image 2.5 Flare uses the Image API's returned token breakdown and the local standard-rate catalog: $5 per million text-input tokens, $8 per million image-input tokens, and $30 per million image-output tokens. The generated asset retains its provider/model provenance, while the tool event retains its own token and cost telemetry.
 
 ## References
 
@@ -113,7 +113,7 @@ GPT Image 2 uses the Image API's returned token breakdown and the local standard
 - [OpenAI GPT-5.6 Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra)
 - [OpenAI GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
 - [OpenAI GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5)
-- [OpenAI GPT Image 2](https://developers.openai.com/api/docs/models/gpt-image-2)
+- [OpenAI GPT Image 2.5 Flare](https://developers.openai.com/api/docs/models/gpt-image-2.5-flare)
 - [OpenAI image-generation cost guidance](https://developers.openai.com/api/docs/guides/image-generation#cost-and-latency)
 - [OpenAI API pricing](https://openai.com/api/pricing/)
 - [OpenRouter Responses API](https://openrouter.ai/docs/api_reference/responses/overview)

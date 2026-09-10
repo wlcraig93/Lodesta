@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { SiteSandboxClient, SiteSandboxRequestError } from "../packages/site-sandbox";
+import { assertWithSandboxFailureCauses, boundedFailureLabel, captureCanaryFailureDiagnostic } from "./site-sandbox-canary-diagnostics";
 
 const originalFetch = globalThis.fetch;
 const operationId = "a".repeat(64);
@@ -89,6 +90,9 @@ try {
   assert((recoveredSubmission.submissionPayloadBytes ?? 0) > 0);
 
   await verifyRequestBoundStatusBudget(client);
+  await verifyFailureOnlyPollDiagnostic(client);
+  await verifyConcurrentCanaryFailureCaptureBeforeDestroy(client);
+  await verifyMalformedDiagnosticsDoesNotPreventDestroy(client);
 
   process.stdout.write(`${JSON.stringify({
     ok: true,
@@ -97,7 +101,10 @@ try {
     retainedFailure: "pass",
     duplicateSubmissionReplay: "pass",
     lostAcknowledgementRecovery: "pass",
-    requestBoundStatusBudget: "pass"
+    requestBoundStatusBudget: "pass",
+    failureOnlyPollDiagnostic: "pass",
+    concurrentCanaryFailureCaptureBeforeDestroy: "pass",
+    malformedDiagnosticsStillDestroy: "pass"
   })}\n`);
 } finally {
   globalThis.fetch = originalFetch;
@@ -132,6 +139,158 @@ async function verifyRequestBoundStatusBudget(client: SiteSandboxClient) {
     Date.now = originalNow;
     AbortSignal.timeout = originalTimeout;
   }
+}
+
+async function verifyFailureOnlyPollDiagnostic(client: SiteSandboxClient) {
+  const originalNow = Date.now;
+  const originalSetTimeout = globalThis.setTimeout;
+  let now = 0;
+  let statusCalls = 0;
+  try {
+    Date.now = () => now;
+    globalThis.setTimeout = ((callback: () => void) => {
+      callback();
+      return {} as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    globalThis.fetch = async (input) => {
+      if (String(input).endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+      statusCalls += 1;
+      if (statusCalls === 1) throw new TypeError("transport token=never-retained");
+      now = 210_000;
+      return Response.json({ error: "api_token_never_retained", detail: "token=never-retained" }, { status: 502 });
+    };
+    await assert.rejects(
+      () => client.apply("operation_test", "revision-before", source),
+      (error) => {
+        assert(error instanceof SiteSandboxRequestError);
+        assert.equal(error.providerCode, "operation_status_timeout");
+        assert.deepEqual(error.operationPollDiagnostic, {
+          operationId,
+          lastJournal: {
+            status: "queued",
+            phase: "queued",
+            createdAt: error.operationPollDiagnostic?.lastJournal.createdAt,
+            updatedAt: error.operationPollDiagnostic?.lastJournal.updatedAt,
+            phaseStartedAt: error.operationPollDiagnostic?.lastJournal.phaseStartedAt,
+            timestamps: { queued: error.operationPollDiagnostic?.lastJournal.timestamps.queued },
+            phaseTimings: {}
+          },
+          pollAttempts: 2,
+          journalResponses: 0,
+          transportErrors: 1,
+          httpErrors: 1,
+          lastPollError: { kind: "http", status: 502, providerCode: "unrecognized_provider_code" }
+        });
+        assert(!JSON.stringify(error.operationPollDiagnostic).includes("never-retained"), "Poll diagnostics retained raw transport or provider detail.");
+        return true;
+      },
+      "Operation timeout did not retain bounded poll/journal evidence."
+    );
+  } finally {
+    Date.now = originalNow;
+    globalThis.setTimeout = originalSetTimeout;
+  }
+}
+
+async function verifyConcurrentCanaryFailureCaptureBeforeDestroy(client: SiteSandboxClient) {
+  const events: string[] = [];
+  const pollDiagnostic = {
+    operationId,
+    lastJournal: {
+      status: "running" as const,
+      phase: "validating" as const,
+      createdAt: "2026-09-10T15:24:00.000Z",
+      updatedAt: "2026-09-10T15:24:52.782Z",
+      phaseStartedAt: "2026-09-10T15:24:52.000Z",
+      timestamps: { queued: "2026-09-10T15:24:00.000Z", validating: "2026-09-10T15:24:52.000Z" },
+      phaseTimings: { queueMs: 10, prepareMs: 20 }
+    },
+    pollAttempts: 3,
+    journalResponses: 1,
+    transportErrors: 1,
+    httpErrors: 1,
+    lastPollError: { kind: "transport" as const, name: "TypeError" }
+  };
+  const first = new SiteSandboxRequestError("apply", "operation_test", 504, "operation_status_timeout", "token=never-retained", pollDiagnostic);
+  const second = new SiteSandboxRequestError("apply", "operation_test", 504, "api_token_never_retained", "token=never-retained", pollDiagnostic);
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/diagnostics")) {
+      events.push("diagnostics");
+      return Response.json(diagnosticFixture());
+    }
+    if (url.endsWith("/destroy")) {
+      events.push("destroy");
+      return Response.json({ ok: true });
+    }
+    throw new Error(`Unexpected fixture request ${url}`);
+  };
+  let captured: Awaited<ReturnType<typeof captureCanaryFailureDiagnostic>> | undefined;
+  let assertionError: unknown;
+  try {
+    const concurrent = await Promise.allSettled([Promise.reject(first), Promise.reject(second)]);
+    const failures = concurrent.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    const causes = failures.map((result) => result.reason).filter((reason): reason is SiteSandboxRequestError => reason instanceof SiteSandboxRequestError);
+    assertWithSandboxFailureCauses(false, `Concurrent identical mutations produced no successful build: ${failures.map((result) => boundedFailureLabel(result.reason)).join(" | ")}`, causes);
+  } catch (error) {
+    assertionError = error;
+    captured = await captureCanaryFailureDiagnostic(client, "operation_test", error);
+    await client.destroy("operation_test");
+  }
+  assert.deepEqual(events, ["diagnostics", "destroy"], "The concurrent assertion path did not retain its diagnostic before teardown.");
+  assert(assertionError instanceof Error, "The concurrent fixture did not reach the assertion failure path.");
+  assert.equal(Object.getOwnPropertyDescriptor(assertionError, "sandboxFailureCauses")?.enumerable, false, "Raw concurrent causes must not become an assertion-log payload.");
+  assert.equal(captured?.failure.name, "AssertionError");
+  const capturedCauses = captured?.causes ?? [];
+  assert.equal(capturedCauses.length, 2, "Concurrent SiteSandboxRequestError causes were lost by the assertion path.");
+  assert.deepEqual(capturedCauses[0]?.poll, pollDiagnostic);
+  assert.equal(capturedCauses[1]?.failure.providerCode, "unrecognized_provider_code", "Arbitrary provider text was not rejected by the diagnostic allowlist.");
+  assert(!JSON.stringify(captured).includes("never-retained"), "Concurrent failure diagnostics retained raw error details.");
+}
+
+async function verifyMalformedDiagnosticsDoesNotPreventDestroy(client: SiteSandboxClient) {
+  const events: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/diagnostics")) {
+      events.push("diagnostics");
+      return Response.json({ ok: true, revision: "known", placementId: "known" });
+    }
+    if (url.endsWith("/destroy")) {
+      events.push("destroy");
+      return Response.json({ ok: true });
+    }
+    throw new Error(`Unexpected fixture request ${url}`);
+  };
+  const originalFailure = new SiteSandboxRequestError("apply", "operation_test", 504, "operation_status_timeout", "original failure");
+  const captured = await captureCanaryFailureDiagnostic(client, "operation_test", originalFailure);
+  await client.destroy("operation_test");
+  assert.deepEqual(events, ["diagnostics", "destroy"], "Malformed diagnostics prevented cleanup after the original failure.");
+  assert.equal(captured.failure.providerCode, "operation_status_timeout", "Malformed diagnostics masked the original failure classification.");
+  assert("diagnosticsFailure" in captured, "Malformed diagnostics did not retain a bounded failure.");
+  assert.equal(captured.diagnosticsFailure?.name, "TypeError", "Malformed successful diagnostics were not retained as a bounded best-effort failure.");
+  assert.equal("sandbox" in captured, false, "Malformed successful diagnostics were treated as a usable snapshot.");
+}
+
+function diagnosticFixture() {
+  return {
+    ok: true,
+    revision: "b".repeat(64),
+    versions: ["fixture-node"],
+    sandboxManifest: {
+      kind: "site-sandbox-manifest",
+      apiIdentity: "api_test",
+      storageIdentity: "storage_test",
+      durableObjectIdentity: "do_test",
+      artifactContractIdentity: "artifact_test",
+      toolchainIdentity: "toolchain_test",
+      sourcePolicyIdentity: "source_test"
+    },
+    placementId: "placement-test",
+    mutationLock: { operationId, startedAt: "2026-09-10T15:24:52.000Z" },
+    activeOperation: operation("running", "validating"),
+    processes: [{ id: "process-test", command: "npm run build token=never-retained", status: "running" }]
+  };
 }
 
 function operation(

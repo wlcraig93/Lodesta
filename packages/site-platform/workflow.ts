@@ -83,6 +83,7 @@ import {
   formDefinitionSchema,
   leadFormConfigurationSchema,
   siteAgentRunSchema,
+  siteAgentProvisionalMediaSchema,
   siteAgentArchitectureSchema,
   siteAgentContinuationHeadSchema,
   siteAgentContinuationSegmentSchema,
@@ -2120,57 +2121,57 @@ export class SiteAuthoringWorkflow {
     // Media adopted during authoring is intentionally provisional until the
     // verified candidate transaction retains the asset rows and richer public
     // input together. Keep session/run recovery bound to the last public input
-    // that actually exists in storage, then rebase the recovered sandbox to the
-    // in-memory effective input below.
+    // that actually exists in storage. Recover the run's durable media metadata
+    // before projecting/rebasing; no provisional rows become public authority.
     let retainedBuildInput = input.buildInput;
     const sourceCatalog = new Map(input.snapshots.map((snapshot) => [snapshot.id, snapshot]));
-    const sourceWorkspace = createSourceWorkspace({
-      buildInput: input.buildInput,
-      snapshots: input.snapshots,
-      pages: input.sourcePages
-    });
+    let effectiveSourcePages = [...input.sourcePages];
     const retainedSourceIds = new Set(input.buildInput.sourceSnapshotIds);
     const generatedRevisions: AssetRevision[] = [];
     const generatedRefs: AssetRevisionRef[] = [];
+    const recoveredMedia = await this.recoverProvisionalMedia(run, input.buildInput, baseState);
+    if (recoveredMedia) {
+      for (const snapshot of recoveredMedia.snapshots) sourceCatalog.set(snapshot.id, snapshot);
+      for (const sourceId of recoveredMedia.draft.sourceSnapshotIds) retainedSourceIds.add(sourceId);
+      effectiveSourcePages.push(...recoveredMedia.pages);
+      generatedRevisions.push(...recoveredMedia.draft.revisions);
+      generatedRefs.push(...recoveredMedia.draft.refs);
+    }
+    const persistProvisionalMedia = async (revisions = generatedRevisions, refs = generatedRefs) => {
+      const draft = {
+        schemaVersion: 1 as const, runId: run.id, siteId: run.siteId, businessId: baseState.businessId,
+        baseStateHash: baseState.stateHash, inputHash: retainedBuildInput.inputHash,
+        publicBuildInputId: retainedBuildInput.id, parentRevisionId: run.exactParentRevisionId,
+        producer: siteAuthoringPlatformIdentity, modelId: run.modelId,
+        executionNumber: run.executionNumber,
+        createdAt: new Date().toISOString(), revisions, refs, sourceSnapshotIds: [...retainedSourceIds].sort()
+      };
+      // Persist before returning a usable asset ID. If persistence fails, the
+      // tool must not expose media held only by this worker's closure.
+      run = await retryTransientAuthoringPersistence(() => this.updateRun(run, {
+        provisionalMedia: siteAgentProvisionalMediaSchema.parse({ ...draft, contentHash: sha256(stableJson(draft)) })
+      }), input.signal);
+      generatedRevisions.splice(0, generatedRevisions.length, ...revisions);
+      generatedRefs.splice(0, generatedRefs.length, ...refs);
+    };
     const refreshEffectiveMedia = (refs: AssetRevisionRef[], retainedDependencyRevisionIds: string[] = []) => {
-      if (!refs.length) {
-        if (retainedDependencyRevisionIds.length) {
-          throw new Error("media_provenance_dependencies_require_a_rendered_asset");
-        }
-        effectiveState = baseState;
-        effectiveBuildInput = retainedBuildInput;
-        return;
-      }
-      const revisionIds = new Set(refs.map((item) => item.revisionId));
-      const sourceSnapshotIds = [...retainedSourceIds].sort();
-      const retainedDependencies = [...new Set(retainedDependencyRevisionIds)]
-        .filter((revisionId) => !revisionIds.has(revisionId))
-        .sort();
-      effectiveState = prospectiveMediaState(baseState, refs);
-      const projected = createPublicBuildInput({
-        id: deterministicId("input", {
-          schemaVersion: 1,
-          runId: run.id,
-          retainedPublicBuildInputId: retainedBuildInput.id,
-          generatedAssetRevisionIds: generatedRevisions.filter((item) => revisionIds.has(item.id)).map((item) => item.id),
-          retainedMediaDependencyRevisionIds: retainedDependencies,
-          sourceSnapshotIds
-        }),
-        state: effectiveState,
-        intent: effectiveIntent,
-        forms: effectiveForms,
-        sourceSnapshotIds,
-        runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
+      const projected = projectAuthoringMedia({
+        runId: run.id, retainedBuildInput, state: baseState, refs, revisions: generatedRevisions,
+        sourceSnapshotIds: [...retainedSourceIds], retainedDependencyRevisionIds
       });
-      // Keep provenance-only ancestors in the immutable candidate manifest so
-      // its asset references delete-restrict their rows/blobs, without making
-      // an unused intermediate a current business-library asset.
-      effectiveBuildInput = withRetainedAssetRevisionIds(projected, retainedDependencies);
+      effectiveState = projected.state;
+      effectiveBuildInput = projected.buildInput;
     };
     const resolveProvisionalMediaClosure = (roots: AssetRevisionRef[]) => mediaProvenanceClosure({
       roots,
       provisionalRevisions: generatedRevisions,
       getRetainedRevision: (revisionId) => this.repository.getAssetRevision(revisionId)
+    });
+    refreshEffectiveMedia(generatedRefs);
+    const sourceWorkspace = createSourceWorkspace({
+      buildInput: effectiveBuildInput,
+      snapshots: [...sourceCatalog.values()],
+      pages: effectiveSourcePages
     });
     const recorder = new SiteAgentEventRecorder(this.repository, this.blobStore, run.id);
     const runEvent = await recorder.open({
@@ -2292,6 +2293,10 @@ export class SiteAuthoringWorkflow {
       await this.repository.saveSourceSnapshot(snapshot);
       sourceCatalog.set(snapshot.id, snapshot);
       retainedSourceIds.add(snapshot.id);
+      effectiveSourcePages = [
+        ...effectiveSourcePages.filter((page) => page.sourceSnapshotId !== snapshot.id),
+        ...await this.repository.listSourceSnapshotPages(snapshot.id)
+      ];
       const nextInput = createPublicBuildInput({
         id: deterministicId("input", {
           schemaVersion: 1,
@@ -2313,6 +2318,7 @@ export class SiteAuthoringWorkflow {
       // together. Persisting it here would race the asset FK and discard an
       // otherwise valid authoring run.
       if (generatedRevisions.length > 0) {
+        await persistProvisionalMedia();
         effectiveBuildInput = nextInput;
         return snapshot;
       }
@@ -2401,8 +2407,7 @@ export class SiteAuthoringWorkflow {
             }
             await this.blobStore.putImmutable({ key: canonical.ref.storageKey, bytes: canonical.materialization.bytes,
               contentType: canonical.ref.mimeType, contentHash: asContentHash(canonical.ref.contentHash) });
-            generatedRevisions.push(canonical.revision);
-            generatedRefs.push(canonical.ref);
+            await persistProvisionalMedia([...generatedRevisions, canonical.revision], [...generatedRefs, canonical.ref]);
             refreshEffectiveMedia(generatedRefs);
             return canonical.ref;
           }
@@ -2477,8 +2482,10 @@ export class SiteAuthoringWorkflow {
             sourceFactIds: [],
             activeForFutureBuilds: true
           };
-          if (!generatedRevisions.some((candidate) => candidate.id === revision.id)) generatedRevisions.push(revision);
-          if (!generatedRefs.some((candidate) => candidate.revisionId === revision.id)) generatedRefs.push(ref);
+          await persistProvisionalMedia(
+            generatedRevisions.some((candidate) => candidate.id === revision.id) ? [...generatedRevisions] : [...generatedRevisions, revision],
+            generatedRefs.some((candidate) => candidate.revisionId === revision.id) ? [...generatedRefs] : [...generatedRefs, ref]
+          );
           refreshEffectiveMedia(generatedRefs);
           return ref;
         },
@@ -2563,9 +2570,23 @@ export class SiteAuthoringWorkflow {
           sourceFactIds: [],
           activeForFutureBuilds: true
         };
-        await this.blobStore.putImmutable({ key: storageKey, bytes: created.bytes, contentType: created.mimeType, contentHash });
-        generatedRevisions.push(revision);
-        generatedRefs.push(ref);
+        const metering: ManagerToolExecution["metering"] = {
+          apiProvider: "openai", modelId: imageCreationModel.id, servedModelId: imageCreationModel.id,
+          usage: {
+            inputTokens: created.usage.inputTokens, cachedInputTokens: 0, reasoningTokens: 0,
+            outputTokens: created.usage.outputTokens, costUsd: created.usage.costUsd,
+            costSource: created.usage.costSource, upstreamInferenceCostUsd: 0, durationMs: created.usage.durationMs
+          }
+        };
+        try {
+          await this.blobStore.putImmutable({ key: storageKey, bytes: created.bytes, contentType: created.mimeType, contentHash });
+          await persistProvisionalMedia([...generatedRevisions, revision], [...generatedRefs, ref]);
+        } catch {
+          // The paid request already completed. Return its metering even when
+          // storage fails, without exposing an unusable asset or retrying the API.
+          const failure = { ok: false, error: "generated_media_persistence_failed" };
+          return { modelOutput: JSON.stringify(failure), diagnosticOutput: failure, metering };
+        }
         refreshEffectiveMedia(generatedRefs);
         return {
           modelOutput: [
@@ -2583,21 +2604,7 @@ export class SiteAuthoringWorkflow {
             publicBuildInputId: effectiveBuildInput.id,
             usage: created.usage
           },
-          metering: {
-            apiProvider: "openai",
-            modelId: imageCreationModel.id,
-            servedModelId: imageCreationModel.id,
-            usage: {
-              inputTokens: created.usage.inputTokens,
-              cachedInputTokens: 0,
-              reasoningTokens: 0,
-              outputTokens: created.usage.outputTokens,
-              costUsd: created.usage.costUsd,
-              costSource: created.usage.costSource,
-              upstreamInferenceCostUsd: 0,
-              durationMs: created.usage.durationMs
-            }
-          }
+          metering
         };
       },
       applyBuild: async (files, expectedRevision, inspectionSignal) => {
@@ -2690,8 +2697,8 @@ export class SiteAuthoringWorkflow {
         run,
         session: activeSession,
         buildInput: effectiveBuildInput,
-        sourceSnapshots: input.snapshots,
-        sourcePages: input.sourcePages,
+        sourceSnapshots: [...sourceCatalog.values()],
+        sourcePages: effectiveSourcePages,
         sandboxRevision,
         route: target.route,
         defaultRoutes: input.releasePlan?.visualReviewRoutePaths,
@@ -2709,8 +2716,8 @@ export class SiteAuthoringWorkflow {
           run,
           session: activeSession,
           buildInput: effectiveBuildInput,
-          sourceSnapshots: input.snapshots,
-          sourcePages: input.sourcePages,
+          sourceSnapshots: [...sourceCatalog.values()],
+          sourcePages: effectiveSourcePages,
           workspaceHash: sha256(stableJson(files)),
           sandboxRevision,
           signal: operationSignal
@@ -2734,8 +2741,8 @@ export class SiteAuthoringWorkflow {
           run,
           session: activeSession,
           buildInput: effectiveBuildInput,
-          sourceSnapshots: input.snapshots,
-          sourcePages: input.sourcePages,
+          sourceSnapshots: [...sourceCatalog.values()],
+          sourcePages: effectiveSourcePages,
           workspaceRevisionId,
           browserRoutePaths: input.releasePlan?.browserRoutePaths,
           signal: operationSignal
@@ -2758,8 +2765,8 @@ export class SiteAuthoringWorkflow {
               run,
               session: activeSession,
               buildInput: effectiveBuildInput,
-              sourceSnapshots: input.snapshots,
-              sourcePages: input.sourcePages,
+              sourceSnapshots: [...sourceCatalog.values()],
+              sourcePages: effectiveSourcePages,
               workspaceRevisionId,
               browserRoutePaths: input.releasePlan?.browserRoutePaths,
               signal: operationSignal
@@ -3051,7 +3058,6 @@ export class SiteAuthoringWorkflow {
         publicBuildInputId: effectiveBuildInput.id,
         updatedAt: new Date().toISOString()
       });
-      run = siteAgentRunSchema.parse({ ...run, publicBuildInputId: effectiveBuildInput.id });
     }
     const session = siteAgentSessionSchema.parse({
       ...activeSession,
@@ -3064,6 +3070,12 @@ export class SiteAuthoringWorkflow {
       outputArtifactId: finalized.artifact.id,
       screenshotKeys: finalized.artifact.qa.screenshotKeys
     }), input.signal);
+    // Only the returned draft points to provisional authority. The persisted
+    // running record remains resumable against its existing immutable input
+    // until finalizeVerifiedAuthoring atomically retains and switches both.
+    if (adoptedGeneratedRevisions.length) {
+      run = siteAgentRunSchema.parse({ ...run, publicBuildInputId: effectiveBuildInput.id });
+    }
     await retryTransientAuthoringPersistence(() => recorder.close(runEvent, {
       status: "succeeded",
       apiProvider: managerResult.apiProvider,
@@ -4137,6 +4149,59 @@ export class SiteAuthoringWorkflow {
     return { destroyed: true as const, session: checkpointed };
   }
 
+  private async recoverProvisionalMedia(run: SiteAgentRun, buildInput: SitePublicBuildInput, knownState?: BusinessState) {
+    if (!run.provisionalMedia) return undefined;
+    const state = knownState ?? await this.requireBusinessState(buildInput.businessId);
+    const { contentHash, ...draft } = siteAgentProvisionalMediaSchema.parse(run.provisionalMedia);
+    if (contentHash !== sha256(stableJson(draft))
+      || draft.runId !== run.id || draft.siteId !== run.siteId
+      || draft.businessId !== state.businessId || draft.baseStateHash !== state.stateHash
+      || draft.publicBuildInputId !== buildInput.id || draft.inputHash !== buildInput.inputHash
+      || draft.parentRevisionId !== run.exactParentRevisionId) {
+      throw new Error("provisional_media_recovery_scope_invalid");
+    }
+    if (new Set(draft.revisions.map((revision) => revision.id)).size !== draft.revisions.length
+      || new Set(draft.refs.map((ref) => ref.assetId)).size !== draft.refs.length
+      || draft.refs.length !== draft.revisions.length) {
+      throw new Error("provisional_media_recovery_manifest_invalid");
+    }
+    const assertBytes = async (revision: AssetRevision) => {
+      const blob = await this.blobStore.get(revision.storageKey);
+      if (!blob || blob.bytes.length !== revision.bytes || sha256(blob.bytes) !== revision.contentHash) {
+        throw new Error("provisional_media_recovery_bytes_invalid");
+      }
+    };
+    for (const revision of draft.revisions) {
+      const ref = draft.refs.find((candidate) => candidate.revisionId === revision.id);
+      if (revision.businessId !== state.businessId || !ref
+        || ref.assetId !== revision.assetId || ref.contentHash !== revision.contentHash
+        || ref.storageKey !== revision.storageKey || ref.mimeType !== revision.mimeType
+        || ref.origin !== revision.origin || ref.width !== revision.width || ref.height !== revision.height) {
+        throw new Error("provisional_media_recovery_manifest_invalid");
+      }
+      await assertBytes(revision);
+    }
+    await mediaProvenanceClosure({ roots: draft.refs, provisionalRevisions: draft.revisions,
+      getRetainedRevision: async (revisionId) => {
+        const revision = await this.repository.getAssetRevision(revisionId);
+        if (!revision || revision.businessId !== state.businessId || !buildInput.assetRevisionIds.includes(revisionId)) {
+          throw new Error("provisional_media_recovery_ancestor_invalid");
+        }
+        await assertBytes(revision);
+        return revision;
+      } });
+    const snapshots: SourceSnapshot[] = [];
+    const pages: SourceSnapshotPage[] = [];
+    for (const sourceId of draft.sourceSnapshotIds) {
+      if (buildInput.sourceSnapshotIds.includes(sourceId)) continue;
+      const snapshot = await this.repository.getSourceSnapshot(sourceId);
+      if (!snapshot || snapshot.businessId !== state.businessId) throw new Error("provisional_media_recovery_source_invalid");
+      snapshots.push(snapshot);
+      pages.push(...await this.repository.listSourceSnapshotPages(snapshot.id));
+    }
+    return { draft, snapshots, pages, state };
+  }
+
   private async ensureSandbox(
     run: SiteAgentRun,
     session: SiteAgentSession,
@@ -4219,9 +4284,17 @@ export class SiteAuthoringWorkflow {
       updatedAt: startedAt
     });
     await this.saveSessionForExecution(run, starting);
+    const recoveredMedia = await this.recoverProvisionalMedia(run, buildInput);
+    const bootstrapInput = recoveredMedia
+      ? projectAuthoringMedia({ runId: run.id, retainedBuildInput: buildInput, state: recoveredMedia.state,
+        refs: recoveredMedia.draft.refs, revisions: recoveredMedia.draft.revisions,
+        sourceSnapshotIds: recoveredMedia.draft.sourceSnapshotIds }).buildInput
+      : buildInput;
     let revision: string;
     const bootstrapAndRestore = async (target: SiteAgentSession) => {
-      let targetRevision = (await this.sandbox.bootstrap(target.sandboxId!, buildInput)).revision;
+      // Restore compiles immediately, so its Asset components need the saved
+      // media now. Session/run recovery IDs still point to retained authority.
+      let targetRevision = (await this.sandbox.bootstrap(target.sandboxId!, bootstrapInput)).revision;
       if (checkpoint) {
         const sidecarBlob = await this.blobStore.get(checkpoint.sidecar.key);
         if (!sidecarBlob
@@ -5199,7 +5272,15 @@ export class SiteAuthoringWorkflow {
       runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
     });
 
-    const run = siteAgentRunSchema.parse({ ...input.run, publicBuildInputId: buildInput.id });
+    let provisionalMedia = input.run.provisionalMedia;
+    if (provisionalMedia) {
+      const { contentHash: _previousMediaHash, ...mediaBody } = provisionalMedia;
+      const rebound = { ...mediaBody, publicBuildInputId: buildInput.id, inputHash: buildInput.inputHash };
+      provisionalMedia = siteAgentProvisionalMediaSchema.parse({ ...rebound, contentHash: sha256(stableJson(rebound)) });
+    }
+    // Form authority and the run's recovery binding move in this same existing
+    // transaction, so a crash cannot strand media against the previous input.
+    const run = siteAgentRunSchema.parse({ ...input.run, publicBuildInputId: buildInput.id, provisionalMedia });
     const session = siteAgentSessionSchema.parse({
       ...input.session,
       publicBuildInputId: buildInput.id,
@@ -5537,6 +5618,37 @@ function id(prefix: string) {
 
 function deterministicId(prefix: string, value: unknown) {
   return `${prefix}_${sha256(stableJson(value)).slice("sha256:".length, "sha256:".length + 32)}`;
+}
+
+function projectAuthoringMedia(input: {
+  runId: string;
+  retainedBuildInput: SitePublicBuildInput;
+  state: BusinessState;
+  refs: AssetRevisionRef[];
+  revisions: AssetRevision[];
+  sourceSnapshotIds: string[];
+  retainedDependencyRevisionIds?: string[];
+}) {
+  if (!input.refs.length) {
+    if (input.retainedDependencyRevisionIds?.length) throw new Error("media_provenance_dependencies_require_a_rendered_asset");
+    return { state: input.state, buildInput: input.retainedBuildInput };
+  }
+  const revisionIds = new Set(input.refs.map((ref) => ref.revisionId));
+  const sourceSnapshotIds = [...new Set(input.sourceSnapshotIds)].sort();
+  const retainedDependencies = [...new Set(input.retainedDependencyRevisionIds ?? [])]
+    .filter((revisionId) => !revisionIds.has(revisionId)).sort();
+  const state = prospectiveMediaState(input.state, input.refs);
+  const projected = createPublicBuildInput({
+    id: deterministicId("input", {
+      schemaVersion: 1, runId: input.runId, retainedPublicBuildInputId: input.retainedBuildInput.id,
+      generatedAssetRevisionIds: input.revisions.filter((revision) => revisionIds.has(revision.id)).map((revision) => revision.id),
+      retainedMediaDependencyRevisionIds: retainedDependencies, sourceSnapshotIds
+    }),
+    state, intent: input.retainedBuildInput.intent, forms: input.retainedBuildInput.forms,
+    sourceSnapshotIds, runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
+  });
+  // Preserve provenance-only ancestors without displaying them in the library.
+  return { state, buildInput: withRetainedAssetRevisionIds(projected, retainedDependencies) };
 }
 
 function prospectiveMediaState(base: BusinessState, generatedAssets: AssetRevisionRef[]) {

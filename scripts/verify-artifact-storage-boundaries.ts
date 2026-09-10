@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import ts from "typescript";
 import { HttpArtifactBlobStore } from "../packages/site-artifacts/blob-store";
-import { isManagedArtifactBlob } from "../packages/site-artifacts";
+import { isManagedArtifactBlob, buildArtifactBlobAudit, assertArtifactBlobAuditDeletable, workspaceSourceSidecarKey } from "../packages/site-artifacts";
+import { siteBuildArtifactSchema, siteAgentProvisionalMediaSchema } from "../packages/site-contracts";
+import { sha256, stableJson } from "../packages/business-data";
 import worker from "../workers/artifact-broker/src/index";
 
 const values = new Map<string, { bytes: Uint8Array; contentType: string; contentHash: string }>();
@@ -88,7 +92,68 @@ try {
   globalThis.fetch = originalFetch;
 }
 
-process.stdout.write(`${JSON.stringify({ ok: true, exactObjectReadWriteHead: "pass", idempotentClientHead: "pass", inventoryAbsent: "pass", deletionAbsent: "pass" })}\n`);
+await verifyProvisionalMediaAudit();
+process.stdout.write(`${JSON.stringify({ ok: true, exactObjectReadWriteHead: "pass", idempotentClientHead: "pass", inventoryAbsent: "pass", deletionAbsent: "pass", provisionalMediaAudit: "pass" })}\n`);
+
+async function verifyProvisionalMediaAudit() {
+  // Extract actual audit functions, never import its live CLI entrypoint.
+  const text = await readFile(new URL("./audit-artifact-blobs.ts", import.meta.url), "utf8");
+  const source = ts.createSourceFile("audit.ts", text, ts.ScriptTarget.Latest, true);
+  const names = new Set(["createReport", "collectReferencedObjects", "addObject", "requiredKey", "requiredContentHash", "requiredBytes", "chunks"]);
+  const functions = source.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && Boolean(node.name && names.has(node.name.text)));
+  assert.equal(functions.length, names.size);
+  const code = ts.transpileModule(functions.map(node => node.getText(source)).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+  const statuses = ["queued", "running", "needs_input", "failed", "succeeded", "cancelled"];
+  const now = "2026-01-01T00:00:00.000Z";
+  const revisions = statuses.map(status => ({ schemaVersion: 1, id: `revision_audit_${status}`, assetId: `asset_audit_${status}`,
+    businessId: "business_audit", contentHash: sha256(status), storageKey: `site-assets/business_audit/${status}`, mimeType: "image/webp",
+    bytes: Buffer.byteLength(status), origin: "platform_generated", provenance: { origin: "platform_generated", provider: "openai", model: "gpt-image-2.5-flare",
+      action: "generate", purpose: "section", prompt: "Fictional abstract fixture", sourceAssetRevisionIds: [] }, createdAt: now }));
+  const rows = statuses.map((status, index) => {
+    const body = { schemaVersion: 1, runId: `run_audit_${status}`, executionNumber: 1, siteId: "site_audit", businessId: "business_audit", baseStateHash: sha256("state"),
+      publicBuildInputId: "input_audit", inputHash: sha256("input"), producer: "fixture", modelId: "gpt-5.6-luna", createdAt: now,
+      revisions: [revisions[index]], refs: [], sourceSnapshotIds: [] };
+    return { id: body.runId, status, retryableByOwner: status === "failed", provisional_media: siteAgentProvisionalMediaSchema.parse({ ...body, contentHash: sha256(stableJson(body)) }) };
+  });
+  // No rendered refs: every retained revision, including unused ancestors, is protected.
+  let selectedRows: Array<Record<string, unknown>> = [...rows, { id: "run_no_media", provisional_media: null }];
+  const queries: Array<{ table: string; columns: string }> = [];
+  const inventory = revisions.map(revision => ({ store: "artifact" as const, key: revision.storageKey, bytes: revision.bytes }));
+  let unavailableKey: string | undefined;
+  let corrupt = false;
+  const dependencies = { buildArtifactBlobAudit, workspaceSourceSidecarKey, siteBuildArtifactSchema, siteAgentProvisionalMediaSchema, sha256, stableJson,
+    listAllObjects: async () => inventory,
+    selectAll: async (table: string, columns: string) => { queries.push({ table, columns }); return table === "site_agent_runs" ? selectedRows : []; },
+    store: { get: async (_store: string, key: string) => {
+      if (key === unavailableKey) return undefined;
+      const revision = revisions.find(item => item.storageKey === key)!;
+      return { bytes: Buffer.from(corrupt ? "corrupt" : key.split("/").at(-1)!), contentHash: revision.contentHash };
+    } }
+  };
+  const createReport = new Function(...Object.keys(dependencies), `${code}\nreturn createReport;`)(...Object.values(dependencies)) as () => Promise<ReturnType<typeof buildArtifactBlobAudit>>;
+  const report = await createReport();
+  assert.equal(report.counts.referenced, statuses.length, "Retained provisional media was not protected for every run status.");
+  assert.equal(report.counts.orphanedManaged, 0, "Recoverable provisional images were classified as deletable orphans.");
+  assert.equal(report.counts.missingReferenced, 0);
+  assert(queries.some(query => query.table === "site_agent_runs" && query.columns === "id,provisional_media:run->provisionalMedia"), "Audit must project run media without loading model/debug content.");
+  unavailableKey = revisions[3].storageKey;
+  const missing = await createReport();
+  assert.equal(missing.counts.missingReferenced, 1, "Failed retryable run's missing provisional bytes were not detected.");
+  assert.throws(() => assertArtifactBlobAuditDeletable(missing), /missing/);
+  unavailableKey = undefined; corrupt = true;
+  const corrupted = await createReport();
+  assert.equal(corrupted.counts.missingReferenced, statuses.length, "Provisional byte/hash mismatches were not detected.");
+  assert.throws(() => assertArtifactBlobAuditDeletable(corrupted), /missing/);
+  corrupt = false;
+  selectedRows = [{ ...rows[0], provisional_media: { ...rows[0].provisional_media, contentHash: sha256("tampered") } }];
+  await assert.rejects(createReport, /provisional_media/);
+  selectedRows = [{ ...rows[0], id: "run_wrong_scope" }];
+  await assert.rejects(createReport, /provisional_media/);
+  selectedRows = [{ id: "run_invalid_media", provisional_media: { revisions: [] } }];
+  await assert.rejects(createReport, "Malformed retained media must stop the audit, not become unreferenced.");
+  selectedRows = [{ id: "run_missing_projection" }];
+  await assert.rejects(createReport, "A missing query projection must not be mistaken for explicit null media.");
+}
 
 function authorized() {
   return { authorization: "Bearer verification-token" };

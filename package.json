@@ -61,7 +61,7 @@
     "verify:publish-preview-binding": "node --import tsx scripts/verify-publish-preview-binding.ts",
     "verify:authoring-transactions": "node --import tsx scripts/verify-authoring-transactions.ts",
     "verify:authoring-coalescing": "node --import tsx scripts/verify-authoring-coalescing.ts",
-    "verify:authoring-durability": "node --import tsx scripts/verify-authoring-durability.ts && npm run verify:runner-refill && node --import tsx scripts/verify-blue-green-sandbox-lifecycle.ts",
+    "verify:authoring-durability": "node --import tsx scripts/verify-authoring-durability.ts && node --import tsx scripts/verify-authoring-media-recovery.ts && npm run verify:runner-refill && node --import tsx scripts/verify-blue-green-sandbox-lifecycle.ts",
     "verify:runner-refill": "node --import tsx scripts/verify-runner-refill.ts",
     "verify:authoring-context": "node --import tsx scripts/verify-authoring-context.ts && node --import tsx scripts/verify-site-architecture-planning.ts",
     "verify:runtime": "node --import tsx scripts/verify-trusted-runtime.ts && node --import tsx scripts/verify-artifact-storage-boundaries.ts",

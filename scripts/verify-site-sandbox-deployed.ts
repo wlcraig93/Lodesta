@@ -9,6 +9,11 @@ import {
   SiteSandboxRequestError
 } from "../packages/site-sandbox";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
+import {
+  assertWithSandboxFailureCauses,
+  boundedFailureLabel,
+  captureCanaryFailureDiagnostic
+} from "./site-sandbox-canary-diagnostics";
 
 const configuredSessionId = process.env.LODESTA_SANDBOX_CANARY_SESSION_ID?.trim();
 const sessionId = configuredSessionId || `sandbox_verify_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -96,16 +101,32 @@ try {
       .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<SiteSandboxClient["apply"]>>> => result.status === "fulfilled")
       .map((result) => result.value);
     const concurrentFailures = concurrent.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-    assert(concurrentSuccesses.length >= 1, `Concurrent identical mutations produced no successful build (pair ${pair}): ${concurrentFailures
-      .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason))
-      .join(" | ")}`);
-    assert(concurrentSuccesses.every((result) => result.revision === concurrentSuccesses[0]?.revision), "Concurrent identical mutations produced different generations.");
-    assert(concurrentSuccesses.filter((result) => !result.replayed).length === 1, "Concurrent identical mutations executed more than one build.");
-    assert(concurrentFailures.every((result) => result.reason instanceof SiteSandboxRequestError
-      && result.reason.status === 409
-      && result.reason.providerCode === "operation_in_progress"), `Concurrent duplicate returned an unexpected failure: ${concurrentFailures
-        .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason))
-        .join(" | ")}`);
+    const concurrentFailureCauses = concurrentFailures
+      .map((result) => result.reason)
+      .filter((reason): reason is SiteSandboxRequestError => reason instanceof SiteSandboxRequestError);
+    const concurrentFailureLabels = concurrentFailures.map((result) => boundedFailureLabel(result.reason)).join(" | ");
+    assertWithSandboxFailureCauses(
+      concurrentSuccesses.length >= 1,
+      `Concurrent identical mutations produced no successful build (pair ${pair}): ${concurrentFailureLabels}`,
+      concurrentFailureCauses
+    );
+    assertWithSandboxFailureCauses(
+      concurrentSuccesses.every((result) => result.revision === concurrentSuccesses[0]?.revision),
+      "Concurrent identical mutations produced different generations.",
+      concurrentFailureCauses
+    );
+    assertWithSandboxFailureCauses(
+      concurrentSuccesses.filter((result) => !result.replayed).length === 1,
+      "Concurrent identical mutations executed more than one build.",
+      concurrentFailureCauses
+    );
+    assertWithSandboxFailureCauses(
+      concurrentFailures.every((result) => result.reason instanceof SiteSandboxRequestError
+        && result.reason.status === 409
+        && result.reason.providerCode === "operation_in_progress"),
+      `Concurrent duplicate returned an unexpected failure: ${concurrentFailureLabels}`,
+      concurrentFailureCauses
+    );
     const concurrentReplay = await sandbox.apply(sessionId, concurrentRevision, concurrentFiles);
     assert.equal(concurrentReplay.revision, concurrentSuccesses[0]?.revision, "Concurrent operation replay did not retain the promoted generation.");
     assert.equal(concurrentReplay.replayed, true, "Concurrent operation replay executed a second build.");
@@ -148,6 +169,8 @@ try {
   })}\n`);
 } catch (error) {
   verificationError = error;
+  const failureDiagnostic = await captureCanaryFailureDiagnostic(sandbox, sessionId, error);
+  process.stderr.write(`${JSON.stringify(failureDiagnostic)}\n`);
 }
 
 let cleanupError: unknown;

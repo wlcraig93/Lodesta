@@ -1169,6 +1169,27 @@ export const siteAgentContinuationSegmentSchema = z.object({
 }).strict();
 export type SiteAgentContinuationSegment = z.infer<typeof siteAgentContinuationSegmentSchema>;
 
+// Run-local media recovery, not published business authority. Asset rows and
+// canonical media adoption still occur only in verified finalization.
+export const siteAgentProvisionalMediaSchema = z.object({
+  schemaVersion: z.literal(1),
+  runId: identifier,
+  siteId: identifier,
+  businessId: identifier,
+  baseStateHash: contentHash,
+  publicBuildInputId: identifier,
+  parentRevisionId: identifier.optional(),
+  inputHash: contentHash,
+  producer: z.string().min(1),
+  modelId: z.string().min(1),
+  executionNumber: z.number().int().nonnegative(),
+  createdAt: isoTimestamp,
+  revisions: z.array(assetRevisionSchema),
+  refs: z.array(assetRevisionRefSchema),
+  sourceSnapshotIds: z.array(identifier),
+  contentHash
+}).strict();
+
 export const siteAgentRunSchema = z.object({
   schemaVersion: z.literal("site-agent-run"),
   id: identifier,
@@ -1183,6 +1204,7 @@ export const siteAgentRunSchema = z.object({
   stage: z.enum(["queued", "retrieving_sources", "architecting", "authoring", "building", "fast_preview", "inspecting", "verifying", "needs_input", "candidate_ready", "failed"]),
   sandboxDeploymentId: identifier.optional(),
   resumeCheckpointId: identifier.optional(),
+  provisionalMedia: siteAgentProvisionalMediaSchema.optional(),
   checkpointRestartedAt: isoTimestamp.optional(),
   exactParentRevisionId: identifier.optional(),
   deferredUntilRunId: identifier.optional(),

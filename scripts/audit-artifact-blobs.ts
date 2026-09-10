@@ -16,8 +16,8 @@ import {
   type LocatedBlobInventoryObject
 } from "../packages/site-artifacts/blob-store";
 import { configuredArtifactBlobMaintenanceStore } from "../packages/site-artifacts/maintenance-store";
-import { siteBuildArtifactSchema } from "../packages/site-contracts";
-import { sha256 } from "../packages/business-data";
+import { siteBuildArtifactSchema, siteAgentProvisionalMediaSchema } from "../packages/site-contracts";
+import { sha256, stableJson } from "../packages/business-data";
 
 const options = parseArgs(process.argv.slice(2));
 const client = getSupabaseAdminClient();
@@ -121,13 +121,14 @@ async function listAllObjects() {
 
 async function collectReferencedObjects() {
   const objects = new Map<string, ArtifactBlobLocator>();
-  const [assetRows, workspaceRows, runtimeRows, artifactRows, sourceCaptureRows, checkpointRows] = await Promise.all([
+  const [assetRows, workspaceRows, runtimeRows, artifactRows, sourceCaptureRows, checkpointRows, runMediaRows] = await Promise.all([
     selectAll("asset_revisions", "storage_path"),
     selectAll("site_workspace_revisions", "source_archive_key"),
     selectAll("trusted_runtime_patches", "storage_key"),
     selectAll("site_build_artifacts", "artifact"),
     selectAll("source_snapshot_resources", "storage_key,blob_content_hash,stored_bytes"),
-    selectAll("site_agent_workspace_checkpoints", "backup_key,backup_hash,backup_bytes,sidecar_key,sidecar_hash,sidecar_bytes")
+    selectAll("site_agent_workspace_checkpoints", "backup_key,backup_hash,backup_bytes,sidecar_key,sidecar_hash,sidecar_bytes"),
+    selectAll("site_agent_runs", "id,provisional_media:run->provisionalMedia")
   ]);
   for (const row of assetRows) addObject(objects, "artifact", row.storage_path, "asset_revisions.storage_path");
   for (const row of workspaceRows) {
@@ -147,6 +148,20 @@ async function collectReferencedObjects() {
     contentHash: requiredContentHash(row.blob_content_hash, "source_snapshot_resources.blob_content_hash"),
     bytes: requiredBytes(row.stored_bytes, "source_snapshot_resources.stored_bytes")
   }));
+  // All retained run statuses count: failed checkpoint-retryable runs may own
+  // recoverable media even while the platform is otherwise quiescent. Include
+  // every provisional revision, not only rendered refs, to preserve ancestry.
+  for (const row of runMediaRows) {
+    if (row.provisional_media === null) continue;
+    const { contentHash, ...media } = siteAgentProvisionalMediaSchema.parse(row.provisional_media);
+    if (media.runId !== row.id || sha256(stableJson(media)) !== contentHash) {
+      throw new Error("retained_provisional_media_integrity_invalid");
+    }
+    for (const revision of media.revisions) {
+      exactObjects.push({ store: "artifact", key: revision.storageKey,
+        contentHash: requiredContentHash(revision.contentHash, "site_agent_runs.provisionalMedia.revisions.contentHash"), bytes: revision.bytes });
+    }
+  }
   for (const row of checkpointRows) {
     exactObjects.push({
       store: "workspace",

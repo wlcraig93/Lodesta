@@ -29,7 +29,7 @@ type SandboxBuildSuccess = {
   warnings?: string[];
 };
 
-type SandboxOperationStatus = {
+export type SandboxOperationStatus = {
   ok: boolean;
   operationId: string;
   status: "queued" | "running" | "succeeded" | "failed";
@@ -47,6 +47,51 @@ type SandboxOperationStatus = {
   submissionReplayed?: boolean;
 };
 
+export type SandboxOperationPollDiagnostic = {
+  operationId: string;
+  lastJournal: Pick<SandboxOperationStatus,
+    "status" | "phase" | "createdAt" | "updatedAt" | "phaseStartedAt" | "timestamps" | "phaseTimings">;
+  pollAttempts: number;
+  journalResponses: number;
+  transportErrors: number;
+  httpErrors: number;
+  lastPollError?: {
+    kind: "transport" | "http";
+    name?: string;
+    status?: number;
+    providerCode?: string;
+  };
+};
+
+export type SandboxDiagnostics = {
+  ok: boolean;
+  revision: string;
+  versions: string[];
+  sandboxManifest: {
+    kind: "site-sandbox-manifest";
+    apiIdentity: string;
+    storageIdentity: string;
+    durableObjectIdentity: string;
+    artifactContractIdentity: string;
+    toolchainIdentity: string;
+    sourcePolicyIdentity: string;
+  };
+  placementId: string;
+  activeGeneration?: {
+    schemaVersion: 1;
+    revision: string;
+    sourceHash: string;
+    publicInputHash: string;
+    operationId: string;
+    status: "initialized" | "built";
+    createdAt: string;
+  };
+  activeGenerationTarget?: string;
+  mutationLock?: { operationId?: string; startedAt?: string };
+  activeOperation?: SandboxOperationStatus;
+  processes: Array<{ id: string; command: string; status: string }>;
+};
+
 export class SiteSandboxRequestError extends Error {
   readonly name = "SiteSandboxRequestError";
 
@@ -55,7 +100,8 @@ export class SiteSandboxRequestError extends Error {
     readonly sessionId: string,
     readonly status: number,
     readonly providerCode: string | undefined,
-    diagnostics: string
+    diagnostics: string,
+    readonly operationPollDiagnostic?: SandboxOperationPollDiagnostic
   ) {
     super(`${action} failed (${status}): ${providerCode ?? "unknown"}${diagnostics ? `:\n${diagnostics}` : ""}`);
   }
@@ -138,35 +184,8 @@ export class SiteSandboxClient {
     return this.submitAndPoll(sessionId, "restore", { backupId, expectedRevision, expectedArchiveHash });
   }
 
-  async diagnostics(sessionId: string) {
-    return this.call<{
-      ok: boolean;
-      revision: string;
-      versions: string[];
-      sandboxManifest: {
-        kind: "site-sandbox-manifest";
-        apiIdentity: string;
-        storageIdentity: string;
-        durableObjectIdentity: string;
-        artifactContractIdentity: string;
-        toolchainIdentity: string;
-        sourcePolicyIdentity: string;
-      };
-      placementId: string;
-      activeGeneration?: {
-        schemaVersion: 1;
-        revision: string;
-        sourceHash: string;
-        publicInputHash: string;
-        operationId: string;
-        status: "initialized" | "built";
-        createdAt: string;
-      };
-      activeGenerationTarget?: string;
-      mutationLock?: { operationId?: string; startedAt?: string };
-      activeOperation?: SandboxOperationStatus;
-      processes: Array<{ id: string; command: string; status: string }>;
-    }>(sessionId, "diagnostics", "GET");
+  async diagnostics(sessionId: string, timeoutMs = sandboxRequestTimeoutMs) {
+    return this.call<SandboxDiagnostics>(sessionId, "diagnostics", "GET", undefined, timeoutMs);
   }
 
   async destroy(sessionId: string) {
@@ -229,6 +248,11 @@ export class SiteSandboxClient {
     const submissionReplayed = submissionAttempts === 2 || Boolean(submitted.submissionReplayed);
     const deadline = Date.now() + sandboxBuildRequestTimeoutMs;
     let lastStatus = submitted;
+    let pollAttempts = 0;
+    let journalResponses = 0;
+    let transportErrors = 0;
+    let httpErrors = 0;
+    let lastPollError: SandboxOperationPollDiagnostic["lastPollError"];
     while (Date.now() < deadline) {
       if (lastStatus.status === "succeeded" && lastStatus.result) {
         return submissionReplayed
@@ -240,6 +264,7 @@ export class SiteSandboxClient {
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) break;
       try {
+        pollAttempts += 1;
         lastStatus = await this.call<SandboxOperationStatus>(
           sessionId,
           `operations/${submitted.operationId}`,
@@ -249,7 +274,19 @@ export class SiteSandboxClient {
           // work connected without extending the overall operation deadline.
           Math.min(sandboxRequestTimeoutMs, remainingMs)
         );
+        journalResponses += 1;
       } catch (error) {
+        if (error instanceof SiteSandboxRequestError) {
+          httpErrors += 1;
+          lastPollError = {
+            kind: "http",
+            status: error.status,
+            ...(error.providerCode ? { providerCode: sandboxDiagnosticProviderCode(error.providerCode) } : {})
+          };
+        } else {
+          transportErrors += 1;
+          lastPollError = { kind: "transport", name: sanitizedTransportErrorName(error) };
+        }
         if (error instanceof SiteSandboxRequestError && error.status < 500 && error.status !== 404) throw error;
         if (Date.now() >= deadline) break;
       }
@@ -259,7 +296,24 @@ export class SiteSandboxClient {
       sessionId,
       504,
       "operation_status_timeout",
-      `operationId=${submitted.operationId}\nlastPhase=${lastStatus.phase}\nlastUpdatedAt=${lastStatus.updatedAt}`
+      `operationId=${submitted.operationId}\nlastPhase=${lastStatus.phase}\nlastUpdatedAt=${lastStatus.updatedAt}`,
+      {
+        operationId: submitted.operationId,
+        lastJournal: {
+          status: lastStatus.status,
+          phase: lastStatus.phase,
+          createdAt: lastStatus.createdAt,
+          updatedAt: lastStatus.updatedAt,
+          phaseStartedAt: lastStatus.phaseStartedAt,
+          timestamps: sanitizedOperationTimestamps(lastStatus.timestamps),
+          phaseTimings: sanitizedPhaseTimings(lastStatus.phaseTimings)
+        },
+        pollAttempts,
+        journalResponses,
+        transportErrors,
+        httpErrors,
+        ...(lastPollError ? { lastPollError } : {})
+      }
     );
   }
 
@@ -303,6 +357,75 @@ function sanitizedSubmissionCause(error: unknown) {
   if (error instanceof SiteSandboxRequestError) return error.providerCode ?? `http_${error.status}`;
   if (error instanceof Error && error.name) return error.name.slice(0, 80);
   return "transport_failure";
+}
+
+function sanitizedTransportErrorName(error: unknown) {
+  if (error instanceof Error && error.name) return sanitizeDiagnosticToken(error.name);
+  return "transport_failure";
+}
+
+function sanitizeDiagnosticToken(value: string) {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 80) || "unknown";
+}
+
+const sandboxDiagnosticProviderCodes = new Set([
+  "active_generation_invalid",
+  "artifact_not_built",
+  "artifact_too_large",
+  "backup_failed",
+  "backup_hash_mismatch",
+  "backup_not_found",
+  "backup_verification_failed",
+  "build_failed",
+  "build_process_missing",
+  "build_timeout",
+  "candidate_cleanup_failed",
+  "candidate_promotion_failed",
+  "candidate_revision_missing",
+  "invalid_rebase_request",
+  "invalid_restore",
+  "method_not_allowed",
+  "not_found",
+  "operation_in_progress",
+  "operation_journal_invalid",
+  "operation_not_found",
+  "operation_payload_conflict",
+  "operation_status_timeout",
+  "preview_expired",
+  "preview_not_ready",
+  "public_build_input_required",
+  "restore_failed",
+  "revision_conflict",
+  "sandbox_not_found",
+  "sandbox_operation_failed",
+  "session_not_found",
+  "source_file_limit",
+  "source_path_violation",
+  "source_payload_too_large",
+  "source_policy_violation",
+  "source_unavailable",
+  "unauthorized",
+  "workspace_uninitialized"
+]);
+
+export function sandboxDiagnosticProviderCode(value: string) {
+  return sandboxDiagnosticProviderCodes.has(value) ? value : "unrecognized_provider_code";
+}
+
+function sanitizedOperationTimestamps(value: Record<string, string>) {
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key, timestamp]) => /^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(key) && isIsoTimestamp(timestamp))
+    .slice(0, 12));
+}
+
+function sanitizedPhaseTimings(value: Record<string, number>) {
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key, duration]) => /^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(key) && Number.isFinite(duration) && duration >= 0 && duration <= 86_400_000)
+    .slice(0, 12));
+}
+
+function isIsoTimestamp(value: string) {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value);
 }
 
 function operationFailure(action: string, sessionId: string, status: SandboxOperationStatus) {

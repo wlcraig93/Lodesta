@@ -781,6 +781,9 @@ function actionContrast(foreground: string, background: string) {
 }
 
 async function settleStopDialogTheme(page: Page, theme: "light" | "dark") {
+  // A preceding click/viewport change can leave Stop hovered. This helper
+  // checks resting theme tokens; hover contrast is tested separately below.
+  await page.mouse.move(0, 0);
   await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
   await page.waitForFunction(() => {
     let cancel: HTMLButtonElement | undefined;

@@ -61,6 +61,7 @@ import {
   type TrustedRuntimeSeries
 } from "@/packages/site-contracts";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
+import { sha256, stableJson } from "@/packages/business-data";
 
 export type { SiteAgentMessage } from "@/packages/site-contracts";
 
@@ -208,6 +209,10 @@ export type FinalizeVerifiedAuthoringInput = {
     expectedBusinessRevision: number;
     assetRevisions: AssetRevision[];
     businessState: BusinessState;
+    publicBuildInput: SitePublicBuildInput;
+  };
+  sourceInputBinding?: {
+    expectedPublicBuildInputId: string;
     publicBuildInput: SitePublicBuildInput;
   };
 };
@@ -1168,6 +1173,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         businessState: businessStateSchema.parse(input.mediaAdoption.businessState),
         publicBuildInput: sitePublicBuildInputSchema.parse(input.mediaAdoption.publicBuildInput)
       };
+      const sourceInputBinding = input.sourceInputBinding && {
+        expectedPublicBuildInputId: input.sourceInputBinding.expectedPublicBuildInputId,
+        publicBuildInput: sitePublicBuildInputSchema.parse(input.sourceInputBinding.publicBuildInput)
+      };
+      if (adoption && sourceInputBinding) throw new Error("finalization_input_binding_conflict");
       const prior = store.finalizations[input.finalizationKey];
       if (prior) {
         const version = store.versions[prior.versionId];
@@ -1206,6 +1216,42 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       }
       if ((site.currentWorkspaceRevisionId ?? undefined) !== (revision.parentRevisionId ?? undefined)) {
         throw new Error("stale_parent_revision");
+      }
+      if (sourceInputBinding) {
+        const retainedInput = store.buildInputs[sourceInputBinding.expectedPublicBuildInputId];
+        const preparedInput = sourceInputBinding.publicBuildInput;
+        const currentState = store.businessStates[site.businessId];
+        const currentIntent = Object.values(store.intents).find((item) => item.siteId === site.id);
+        if (
+          !retainedInput
+          || site.currentPublicBuildInputId !== sourceInputBinding.expectedPublicBuildInputId
+          || retainedRun.publicBuildInputId !== sourceInputBinding.expectedPublicBuildInputId
+          || run.publicBuildInputId !== preparedInput.id
+          || session.siteId !== site.id
+          || session.publicBuildInputId !== preparedInput.id
+          || currentState?.ownerOperationalRevision !== preparedInput.ownerOperationalRevision
+          || currentIntent?.ownerIntentRevision !== preparedInput.ownerIntentRevision
+          || !isPreparedSourceOnlyInput(retainedInput, preparedInput)
+          || !hasCanonicalInputHash(preparedInput)
+          || preparedInput.sourceSnapshotIds.some((sourceId) => !store.sourceSnapshots[sourceId])
+          || preparedInput.id !== artifact.publicBuildInputId
+          || preparedInput.id !== requestedVersion.publicBuildInputId
+          || preparedInput.siteId !== site.id
+          || preparedInput.businessId !== site.businessId
+          || preparedInput.ownerOperationalRevision !== revision.ownerOperationalRevision
+          || preparedInput.ownerIntentRevision !== revision.ownerIntentRevision
+        ) {
+          throw new Error("stale_prepared_source_input");
+        }
+        if (store.buildInputs[preparedInput.id]) throw new Error("Public build inputs are immutable.");
+        store.buildInputs[preparedInput.id] = preparedInput;
+        for (const candidate of Object.values(store.versions)) {
+          if (candidate.siteId === site.id && candidate.status === "candidate") {
+            candidate.status = "superseded";
+            candidate.staleReason = undefined;
+          }
+        }
+        site.currentPublicBuildInputId = preparedInput.id;
       }
       if (adoption) {
         const currentState = store.businessStates[adoption.businessState.businessId];
@@ -2763,6 +2809,13 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const version = siteVersionSchema.parse(input.version);
     const run = siteAgentRunSchema.parse(input.run);
     const session = siteAgentSessionSchema.parse(input.session);
+    const sourceInputBinding = input.sourceInputBinding && {
+      expectedPublicBuildInputId: input.sourceInputBinding.expectedPublicBuildInputId,
+      publicBuildInput: sitePublicBuildInputSchema.parse(input.sourceInputBinding.publicBuildInput)
+    };
+    if (sourceInputBinding && !hasCanonicalInputHash(sourceInputBinding.publicBuildInput)) {
+      throw new Error("prepared_source_input_hash_invalid");
+    }
     const result = await requireData<{ version: unknown; run: unknown }>(this.client.rpc("finalize_verified_authoring", {
       target_finalization_key: input.finalizationKey,
       revision_document: revision,
@@ -2771,6 +2824,7 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       run_document: run,
       session_document: session,
       preview_grant_document: input.previewGrantDocument,
+      prepared_input_document: sourceInputBinding ?? null,
       media_adoption_document: input.mediaAdoption ?? null
     }), "Finalize verified authoring");
     const coverage = input.sourceCoverage ? siteSourceCoverageReportSchema.parse(input.sourceCoverage) : null;
@@ -3513,6 +3567,21 @@ function assertUniqueBootstrapIds(values: Array<{ id: string }>, label: string) 
 }
 
 function clone<T>(value: T): T { return value === undefined ? value : structuredClone(value); }
+
+function isPreparedSourceOnlyInput(retained: SitePublicBuildInput, prepared: SitePublicBuildInput) {
+  if (prepared.id === retained.id || !prepared.sourceSnapshotIds.length) return false;
+  const retainedSources = new Set(retained.sourceSnapshotIds);
+  if (!retained.sourceSnapshotIds.every((sourceId) => prepared.sourceSnapshotIds.includes(sourceId))) return false;
+  if (prepared.sourceSnapshotIds.every((sourceId) => retainedSources.has(sourceId))) return false;
+  const { id: _retainedId, inputHash: _retainedHash, createdAt: _retainedCreatedAt, sourceSnapshotIds: _retainedSources, ...retainedContent } = retained;
+  const { id: _preparedId, inputHash: _preparedHash, createdAt: _preparedCreatedAt, sourceSnapshotIds: _preparedSources, ...preparedContent } = prepared;
+  return stableJson(retainedContent) === stableJson(preparedContent);
+}
+
+function hasCanonicalInputHash(input: SitePublicBuildInput) {
+  const { inputHash, ...withoutHash } = input;
+  return inputHash === sha256(stableJson(withoutHash));
+}
 
 async function requireData<T>(query: PromiseLike<{ data: unknown; error: { message: string } | null }>, operation: string) {
   const { data, error } = await query;

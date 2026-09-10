@@ -1179,7 +1179,8 @@ export class SiteAuthoringWorkflow {
         && exactParentRevision.siteId === run.siteId
         && exactParentRevision.publicBuildInputId === outcome.buildInput.id
         && exactParentRevision.sourceHash === outcome.revision.sourceHash
-        && !outcome.mediaAdoption;
+        && !outcome.mediaAdoption
+        && !outcome.sourceInputBinding;
       if (noOpEdit) {
         const retainedVersion = (await this.repository.listSiteVersions(run.siteId)).find((version) => (
           version.workspaceRevisionId === exactParentRevision.id
@@ -1275,6 +1276,7 @@ export class SiteAuthoringWorkflow {
         run: completedRun,
         session: completedSession,
         mediaAdoption: outcome.mediaAdoption,
+        sourceInputBinding: outcome.sourceInputBinding,
         sourceCoverage: sourceCoverage.report,
         redirects: sourceCoverage.redirects
       }), workflowSignal);
@@ -3052,7 +3054,13 @@ export class SiteAuthoringWorkflow {
       assetRevisionIds: effectiveBuildInput.assetRevisionIds,
       pendingAssetRevisions: adoptedGeneratedRevisions
     }), input.signal);
-    if (adoptedGeneratedRevisions.length) {
+    const sourceInputBinding = !adoptedGeneratedRevisions.length && effectiveBuildInput.id !== retainedBuildInput.id
+      ? {
+          expectedPublicBuildInputId: retainedBuildInput.id,
+          publicBuildInput: effectiveBuildInput
+        }
+      : undefined;
+    if (adoptedGeneratedRevisions.length || sourceInputBinding) {
       activeSession = siteAgentSessionSchema.parse({
         ...activeSession,
         publicBuildInputId: effectiveBuildInput.id,
@@ -3073,7 +3081,7 @@ export class SiteAuthoringWorkflow {
     // Only the returned draft points to provisional authority. The persisted
     // running record remains resumable against its existing immutable input
     // until finalizeVerifiedAuthoring atomically retains and switches both.
-    if (adoptedGeneratedRevisions.length) {
+    if (adoptedGeneratedRevisions.length || sourceInputBinding) {
       run = siteAgentRunSchema.parse({ ...run, publicBuildInputId: effectiveBuildInput.id });
     }
     await retryTransientAuthoringPersistence(() => recorder.close(runEvent, {
@@ -3124,6 +3132,7 @@ export class SiteAuthoringWorkflow {
             publicBuildInput: effectiveBuildInput
           }
         : undefined,
+      sourceInputBinding,
       inspectionHash: managerResult.completion.inspectionHash,
       ownerMessage: managerResult.completion.ownerMessage,
       focusRoute: managerResult.completion.focusRoute,
@@ -5629,12 +5638,36 @@ function projectAuthoringMedia(input: {
   sourceSnapshotIds: string[];
   retainedDependencyRevisionIds?: string[];
 }) {
+  const sourceSnapshotIds = [...new Set(input.sourceSnapshotIds)].sort();
   if (!input.refs.length) {
     if (input.retainedDependencyRevisionIds?.length) throw new Error("media_provenance_dependencies_require_a_rendered_asset");
-    return { state: input.state, buildInput: input.retainedBuildInput };
+    const retainedSourceSnapshotIds = [...input.retainedBuildInput.sourceSnapshotIds].sort();
+    if (
+      sourceSnapshotIds.length === retainedSourceSnapshotIds.length
+      && sourceSnapshotIds.every((sourceId, index) => sourceId === retainedSourceSnapshotIds[index])
+    ) {
+      return { state: input.state, buildInput: input.retainedBuildInput };
+    }
+    const { inputHash: _retainedInputHash, ...retainedInputBody } = input.retainedBuildInput;
+    const sourceOnlyBody = {
+      ...retainedInputBody,
+      id: deterministicId("input", {
+        schemaVersion: 1,
+        runId: input.runId,
+        retainedPublicBuildInputId: input.retainedBuildInput.id,
+        sourceSnapshotIds
+      }),
+      sourceSnapshotIds
+    };
+    return {
+      state: input.state,
+      buildInput: sitePublicBuildInputSchema.parse({
+        ...sourceOnlyBody,
+        inputHash: sha256(stableJson(sourceOnlyBody))
+      })
+    };
   }
   const revisionIds = new Set(input.refs.map((ref) => ref.revisionId));
-  const sourceSnapshotIds = [...new Set(input.sourceSnapshotIds)].sort();
   const retainedDependencies = [...new Set(input.retainedDependencyRevisionIds ?? [])]
     .filter((revisionId) => !revisionIds.has(revisionId)).sort();
   const state = prospectiveMediaState(input.state, input.refs);

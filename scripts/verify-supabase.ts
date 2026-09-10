@@ -71,7 +71,8 @@ assert.deepEqual(
     "202608140002_canonical_source_logo_recapture.sql",
     "202608230001_canonical_site_quality.sql",
     "202609060001_site_publication_timestamp.sql",
-    "202609070001_privacy_minimal_analytics.sql"
+    "202609070001_privacy_minimal_analytics.sql",
+    "202609100001_atomic_prepared_source_input_finalization.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );
@@ -342,6 +343,18 @@ assert(
     && !minimalBlueGreenSandboxes.includes("sandboxWarmUntil")
     && !minimalBlueGreenSandboxes.includes("deployment_status"),
   "Blue-green deployment pointers, durable pause checkpoints, canonical claims, or teardown fencing are incomplete."
+);
+const preparedSourceInputFinalization = await readFile("supabase/migrations/202609100001_atomic_prepared_source_input_finalization.sql", "utf8");
+assert(
+  preparedSourceInputFinalization.includes("prepared_input_document jsonb DEFAULT NULL::jsonb")
+    && preparedSourceInputFinalization.includes("stale_prepared_source_input")
+    && preparedSourceInputFinalization.includes("retained_run_document->>'publicBuildInputId'")
+    && preparedSourceInputFinalization.includes("current_business_state->>'ownerOperationalRevision'")
+    && preparedSourceInputFinalization.includes("current_site_intent->>'ownerIntentRevision'")
+    && preparedSourceInputFinalization.includes("site_public_build_input_sources")
+    && preparedSourceInputFinalization.includes("drop function public.finalize_verified_authoring(\n  text,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb\n)")
+    && preparedSourceInputFinalization.includes("grant execute on function public.finalize_verified_authoring(\n  text,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb\n) to service_role"),
+  "Prepared source-only input finalization must preserve the existing authority fences and replace the retired function signature."
 );
 assert(
   ownerSiteAgentRunCancellation.includes("create or replace function public.cancel_site_agent_run")

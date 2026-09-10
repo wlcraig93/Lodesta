@@ -29,6 +29,8 @@ assert(repository.includes('rpc("enqueue_site_agent_request"'));
 assert(repository.includes('rpc("apply_prepared_owner_authority_change"'));
 assert(repository.includes('rpc("apply_prepared_provisional_authoring_context"'));
 assert(repository.includes('rpc("apply_managed_form_authoring_change"'));
+assert(repository.includes('prepared_input_document'));
+assert(repository.includes('prepared_source_input_hash_invalid'));
 assert(migration.includes("create or replace function public.bootstrap_site_authoring"));
 assert(migration.includes("create or replace function public.apply_prepared_owner_authority_change"));
 assert(migration.includes("create or replace function public.apply_prepared_provisional_authoring_context"));

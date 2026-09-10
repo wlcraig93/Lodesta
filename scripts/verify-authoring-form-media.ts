@@ -7,7 +7,7 @@ import { LocalSitePlatformRepository } from "../packages/platform-data/repositor
 import { LocalArtifactBlobStore } from "../packages/site-artifacts";
 import { SiteAuthoringWorkflow, mediaProvenanceClosure, operatorHomepageContextPages, withRetainedAssetRevisionIds } from "../packages/site-platform/workflow";
 import { createSiteAuthoringContext, imageCreationModel, siteAgentRunGuardrailsForKind, type WebsiteManagerAgent } from "../packages/site-agent";
-import { assetRevisionSchema, businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, sourceSnapshotSchema, sourceSnapshotPageSchema, sourceSnapshotResourceSchema, type AssetRevision, type AssetRevisionRef, type SitePublicBuildInput } from "../packages/site-contracts";
+import { assetRevisionSchema, businessStateSchema, siteAgentRunSchema, siteAgentSessionSchema, siteBuildArtifactSchema, sitePublicBuildInputSchema, siteVersionSchema, siteWorkspaceRevisionSchema, sourceSnapshotSchema, sourceSnapshotPageSchema, sourceSnapshotResourceSchema, type AssetRevision, type AssetRevisionRef, type SitePublicBuildInput } from "../packages/site-contracts";
 import { resolveApprovedSourceDocuments } from "../packages/business-data/owner-documents";
 import { sha256, stableJson } from "../packages/business-data";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
@@ -442,6 +442,118 @@ async function verifyGeneratedMediaProvenanceFinalization() {
     assert.deepEqual((await repository.getPublicBuildInput(adoptionInput.id))!.assetRevisionIds, [ancestor.id, edited.id, sibling.id]);
     assert.deepEqual((await repository.getBusinessState(input.businessId))!.assets.map((asset) => asset.revisionId), [edited.id, sibling.id]);
     assert(await repository.getAssetRevision(ancestor.id), "Finalization did not persist the provenance-only ancestor revision.");
+
+    const researchSnapshot = sourceSnapshotSchema.parse({ schemaVersion: 1, id: "source_research_after_unused_media", businessId: input.businessId,
+      sourceType: "website", sourceUrl: "https://northstar.example/research", contentHash: sha256("source-only-finalization"), capturedAt: now,
+      payload: { kind: "website-mirror", fixture: "source-only-finalization" } });
+    for (const sourceId of adoptionInput.sourceSnapshotIds) {
+      if (await repository.getSourceSnapshot(sourceId)) continue;
+      await repository.saveSourceSnapshot(sourceSnapshotSchema.parse({ schemaVersion: 1, id: sourceId, businessId: input.businessId,
+        sourceType: "website", sourceUrl: `https://northstar.example/${sourceId}`, contentHash: sha256(sourceId), capturedAt: now,
+        payload: { kind: "website-mirror", fixture: "retained-source-binding" } }));
+    }
+    await repository.saveSourceSnapshot(researchSnapshot);
+    const { inputHash: _adoptionHash, id: _adoptionId, createdAt: _adoptionCreatedAt, sourceSnapshotIds: _adoptionSources, ...sourceInputBody } = adoptionInput;
+    const preparedWithoutHash = {
+      ...sourceInputBody, id: "input_source_only_finalization", createdAt: now,
+      sourceSnapshotIds: [..._adoptionSources, researchSnapshot.id].sort()
+    };
+    const sourceInput = sitePublicBuildInputSchema.parse({ ...preparedWithoutHash, inputHash: sha256(stableJson(preparedWithoutHash)) });
+    const sourceSession = siteAgentSessionSchema.parse({ ...session, id: "session_source_only_finalization", publicBuildInputId: adoptionInput.id });
+    const sourceRun = siteAgentRunSchema.parse({ ...runningRun, id: "run_source_only_finalization", sessionId: sourceSession.id, publicBuildInputId: adoptionInput.id });
+    await repository.saveAgentSession(sourceSession);
+    await repository.saveAgentRun(sourceRun);
+    const sourceWorkspace = siteWorkspaceRevisionSchema.parse({ ...workspace, id: "workspace_source_only_finalization", parentRevisionId: workspace.id, publicBuildInputId: sourceInput.id,
+      sourceHash: sha256("source-only-finalization-workspace"), sourceArchiveKey: "workspace-backups/source-only-finalization.tar.gz", createdBy: { kind: "agent", id: sourceRun.id } });
+    const sourceArtifact = siteBuildArtifactSchema.parse({ ...artifact, id: "artifact_source_only_finalization", workspaceRevisionId: sourceWorkspace.id,
+      publicBuildInputId: sourceInput.id, artifactHash: sha256("source-only-finalization-artifact"), storagePrefix: "site-artifacts/source-only-finalization" });
+    const sourceVersion = siteVersionSchema.parse({ ...requestedVersion, id: "version_source_only_finalization", artifactId: sourceArtifact.id,
+      artifactHash: sourceArtifact.artifactHash, workspaceRevisionId: sourceWorkspace.id, publicBuildInputId: sourceInput.id,
+      sourceSnapshotIds: sourceInput.sourceSnapshotIds, assetRevisionIds: sourceInput.assetRevisionIds, formDefinitionIds: sourceInput.forms.map((form) => form.id), createdBy: { kind: "agent", id: sourceRun.id } });
+    const sourceFinalization = {
+      finalizationKey: sha256("source-only-finalization"), revision: sourceWorkspace, artifact: sourceArtifact, version: sourceVersion,
+      run: siteAgentRunSchema.parse({ ...sourceRun, publicBuildInputId: sourceInput.id, status: "succeeded", stage: "candidate_ready", completedAt: now }),
+      session: siteAgentSessionSchema.parse({ ...sourceSession, publicBuildInputId: sourceInput.id, status: "closed", updatedAt: now }),
+      sourceInputBinding: { expectedPublicBuildInputId: adoptionInput.id, publicBuildInput: sourceInput }
+    };
+    const sourceFinalized = await repository.finalizeVerifiedAuthoring(sourceFinalization);
+    const sourceReplay = await repository.finalizeVerifiedAuthoring(sourceFinalization);
+    assert.equal(sourceReplay.version.id, sourceFinalized.version.id, "Source-only finalization replay created a second version.");
+    assert.equal(sourceReplay.run.id, sourceFinalized.run.id, "Source-only finalization replay changed the retained run.");
+    assert.deepEqual(sourceFinalized.version.sourceSnapshotIds, sourceInput.sourceSnapshotIds, "Atomic finalization lost retained research source authority.");
+    assert.equal((await repository.getSite(input.siteId))!.currentPublicBuildInputId, sourceInput.id);
+    assert.equal((await repository.getBusinessState(input.businessId))!.revision, adoptionState.revision, "Source-only binding must not advance business revision.");
+    assert.equal(await repository.getAssetRevision("asset_revision_discarded"), undefined, "Discarded media must not be adopted.");
+    const nextResearch = sourceSnapshotSchema.parse({ ...researchSnapshot, id: "source_research_negative_binding", sourceUrl: "https://northstar.example/research-next", contentHash: sha256("source-only-negative") });
+    await repository.saveSourceSnapshot(nextResearch);
+    const rejectPreparedSourceBinding = async (label: string, mutate: (candidate: SitePublicBuildInput) => SitePublicBuildInput) => {
+      const candidateBody = { ...sourceInput, id: `input_source_only_${label}`, sourceSnapshotIds: [...sourceInput.sourceSnapshotIds, nextResearch.id].sort() };
+      const { inputHash: _candidateHash, ...candidateWithoutHash } = candidateBody;
+      const candidate = mutate(sitePublicBuildInputSchema.parse({ ...candidateWithoutHash, inputHash: sha256(stableJson(candidateWithoutHash)) }));
+      const rejectedSession = siteAgentSessionSchema.parse({ ...sourceSession, id: `session_source_only_${label}`, publicBuildInputId: candidate.id });
+      const retainedRun = siteAgentRunSchema.parse({ ...sourceRun, id: `run_source_only_${label}`, sessionId: rejectedSession.id, publicBuildInputId: sourceInput.id });
+      await repository.saveAgentSession(rejectedSession);
+      await repository.saveAgentRun(retainedRun);
+      const rejectedWorkspace = siteWorkspaceRevisionSchema.parse({ ...sourceWorkspace, id: `workspace_source_only_${label}`, parentRevisionId: sourceWorkspace.id,
+        publicBuildInputId: candidate.id, sourceHash: sha256(`source-only-${label}`), sourceArchiveKey: `workspace-backups/source-only-${label}.tar.gz`, createdBy: { kind: "agent", id: retainedRun.id } });
+      const rejectedArtifact = siteBuildArtifactSchema.parse({ ...sourceArtifact, id: `artifact_source_only_${label}`, workspaceRevisionId: rejectedWorkspace.id,
+        publicBuildInputId: candidate.id, artifactHash: sha256(`source-only-artifact-${label}`), storagePrefix: `site-artifacts/source-only-${label}` });
+      const rejectedVersion = siteVersionSchema.parse({ ...sourceVersion, id: `version_source_only_${label}`, artifactId: rejectedArtifact.id,
+        artifactHash: rejectedArtifact.artifactHash, workspaceRevisionId: rejectedWorkspace.id, publicBuildInputId: candidate.id,
+        sourceSnapshotIds: candidate.sourceSnapshotIds, assetRevisionIds: candidate.assetRevisionIds, formDefinitionIds: candidate.forms.map((form) => form.id), createdBy: { kind: "agent", id: retainedRun.id } });
+      const inputsBefore = (await repository.listPublicBuildInputs()).length;
+      await assert.rejects(() => repository.finalizeVerifiedAuthoring({
+        finalizationKey: sha256(`source-only-${label}`), revision: rejectedWorkspace, artifact: rejectedArtifact, version: rejectedVersion,
+        run: siteAgentRunSchema.parse({ ...retainedRun, publicBuildInputId: candidate.id, status: "succeeded", stage: "candidate_ready", completedAt: now }),
+        session: siteAgentSessionSchema.parse({ ...rejectedSession, status: "closed", updatedAt: now }),
+        sourceInputBinding: { expectedPublicBuildInputId: sourceInput.id, publicBuildInput: candidate }
+      }), /stale_prepared_source_input/);
+      assert.equal((await repository.listPublicBuildInputs()).length, inputsBefore, `${label} rejection persisted a prepared input.`);
+      assert.equal((await repository.getSite(input.siteId))!.currentPublicBuildInputId, sourceInput.id, `${label} rejection changed the site input.`);
+    };
+    await rejectPreparedSourceBinding("owner_revision", (candidate) => {
+      const { inputHash: _hash, ...body } = candidate;
+      return sitePublicBuildInputSchema.parse({ ...body, ownerOperationalRevision: candidate.ownerOperationalRevision + 1, inputHash: sha256(stableJson({ ...body, ownerOperationalRevision: candidate.ownerOperationalRevision + 1 })) });
+    });
+    await rejectPreparedSourceBinding("intent_revision", (candidate) => {
+      const { inputHash: _hash, ...body } = candidate;
+      return sitePublicBuildInputSchema.parse({ ...body, ownerIntentRevision: candidate.ownerIntentRevision + 1, inputHash: sha256(stableJson({ ...body, ownerIntentRevision: candidate.ownerIntentRevision + 1 })) });
+    });
+    await rejectPreparedSourceBinding("changed_content", (candidate) => {
+      const { inputHash: _hash, ...body } = candidate;
+      const changed = { ...body, business: { ...candidate.business, name: "Changed fixture name" } };
+      return sitePublicBuildInputSchema.parse({ ...changed, inputHash: sha256(stableJson(changed)) });
+    });
+    await rejectPreparedSourceBinding("invalid_hash", (candidate) => ({ ...candidate, inputHash: sha256("invalid-prepared-source-hash") }));
+    await rejectPreparedSourceBinding("missing_source", (candidate) => {
+      const { inputHash: _hash, ...body } = candidate;
+      const missing = { ...body, sourceSnapshotIds: [...sourceInput.sourceSnapshotIds, "source_missing_finalization"].sort() };
+      return sitePublicBuildInputSchema.parse({ ...missing, inputHash: sha256(stableJson(missing)) });
+    });
+    await rejectPreparedSourceBinding("reordered_sources", (candidate) => {
+      const { inputHash: _hash, ...body } = candidate;
+      const reordered = { ...body, sourceSnapshotIds: [...sourceInput.sourceSnapshotIds].reverse() };
+      return sitePublicBuildInputSchema.parse({ ...reordered, inputHash: sha256(stableJson(reordered)) });
+    });
+    const currentState = (await repository.getBusinessState(input.businessId))!;
+    const { stateHash: _priorStateHash, ...nextStateBody } = currentState;
+    const advancedState = businessStateSchema.parse({ ...nextStateBody, revision: currentState.revision + 1,
+      ownerOperationalRevision: currentState.ownerOperationalRevision + 1, updatedAt: now,
+      stateHash: sha256(stableJson({ ...nextStateBody, revision: currentState.revision + 1, ownerOperationalRevision: currentState.ownerOperationalRevision + 1, updatedAt: now })) });
+    await repository.saveBusinessState(advancedState);
+    await rejectPreparedSourceBinding("current_owner_changed", (candidate) => candidate);
+    const staleSession = siteAgentSessionSchema.parse({ ...sourceSession, id: "session_source_only_stale", publicBuildInputId: sourceInput.id });
+    const staleRun = siteAgentRunSchema.parse({ ...sourceRun, id: "run_source_only_stale", sessionId: staleSession.id, publicBuildInputId: sourceInput.id });
+    await repository.saveAgentSession(staleSession);
+    await repository.saveAgentRun(staleRun);
+    await assert.rejects(() => repository.finalizeVerifiedAuthoring({
+      finalizationKey: sha256("source-only-finalization-stale"), revision: { ...sourceWorkspace, id: "workspace_source_only_stale", parentRevisionId: sourceWorkspace.id, sourceHash: sha256("stale") },
+      artifact: { ...sourceArtifact, id: "artifact_source_only_stale", workspaceRevisionId: "workspace_source_only_stale", artifactHash: sha256("stale-artifact") },
+      version: { ...sourceVersion, id: "version_source_only_stale", artifactId: "artifact_source_only_stale", workspaceRevisionId: "workspace_source_only_stale" },
+      run: siteAgentRunSchema.parse({ ...staleRun, publicBuildInputId: sourceInput.id, status: "succeeded", stage: "candidate_ready", completedAt: now }),
+      session: siteAgentSessionSchema.parse({ ...staleSession, publicBuildInputId: sourceInput.id, status: "closed", updatedAt: now }),
+      sourceInputBinding: { expectedPublicBuildInputId: adoptionInput.id, publicBuildInput: sourceInput }
+    }), /stale_prepared_source_input|stale_parent_revision/);
   } finally {
     await rm(provenanceDirectory, { recursive: true, force: true });
   }

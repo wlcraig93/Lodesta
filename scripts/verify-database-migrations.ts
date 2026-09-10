@@ -146,14 +146,16 @@ const { stdout: finalizerOutput } = await execute("psql", [
   "--set",
   "ON_ERROR_STOP=1",
   "--command",
-  "select pg_get_functiondef('public.finalize_verified_authoring(text,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)'::regprocedure);"
+  "select pg_get_functiondef('public.finalize_verified_authoring(text,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,jsonb)'::regprocedure);"
 ], {
   env: postgresEnvironment,
   maxBuffer: 1_000_000
 });
 assert(
-  !/external_authoring|external_document|execution_driver|staged_blob_receipts/i.test(finalizerOutput),
-  `${environment} retained an MCP branch in finalize_verified_authoring.`
+  !/external_authoring|external_document|execution_driver|staged_blob_receipts/i.test(finalizerOutput)
+    && finalizerOutput.includes("prepared_input_document jsonb DEFAULT NULL::jsonb")
+    && finalizerOutput.includes("stale_prepared_source_input"),
+  `${environment} finalizer has retired execution branches or lacks atomic source-only input binding.`
 );
 
 const { stdout: comprehensiveSchemaOutput } = await execute("psql", [

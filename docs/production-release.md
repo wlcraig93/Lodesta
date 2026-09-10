@@ -10,6 +10,8 @@ After cutover, website capture is a separate pre-authoring preparation step and 
 
 Apply `202608040005_incremental_source_snapshot_readiness.sql` before releasing the controller that calls the incremental snapshot functions. The migration requires the retired staging tables to be empty, replaces the single large finalization transaction with bounded canonical resource/page writes, and keeps a snapshot hidden from repository readers until its manifest is complete. Run live database verification immediately afterward.
 
+Apply `202609100001_atomic_prepared_source_input_finalization.sql` under an owned draining maintenance lease after running authoring reaches zero, before deploying its controller. Compare the live finalizer and migration ledger with the reviewed predecessor; apply the forward migration and ledger entry in one transaction, then verify the new function and service-role-only privileges. It replaces the old finalizer signature with one canonical function whose optional `prepared_input_document` binds newly retained research without adopting discarded media. It does not rewrite retained inputs or artifacts. Existing named-argument calls omit this optional value; do not retain a second finalizer overload or a fallback dispatch. Keep database migration evidence separate from fresh-site quality acceptance.
+
 ## One-time configuration
 
 Configure the production environment secrets:

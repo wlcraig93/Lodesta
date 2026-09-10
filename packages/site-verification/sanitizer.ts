@@ -66,10 +66,22 @@ export function sanitizeAgentHtml(input: SanitizeArtifactInput) {
     return true;
   });
   normalizeManagedNavigation(document.children);
+  validateNonemptyMain(document.children, findings, input.route);
   validateNativeInteractions(document.children, findings, input.route);
   validateResponsivePictures(document.children, findings, input.route);
 
   return { html: DomUtils.getInnerHTML(document), findings: dedupeFindings(findings) };
+}
+
+function validateNonemptyMain(nodes: AnyNode[], findings: ArtifactGateFinding[], route: string) {
+  const mains = DomUtils.findAll((node) => node.type === "tag" && node.name === "main", nodes);
+  for (const main of mains) {
+    const hasContent = main.children.some((node) =>
+      node.type !== "comment" && (node.type !== "text" || Boolean(node.data.trim())));
+    if (!hasContent) {
+      findings.push(finding("html.empty_main", "html", "Route main landmark must contain rendered content.", route));
+    }
+  }
 }
 
 function normalizeManagedNavigation(nodes: AnyNode[]) {

@@ -328,6 +328,41 @@ assert.equal(
   "Catastrophic stylesheet loss was not classified as a technical release blocker."
 );
 
+const inlineCtaMarkup = '<span class="inline-cta-fixture"><a class="cta" href="contact/">Request help</a><a class="cta" href="contact/">Plan a visit</a><a class="cta" href="contact/">See next steps</a></span>';
+const styledInlineCtaPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace('<a class="button" href="contact/">Request help</a>', inlineCtaMarkup) }
+    : route),
+  files: prepared.files.map((file) => file.path === "site.css"
+    ? {
+        ...file,
+        bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.inline-cta-fixture{display:flex;gap:20px;flex-wrap:wrap}.cta{display:inline;min-height:0;padding:0;border:0;background:transparent;color:#195a87;font-weight:700;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:4px}`)
+      }
+    : file.path === "index.html"
+      ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace('<a class="button" href="contact/">Request help</a>', inlineCtaMarkup)) }
+      : file)
+};
+assert(styledInlineCtaPrepared.routes.find((route) => route.path === "/")!.html.includes('class="cta"'), "Inline CTA regression fixture did not alter the expected route.");
+const styledInlineCtaBrowser = await runArtifactBrowserGate({
+  prepared: styledInlineCtaPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-styled-inline-cta",
+  routePaths: ["/"],
+  viewports: [{ name: "desktop", width: 1280, height: 900 }]
+});
+assert.equal(
+  styledInlineCtaBrowser.findings.some((finding) => finding.id === "render.browser_default_document"),
+  false,
+  "Custom inline CTA links were misclassified as catastrophic browser-default document styling."
+);
+assert.equal(
+  styledInlineCtaBrowser.findings.some((finding) => finding.id === "render.target_size" && finding.severity === "warning"),
+  true,
+  "The inline CTA fixture lost its separate advisory target-size signal."
+);
+
 const uncontaminatedReviewPrepared = {
   ...prepared,
   files: prepared.files.map((file) => file.path === "site.css"

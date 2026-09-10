@@ -1404,6 +1404,41 @@ const asset = {
   sourceFactIds: [name.id],
   activeForFutureBuilds: true
 };
+
+const emptyMainArtifact = prepareSiteArtifact({
+  authoredArtifact: artifact('<main id="main-content"></main>'),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4"
+});
+const emptyMainFinding = errors(emptyMainArtifact).find((finding) => finding.id === "html.empty_main");
+assert.equal(emptyMainFinding?.route, "/", "An explicitly empty main landmark did not produce a route-scoped blocker.");
+assert.equal(emptyMainFinding?.severity, "error", "An explicitly empty main landmark was not a release blocker.");
+assert.equal(finalizeForTest(emptyMainArtifact, input).qa.hardGate, "failed", "Finish accepted an explicitly empty main landmark.");
+
+const whitespaceAndCommentMainArtifact = prepareSiteArtifact({
+  authoredArtifact: artifact("<main> \n<!-- no rendered content -->\n </main>"),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4"
+});
+assert(errors(whitespaceAndCommentMainArtifact).some((finding) => finding.id === "html.empty_main"),
+  "Whitespace and comments were treated as rendered main content.");
+
+const imageLedMain = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main id="main-content"><img src="asset://${asset.assetId}" alt="Workshop exterior"></main>`),
+  buildInput: { ...input, business: { ...input.business, assets: [asset] } },
+  runtimeSeriesId: "site-runtime-v4"
+});
+assert(!errors(imageLedMain).some((finding) => finding.id === "html.empty_main"), "A non-text image-led main landmark was rejected as empty.");
+assert.equal(errors(imageLedMain).length, 0, JSON.stringify(errors(imageLedMain)));
+
+const formLedMain = prepareSiteArtifact({
+  authoredArtifact: artifact(`<main id="main-content"><form data-lodesta-form-id="form_estimate" data-lodesta-form-key="estimate_request" data-lodesta-form-revision="1" data-lodesta-form-destination="lead_inbox"><label for="empty-main-name">Name</label><input id="empty-main-name" data-lodesta-field-id="name" name="name" type="text" required><label for="empty-main-phone">Phone</label><input id="empty-main-phone" data-lodesta-field-id="phone" name="phone" type="tel" required><label for="empty-main-message">What happened?</label><textarea id="empty-main-message" data-lodesta-field-id="message" name="message"></textarea><button type="submit" data-lodesta-form-submit>Request an estimate</button><p data-lodesta-form-status aria-live="polite" aria-atomic="true">Thanks. The shop will follow up.</p></form></main>`),
+  buildInput: input,
+  runtimeSeriesId: "site-runtime-v4"
+});
+assert(!errors(formLedMain).some((finding) => finding.id === "html.empty_main"), "A valid form-led main landmark was rejected as empty.");
+assert.equal(errors(formLedMain).length, 0, JSON.stringify(errors(formLedMain)));
+
 assert.equal(sanitizeAgentCss(`.hero{background-image:url("asset://${asset.assetId}")}`, [asset]).findings.length, 0);
 assert(sanitizeAgentCss(`.hero{background-image:u\\72l("https://evil.example/x")}`, [asset]).findings.some((finding) => finding.severity === "error"));
 assert(sanitizeAgentCss(`.hero{background-image:url("asset://unknown")}`, [asset]).findings.some((finding) => finding.severity === "error"));

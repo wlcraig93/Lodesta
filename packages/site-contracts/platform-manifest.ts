@@ -15,8 +15,8 @@ export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:e9d0d
 export const websiteManagerPromptIdentity = "website-manager@sha256:ca3b2b5018747de7ff36e0a0b9efd6cb243e496a0893035144a5ca16e00fce88";
 // Descriptor: fact-binding-validator:exact-markers-and-bindings:advisory-prose-evidence:2026-09-05
 export const factBindingPolicyIdentity = "fact-binding-validator@sha256:e560da37c4418c025b62803388a62cf34a50358b0a6c7ec64436ef6552e71eaa";
-// Descriptor: site-verification-policy:controlled-panel-navigation:advisory-prose-evidence:owner-approved-documents:no-header-line-count-advisory:qualified-body-text-advisory:approved-document-mismatch-context:pending-navigation-resource-evidence:2026-09-09
-export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:03891266f4f69958c583a2afcd728b77fdf75caf0b4ea0076ea996fe26306d85";
+// Descriptor: site-verification-policy:controlled-panel-navigation:advisory-prose-evidence:owner-approved-documents:no-header-line-count-advisory:qualified-body-text-advisory:approved-document-mismatch-context:pending-navigation-resource-evidence:default-link-styling-required-for-cta-loss-signal:explicit-empty-main-functional-failure:2026-09-10
+export const siteVerificationPolicyIdentity = "site-verification-policy@sha256:81e4a51ea29bac5880abb962de8ce0880487832004b7a52e1adcc85ae209d395";
 export const workspaceSourcePolicyIdentity = "workspace-source-policy@sha256:a9dc99a379ac4ccb9bd4a590bda1b4864ac05827a8d2e560fe06f46706974cab";
 
 export const siteTechnicalReleasePolicy = {
@@ -29,6 +29,7 @@ export const siteTechnicalReleasePolicy = {
     "accessibility.axe.serious."
   ],
   blockingIds: [
+    "html.empty_main",
     "html.runtime_count",
     "html.runtime_identity",
     "link.rendered",

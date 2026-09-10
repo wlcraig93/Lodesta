@@ -2310,7 +2310,11 @@ const browserInspectionSource = String.raw`(() => {
       const background = colorTools.parse(style.backgroundColor);
       const borderWidth = [style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth]
         .reduce((total, value) => total + (parseFloat(value) || 0), 0);
-      return element.getBoundingClientRect().height < 28
+      // A deliberately unboxed action is not evidence of stylesheet loss.
+      // Require actual browser-default link presentation for this signal.
+      return style.color === "rgb(0, 0, 238)"
+        && style.textDecorationLine.includes("underline")
+        && element.getBoundingClientRect().height < 28
         && (!background.valid || background.channels[3] <= 0.001)
         && borderWidth <= 0.1;
     });

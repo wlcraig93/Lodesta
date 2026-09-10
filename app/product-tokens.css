@@ -69,6 +69,7 @@
   --product-color-warning-border: #fde68a;
   --product-color-warning-text: #92400e;
   --product-color-error: #b8324f;
+  --product-color-danger-action-text: #ffffff;
   --product-color-error-surface: #fee2e2;
   --product-color-error-border: #fecaca;
   --product-color-error-text: #991b1b;
@@ -167,6 +168,7 @@
   --product-color-warning-border: #68552d;
   --product-color-warning-text: #ecc876;
   --product-color-error: #e1798e;
+  --product-color-danger-action-text: #0b0b0b;
   --product-color-error-surface: #3c2229;
   --product-color-error-border: #6d3543;
   --product-color-error-text: #f2a3b3;

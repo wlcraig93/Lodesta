@@ -44,14 +44,45 @@ const failedHistoryRun = {
   startedAt: "2026-09-09T10:00:00.000Z", completedAt: "2026-09-09T10:02:00.000Z",
   progress: { label: "Website needs attention", detail: "The work stopped before it finished." }
 } as any;
+const runningEditRun = {
+  id: "run_stop_fixture", status: "running", kind: "edit", stage: "authoring",
+  startedAt: "2026-09-09T10:03:00.000Z",
+  progress: { label: "Updating", detail: "Fixture update" }
+} as any;
+const queuedEditRun = {
+  id: "run_queued_fixture", status: "queued", kind: "edit", stage: "queued",
+  startedAt: "2026-09-09T10:04:00.000Z",
+  progress: { label: "Preparing your website", detail: "Fixture queued update" }
+} as any;
+const needsInputHistoryRun = {
+  id: "run_needs_input_history", status: "needs_input", kind: "edit", stage: "needs_input",
+  startedAt: "2026-09-09T10:05:00.000Z",
+  progress: { label: "Your answer is needed", detail: "Fixture question" }
+} as any;
+const cancelledHistoryRun = {
+  id: "run_cancelled_history", status: "cancelled", kind: "edit", stage: "authoring",
+  startedAt: "2026-09-09T10:03:00.000Z", completedAt: "2026-09-09T10:04:00.000Z",
+  progress: { label: "Website update stopped", detail: "The active work was stopped. Your published website was not changed." }
+} as any;
 const captureScreenshots = process.env.LODESTA_FIXTURE_CAPTURE !== "false";
 
-let workspace = makeWorkspace();
+let workspace: any = makeWorkspace();
 let clientScript = "";
 let artifactMode: "hidden" | "visible" | "delayed-stylesheet" = "hidden";
 let publishMode: "failure" | "success" = "failure";
 let sessionMode: "success" | "failure" = "success";
 const publishRequests: Array<{ path: string; mode: string }> = [];
+let stopMode: "failure" | "cancelled" | "already_finished" | "unconfirmed" | "mismatched" = "failure";
+const stopRequests: Array<{ path: string; sessionId: string; runId: string; mode: string }> = [];
+const stopDialogActionDiagnostics: Array<{
+  theme: "light" | "dark";
+  viewport: string;
+  label: string;
+  disabled: boolean;
+  opacity: string;
+  color: string;
+  backgroundColor: string;
+}> = [];
 
 type StylesheetGate = {
   started: Promise<void>;
@@ -84,7 +115,7 @@ function makeWorkspace(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function historySnapshot(run: typeof succeededHistoryRun) {
+function historySnapshot(run: { id: string; startedAt: string; completedAt?: string; [key: string]: unknown }) {
   return {
     run,
     completed: [
@@ -93,6 +124,10 @@ function historySnapshot(run: typeof succeededHistoryRun) {
     ],
     hasEarlierActivity: false
   };
+}
+
+function cancelledHistorySnapshot(run: typeof cancelledHistoryRun) {
+  return { run, completed: [], hasEarlierActivity: false };
 }
 
 const serverBuild = await build({
@@ -148,6 +183,43 @@ const server = createServer(async (request, response) => {
   if (url.pathname === `/api/site-agent/runs/${failedHistoryRun.id}/activity`) {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(historySnapshot(failedHistoryRun)));
+    return;
+  }
+  if (url.pathname === `/api/site-agent/runs/${cancelledHistoryRun.id}/activity`) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(cancelledHistorySnapshot(cancelledHistoryRun)));
+    return;
+  }
+  if (url.pathname === `/api/site-agent/runs/${needsInputHistoryRun.id}/activity`) {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(cancelledHistorySnapshot(needsInputHistoryRun)));
+    return;
+  }
+  if (url.pathname === "/api/site-agent/runs" && request.method === "DELETE") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { sessionId?: string; runId?: string };
+    stopRequests.push({ path: url.pathname, sessionId: body.sessionId ?? "", runId: body.runId ?? "", mode: stopMode });
+    if (stopMode === "failure") {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end(JSON.stringify({ message: "Lodesta could not stop this update. Try again or cancel." }));
+      return;
+    }
+    const run = stopMode === "cancelled"
+      ? { ...runningEditRun, status: "cancelled", completedAt: "2026-09-09T10:04:00.000Z", progress: cancelledHistoryRun.progress }
+      : stopMode === "unconfirmed"
+        ? { ...runningEditRun }
+        : stopMode === "mismatched"
+          ? { ...runningEditRun, id: "run_other_fixture", status: "cancelled", completedAt: "2026-09-09T10:04:00.000Z", progress: cancelledHistoryRun.progress }
+          : { ...runningEditRun, status: "succeeded", stage: "candidate_ready", completedAt: "2026-09-09T10:04:00.000Z", progress: succeededHistoryRun.progress };
+    if (["cancelled", "succeeded", "failed"].includes(run.status)) {
+      workspace = {
+        ...workspace,
+        runs: workspace.runs.map((currentRun: any) => currentRun.id === body.runId ? run : currentRun)
+      };
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ run }));
     return;
   }
   if (url.pathname === "/api/site-versions/candidate_fixture/artifact/") {
@@ -310,9 +382,154 @@ try {
   await page.locator(".site-agent-publish-desktop").waitFor({ state: "visible" });
   assert(await page.locator(".site-agent-publish-desktop").isDisabled(), "A stale candidate must block desktop publication.");
 
+  const stopFeedbackScreenshots = resolve(".design/owner-run-feedback/screenshots");
+  await mkdir(stopFeedbackScreenshots, { recursive: true });
+  workspace = makeWorkspace({ runs: [runningEditRun] });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const stopUpdate = page.getByRole("button", { name: "Stop update", exact: true });
+  await stopUpdate.waitFor({ state: "visible" });
+  await stopUpdate.click();
+  await assertStopDialog(page);
+  assert(await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).evaluate((button) => document.activeElement === button), "Stop confirmation must focus Cancel first.");
+  await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
+  const stopError = page.getByRole("dialog").getByRole("alert");
+  await stopError.waitFor({ state: "visible" });
+  assert.equal(await stopError.innerText(), "Lodesta could not stop this update. Try again or cancel.");
+  assert.deepEqual(stopRequests, [{ path: "/api/site-agent/runs", sessionId: "session_fixture", runId: "run_stop_fixture", mode: "failure" }]);
+  assert.equal(await page.getByRole("dialog").count(), 1, "A failed Stop request closed its confirmation.");
+  await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
+  await stopError.waitFor({ state: "visible" });
+  assert.equal(stopRequests.length, 2, "A Stop failure did not allow a deliberate retry.");
+  for (const viewport of [
+    { label: "desktop-1280", width: 1280, height: 800 },
+    { label: "tablet-768", width: 768, height: 1024 },
+    { label: "phone-375", width: 375, height: 812 }
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await settleStopDialogTheme(page, "light");
+    await assertEnabledStopDialogActions(page, "light", viewport.label);
+    await capture(page, resolve(stopFeedbackScreenshots, `stop-failure-light-${viewport.label}.png`));
+    await assertDangerHoverContrast(page, "light", viewport.label);
+    await settleStopDialogTheme(page, "dark");
+    await assertEnabledStopDialogActions(page, "dark", viewport.label);
+    await capture(page, resolve(stopFeedbackScreenshots, `stop-failure-dark-${viewport.label}.png`));
+    await assertDangerHoverContrast(page, "dark", viewport.label);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `Stop failure dialog overflows ${viewport.label}.`);
+  }
+  await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => document.activeElement?.textContent === "Stop update");
+  assert.equal(stopRequests.length, 2, "Closing a failed Stop confirmation retried the request.");
+
+  stopMode = "cancelled";
+  workspace = makeWorkspace({ runs: [runningEditRun] });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await stopUpdate.click();
+  await assertStopDialog(page);
+  sessionMode = "failure";
+  await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
+  await page.locator(".site-agent-inline-notice").getByText("The website update was stopped. The editor could not refresh; reload to see the latest workspace. Your published website was not changed.", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 0, "A confirmed Stop remained open after only its refresh failed.");
+  assert.equal(await page.getByRole("button", { name: "Stop update", exact: true }).count(), 0, "A confirmed Stop offered a duplicate stop action after refresh failure.");
+  assert.equal(stopRequests.length, 3, "A confirmed Stop did not make exactly one request.");
+  sessionMode = "success";
+
+  stopMode = "already_finished";
+  workspace = makeWorkspace({ runs: [runningEditRun] });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Stop update", exact: true }).click();
+  await assertStopDialog(page);
+  await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
+  await page.locator(".site-agent-inline-notice").getByText("This website update had already finished. Reload to see the latest workspace.", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 0, "A terminal-race Stop response kept the confirmation open.");
+  assert.equal(await page.locator(".site-agent-inline-notice").getByText(/was stopped/).count(), 0, "A terminal-race Stop response falsely reported a stop.");
+  assert.equal(stopRequests.length, 4, "A terminal-race Stop response made more than one request.");
+  assert.equal(await page.getByRole("button", { name: "Stop update", exact: true }).count(), 0, "A successful workspace refresh resurrected a terminal Stop target.");
+
+  stopMode = "unconfirmed";
+  workspace = makeWorkspace({ runs: [runningEditRun] });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Stop update", exact: true }).click();
+  await assertStopDialog(page);
+  await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
+  await page.getByRole("dialog").getByRole("alert").getByText("Stopping the website update could not be confirmed.", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 1, "A nonterminal cancellation response closed the confirmation.");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+
+  stopMode = "mismatched";
+  workspace = makeWorkspace({ runs: [runningEditRun] });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Stop update", exact: true }).click();
+  await assertStopDialog(page);
+  await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
+  await page.getByRole("dialog").getByRole("alert").getByText("Stopping the website update could not be confirmed.", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("dialog").count(), 1, "A mismatched cancellation response closed the confirmation.");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+
+  stopMode = "failure";
+  workspace = makeWorkspace({ runs: [queuedEditRun, runningEditRun] });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByText("Build in progress", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Stop update", exact: true }).click();
+  await assertStopDialog(page);
+  await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click();
+  await page.getByRole("dialog").getByRole("alert").waitFor({ state: "visible" });
+  assert.equal(stopRequests.at(-1)?.runId, "run_stop_fixture", "A newer queued run displaced the active running update as the Stop target.");
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+
+  workspace = makeWorkspace({ runs: [cancelledHistoryRun] });
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const cancelledCard = page.locator(".site-agent-activity-card.is-cancelled");
+  await cancelledCard.waitFor({ state: "visible" });
+  assert.equal(await cancelledCard.locator(".site-agent-activity-header .site-agent-activity-dot.is-cancelled").count(), 1, "Expanded cancelled activity is incorrectly marked successful.");
+  const cancelledGuidance = cancelledCard.getByText("The active work was stopped. Your published website was not changed.", { exact: true });
+  await cancelledGuidance.waitFor({ state: "visible" });
+  assert.equal(await cancelledGuidance.count(), 1, "Cancelled activity does not explain the safe outcome.");
+  for (const viewport of [
+    { label: "desktop-1280", width: 1280, height: 800 },
+    { label: "tablet-768", width: 768, height: 1024 },
+    { label: "phone-375", width: 375, height: 812 }
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
+    await capture(page, resolve(stopFeedbackScreenshots, `cancelled-update-light-${viewport.label}.png`));
+    await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    await capture(page, resolve(stopFeedbackScreenshots, `cancelled-update-dark-${viewport.label}.png`));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `Cancelled activity overflows ${viewport.label}.`);
+  }
+  workspace = makeWorkspace({ runs: [succeededHistoryRun, cancelledHistoryRun] });
+  await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const collapsedCancelledCard = page.locator(".site-agent-activity-card.is-cancelled");
+  await collapsedCancelledCard.waitFor({ state: "visible" });
+  assert.equal(await collapsedCancelledCard.locator(".site-agent-activity-summary .site-agent-activity-dot.is-cancelled").count(), 1, "Collapsed cancelled activity is incorrectly marked successful.");
+
+  workspace = makeWorkspace({ runs: [needsInputHistoryRun] });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const needsInputCard = page.locator(".site-agent-activity-card.is-needs_input");
+  await needsInputCard.waitFor({ state: "visible" });
+  assert.equal(await needsInputCard.locator(".site-agent-activity-header .site-agent-activity-dot.is-needs_input").count(), 1, "Needs-input activity is incorrectly marked successful.");
+  assert.equal(await needsInputCard.locator(".site-agent-activity-dot.is-succeeded").count(), 0, "Needs-input activity retains a success dot.");
+  for (const viewport of [
+    { label: "desktop-1280", width: 1280, height: 800 },
+    { label: "tablet-768", width: 768, height: 1024 },
+    { label: "phone-375", width: 375, height: 812 }
+  ]) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
+    await capture(page, resolve(stopFeedbackScreenshots, `needs-input-light-${viewport.label}.png`));
+    await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+    await capture(page, resolve(stopFeedbackScreenshots, `needs-input-dark-${viewport.label}.png`));
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, `Needs-input activity overflows ${viewport.label}.`);
+  }
+
   workspace = makeWorkspace();
   publishMode = "success";
   sessionMode = "success";
+  await page.setViewportSize({ width: 1280, height: 800 });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(".site-agent-publish-desktop").waitFor({ state: "visible" });
   await page.locator(".site-agent-publish-desktop").click();
@@ -372,7 +589,7 @@ try {
   assert.equal(await failedRunRow.getByText("Earlier attempt", { exact: true }).count(), 0, "A currently failed run must not be labelled as an earlier attempt.");
   await capture(page, resolve(screenshots, "failed-run-no-earlier-attempt-desktop.png"));
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ ok: true, desktop: "Escape focus + successful More focus + no preconfirm POST", phone: "Cancel/Escape focus + successful Preview-options focus + no preconfirm POST", failure: "dialog retained", staleSelection: "blocked in open confirmation", activeRun: "blocked", staleCandidate: "blocked", publish: "one exact confirmed POST", refreshFailure: "successful promotion remains closed and non-repeatable", activityHistory: "succeeded-run failed step marked earlier; failed enclosing run unmarked", preview: "actual canary helper rejects about:blank, stale URL, hidden ancestor, and stylesheet-loading interactive document before accepting complete" }));
+  console.log(JSON.stringify({ ok: true, desktop: "Escape focus + successful More focus + no preconfirm POST", phone: "Cancel/Escape focus + successful Preview-options focus + no preconfirm POST", failure: "dialog retained", stopFailure: "failed Stop stays in dialog, can retry or close safely", stopDialogActionDiagnostics, cancelledActivity: "expanded and collapsed rows use neutral cancelled state", staleSelection: "blocked in open confirmation", activeRun: "blocked", staleCandidate: "blocked", publish: "one exact confirmed POST", refreshFailure: "successful promotion remains closed and non-repeatable", activityHistory: "succeeded-run failed step marked earlier; failed enclosing run unmarked", preview: "actual canary helper rejects about:blank, stale URL, hidden ancestor, and stylesheet-loading interactive document before accepting complete" }));
 } finally {
   delayedStylesheet?.release();
   await browser.close();
@@ -493,6 +710,106 @@ async function assertDialog(page: Page, description: string) {
   assert.equal(await dialog.getByText(description, { exact: true }).count(), 1);
 }
 
+async function assertStopDialog(page: Page) {
+  const dialog = page.getByRole("dialog");
+  assert.equal(await dialog.count(), 1);
+  assert.equal(await dialog.getByRole("heading", { name: "Stop this website update?" }).count(), 1);
+  assert.equal(await dialog.getByText("Your published website will not be changed.", { exact: true }).count(), 1);
+}
+
+async function assertEnabledStopDialogActions(page: Page, theme: "light" | "dark", viewport: string) {
+  const actions = await page.getByRole("dialog").evaluate((dialog) => {
+    const currentTheme = document.documentElement.dataset.theme;
+    return [...dialog.querySelectorAll("button")]
+      .filter((button) => button.textContent === "Cancel" || button.textContent === "Stop")
+      .map((button) => {
+        const style = getComputedStyle(button);
+        return {
+          label: button.textContent,
+          disabled: button.disabled,
+          opacity: style.opacity,
+          color: style.color,
+          backgroundColor: style.backgroundColor,
+          currentTheme
+        };
+      });
+  });
+  assert.deepEqual(actions.map((action) => action.label), ["Cancel", "Stop"], `Stop dialog actions changed at ${theme} ${viewport}.`);
+  for (const action of actions) {
+    assert.equal(action.currentTheme, theme, `Stop dialog did not settle in the ${theme} theme at ${viewport}.`);
+    assert.equal(action.disabled, false, `${action.label} remained disabled after a failed Stop at ${theme} ${viewport}.`);
+    assert.equal(action.opacity, "1", `${action.label} retained disabled opacity after a failed Stop at ${theme} ${viewport}.`);
+    assert.notEqual(action.color, action.backgroundColor, `${action.label} text matched its background after a failed Stop at ${theme} ${viewport}.`);
+    assert(actionContrast(action.color, action.backgroundColor) >= 4.5, `${action.label} contrast is below 4.5:1 after a failed Stop at ${theme} ${viewport}.`);
+    stopDialogActionDiagnostics.push({ theme, viewport, ...action });
+  }
+}
+
+async function assertDangerHoverContrast(page: Page, theme: "light" | "dark", viewport: string) {
+  const stop = page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true });
+  await stop.hover();
+  await page.waitForFunction(`(() => {
+    const stop = [...document.querySelectorAll('.product-dialog-actions .button')].find((button) => button.textContent === 'Stop');
+    if (!stop) return false;
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = 'var(--product-color-error-text)';
+    document.documentElement.appendChild(probe);
+    const expected = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return getComputedStyle(stop).backgroundColor === expected;
+  })()`);
+  const colors = await stop.evaluate((button) => {
+    const style = getComputedStyle(button);
+    return { color: style.color, backgroundColor: style.backgroundColor };
+  });
+  assert(actionContrast(colors.color, colors.backgroundColor) >= 4.5, `Hovered Stop contrast is below 4.5:1 at ${theme} ${viewport}.`);
+  await page.mouse.move(0, 0);
+  await settleStopDialogTheme(page, theme);
+}
+
+function actionContrast(foreground: string, background: string) {
+  const parse = (value: string) => {
+    const match = value.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
+    assert(match, `Expected an opaque rgb color, received ${value}.`);
+    return match.slice(1).map((part) => Number(part) / 255).map((channel) => channel <= 0.04045
+      ? channel / 12.92
+      : ((channel + 0.055) / 1.055) ** 2.4);
+  };
+  const luminance = (channels: number[]) => channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  const [first, second] = [luminance(parse(foreground)), luminance(parse(background))];
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
+async function settleStopDialogTheme(page: Page, theme: "light" | "dark") {
+  await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+  await page.waitForFunction(() => {
+    let cancel: HTMLButtonElement | undefined;
+    let stop: HTMLButtonElement | undefined;
+    for (const button of document.querySelectorAll<HTMLButtonElement>(".product-dialog-actions .button")) {
+      if (button.textContent === "Cancel") cancel = button;
+      if (button.textContent === "Stop") stop = button;
+    }
+    if (!cancel || !stop) return false;
+    const cancelStyle = getComputedStyle(cancel);
+    const stopStyle = getComputedStyle(stop);
+    const probe = document.createElement("span");
+    probe.style.color = "var(--product-color-text)";
+    probe.style.backgroundColor = "var(--product-color-surface)";
+    document.documentElement.appendChild(probe);
+    const cancelColor = getComputedStyle(probe).color;
+    const cancelBackground = getComputedStyle(probe).backgroundColor;
+    probe.style.color = "var(--product-color-danger-action-text)";
+    probe.style.backgroundColor = "var(--product-color-error)";
+    const stopColor = getComputedStyle(probe).color;
+    const stopBackground = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return cancelStyle.color === cancelColor
+      && cancelStyle.backgroundColor === cancelBackground
+      && stopStyle.color === stopColor
+      && stopStyle.backgroundColor === stopBackground;
+  }, undefined, { timeout: 1_000, polling: 25 });
+}
+
 async function capture(page: Page, path: string) {
-  if (captureScreenshots) await page.screenshot({ path, fullPage: true });
+  if (captureScreenshots) await page.screenshot({ path, fullPage: true, animations: "disabled" });
 }

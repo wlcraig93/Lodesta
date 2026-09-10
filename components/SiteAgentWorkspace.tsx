@@ -138,6 +138,7 @@ export function SiteAgentWorkspace({
   const [liveAnnouncement, setLiveAnnouncement] = useState("");
   const [newActivity, setNewActivity] = useState(false);
   const [cancelRunTarget, setCancelRunTarget] = useState<OwnerSiteAgentRun>();
+  const [cancelRunError, setCancelRunError] = useState("");
   const previewMoreId = useId();
   const publishReasonId = useId();
   const composerUnavailableId = useId();
@@ -165,7 +166,8 @@ export function SiteAgentWorkspace({
   const focusedMessageRef = useRef("");
 
   const latestCandidate = workspace.versions.find((version) => version.status === "candidate");
-  const activeRun = workspace.runs.find((run) => run.status === "queued" || run.status === "running");
+  const activeRun = workspace.runs.find((run) => run.status === "running")
+    ?? workspace.runs.find((run) => run.status === "queued");
   const initialBuildActive = activeRun?.kind === "initial_build";
   const waitingRun = !activeRun ? workspace.runs.find((run) => run.status === "needs_input") : undefined;
   const latestCompletedRun = workspace.runs.find((run) =>
@@ -975,6 +977,7 @@ export function SiteAgentWorkspace({
     if (!workspace.session || busy || !["queued", "running", "needs_input"].includes(run.status)) return;
     const label = run.kind === "initial_build" ? "website build" : "website update";
     setBusy(true);
+    setCancelRunError("");
     setNotice(undefined);
     try {
       const response = await fetch("/api/site-agent/runs", {
@@ -983,15 +986,49 @@ export function SiteAgentWorkspace({
         body: JSON.stringify({ sessionId: workspace.session.id, runId: run.id })
       });
       if (!response.ok) throw new Error(await responseMessage(response));
-      setInstruction("");
-      await refresh();
+      const result = await response.json() as { run?: OwnerSiteAgentRun };
+      const confirmedRun = result.run;
+      if (!confirmedRun || confirmedRun.id !== run.id) throw new Error("Stopping the website update could not be confirmed.");
+      if (!["cancelled", "succeeded", "failed"].includes(confirmedRun.status)) {
+        throw new Error("Stopping the website update could not be confirmed.");
+      }
+      setWorkspace((current) => ({
+        ...current,
+        runs: current.runs.map((currentRun) => currentRun.id === confirmedRun.id ? confirmedRun : currentRun)
+      }));
       setCancelRunTarget(undefined);
+      if (confirmedRun.status !== "cancelled") {
+        setNotice(`This ${label} had already finished. Reload to see the latest workspace.`);
+        try {
+          await refresh();
+        } catch {
+          setNotice(`This ${label} had already finished. The editor could not refresh; reload to see the latest workspace.`);
+        }
+        return;
+      }
+      setInstruction("");
       setNotice(`The ${label} was stopped. Your published website was not changed.`);
+      try {
+        await refresh();
+      } catch {
+        setNotice(`The ${label} was stopped. The editor could not refresh; reload to see the latest workspace. Your published website was not changed.`);
+      }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setCancelRunError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
+  }
+
+  function openCancelRunDialog(run: OwnerSiteAgentRun) {
+    setCancelRunError("");
+    setCancelRunTarget(run);
+  }
+
+  function closeCancelRunDialog() {
+    if (busy) return;
+    setCancelRunTarget(undefined);
+    setCancelRunError("");
   }
 
   function handleTranscriptScroll() {
@@ -1222,7 +1259,7 @@ export function SiteAgentWorkspace({
                   <strong>{activeRun.status === "queued" ? "Waiting to start" : "Build in progress"}</strong>
                   <small>Your published website remains unchanged until you publish a finished draft.</small>
                 </span>
-                <button className="button danger-secondary" type="button" disabled={busy} onClick={() => setCancelRunTarget(activeRun)}>
+                <button className="button danger-secondary" type="button" disabled={busy} onClick={() => openCancelRunDialog(activeRun)}>
                   Stop {activeRun.kind === "initial_build" ? "build" : "update"}
                 </button>
               </div>
@@ -1230,7 +1267,7 @@ export function SiteAgentWorkspace({
             {waitingRun ? (
               <div className="site-agent-compose-pause-actions">
                 <span>You can answer whenever you are ready.</span>
-                <button className="button danger-secondary" type="button" disabled={busy} onClick={() => setCancelRunTarget(waitingRun)}>Stop update</button>
+                <button className="button danger-secondary" type="button" disabled={busy} onClick={() => openCancelRunDialog(waitingRun)}>Stop update</button>
               </div>
             ) : null}
             <textarea
@@ -1358,8 +1395,9 @@ export function SiteAgentWorkspace({
         confirmPendingLabel="Stopping"
         tone="danger"
         pending={busy}
+        error={cancelRunError}
         onConfirm={() => cancelRunTarget && void cancelRun(cancelRunTarget)}
-        onClose={() => setCancelRunTarget(undefined)}
+        onClose={closeCancelRunDialog}
       />
     </>
   );
@@ -1407,7 +1445,7 @@ function RunActivityCard({
           }}
         >
           <summary className="site-agent-activity-summary">
-            <ActivityDot status={run.status === "failed" ? "failed" : "succeeded"} />
+            <ActivityDot status={run.status} />
             <span>
               <strong>{run.progress.label}</strong>
               <small>{timestamp}</small>
@@ -1432,7 +1470,7 @@ function RunActivityCard({
   return (
     <article className={`site-agent-activity-card is-${run.status}`}>
       <header className="site-agent-activity-header">
-        <ActivityDot status={active ? "running" : run.status === "failed" ? "failed" : "succeeded"} />
+        <ActivityDot status={run.status} />
         <span>
           <strong>{run.progress.label}</strong>
           <small>{timestamp}</small>
@@ -1494,7 +1532,7 @@ function RunActivityBody({
       ) : null}
       {visibleCompleted.length ? <ActivityRows groups={visibleCompleted} succeededRun={run.status === "succeeded"} /> : null}
       {!active && snapshot && !hasMappedActivity ? <p className="site-agent-activity-empty">No detailed activity was recorded.</p> : null}
-      {(run.status === "needs_input" || run.status === "failed") ? <p className="site-agent-activity-guidance">{run.progress.detail}</p> : null}
+      {(run.status === "needs_input" || run.status === "failed" || run.status === "cancelled") ? <p className="site-agent-activity-guidance">{run.progress.detail}</p> : null}
       {detailed && snapshot?.hasEarlierActivity ? <small>Earlier activity is not shown.</small> : null}
     </>
   );
@@ -1515,7 +1553,7 @@ function ActivityRows({ groups, succeededRun = false }: { groups: OwnerActivityG
   );
 }
 
-function ActivityDot({ status }: { status: "running" | "succeeded" | "failed" }) {
+function ActivityDot({ status }: { status: OwnerSiteAgentRun["status"] | OwnerActivityGroup["status"] }) {
   return <span className={`site-agent-activity-dot is-${status}`} aria-hidden="true" />;
 }
 

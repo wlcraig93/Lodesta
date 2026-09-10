@@ -2177,7 +2177,7 @@ textarea {
 .button.danger {
   border-color: var(--product-color-error);
   background: var(--product-color-error);
-  color: var(--product-color-text-inverse);
+  color: var(--product-color-danger-action-text);
 }
 
 .button.danger:hover,
@@ -3930,6 +3930,17 @@ textarea {
 .site-agent-activity-dot.is-failed {
   border-color: var(--product-color-error-border);
   background: var(--product-color-error);
+}
+
+.site-agent-activity-dot.is-queued,
+.site-agent-activity-dot.is-cancelled {
+  border-color: var(--product-color-border-emphasis);
+  background: var(--product-color-surface-soft);
+}
+
+.site-agent-activity-dot.is-needs_input {
+  border-color: var(--product-color-intelligence-border);
+  background: var(--product-color-intelligence);
 }
 
 .site-agent-activity-list {

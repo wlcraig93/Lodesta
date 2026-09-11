@@ -208,16 +208,16 @@ async function verifyOperationJournalReads() {
     SandboxOperationError: Conflict
   });
   const missingResponse = await fetchStatus(adapter(async () => ({ exists: false }), async () => ({ content: "" })))(
-    new Request(`https://sandbox.example/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
+    new Request(`http://127.0.0.1/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
   assert.equal(missingResponse.status, 404);
   assert.deepEqual(await missingResponse.json(), { error: "operation_not_found", operationId });
   const transportResponse = await fetchStatus(adapter(async () => { throw existsFailure; }, async () => ({ content: "" })))(
-    new Request(`https://sandbox.example/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
+    new Request(`http://127.0.0.1/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
   assert.equal(transportResponse.status, 500);
   assert.equal((await transportResponse.json() as { error?: string }).error, "sandbox_operation_failed",
     "The GET handler misreported a journal transport failure as operation_not_found.");
   const malformedResponse = await fetchStatus(adapter(async () => ({ exists: true }), async () => ({ content: "null" })))(
-    new Request(`https://sandbox.example/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
+    new Request(`http://127.0.0.1/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
   assert.equal(malformedResponse.status, 500);
   assert.deepEqual(await malformedResponse.json(), { error: "operation_journal_invalid", operationId });
 }

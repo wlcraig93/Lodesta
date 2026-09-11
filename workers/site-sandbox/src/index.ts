@@ -991,9 +991,17 @@ async function readOperationJournal(
   sandbox: ReturnType<typeof getSandbox>,
   operationId: string
 ) {
-  const journal = await readJson<OperationJournal>(sandbox, `${operationsRoot}/${operationId}.json`).catch(() => undefined);
-  if (!journal) return undefined;
-  if (journal.operationId !== operationId || journal.schemaVersion !== 1) {
+  const path = `${operationsRoot}/${operationId}.json`;
+  const exists = await sandbox.exists(path);
+  if (exists.exists === false) return undefined;
+  const file = await sandbox.readFile(path, { encoding: "utf8" });
+  let journal: OperationJournal;
+  try {
+    journal = JSON.parse(file.content) as OperationJournal;
+  } catch {
+    throw new SandboxOperationError(500, { error: "operation_journal_invalid", operationId });
+  }
+  if (!journal || typeof journal !== "object" || journal.operationId !== operationId || journal.schemaVersion !== 1) {
     throw new SandboxOperationError(500, { error: "operation_journal_invalid", operationId });
   }
   return journal;

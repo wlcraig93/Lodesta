@@ -55,6 +55,8 @@ assert.match(
 );
 
 await verifyFreshMutationLock();
+await verifyOperationJournalReads();
+await verifySubmissionJournalReadSafety();
 await verifyQueuedJournalRace();
 await verifyPreparationObserver();
 await verifyCompletedOperationPoll();
@@ -157,6 +159,148 @@ async function verifyFreshMutationLock() {
   await assert.rejects(acquire(sandbox, "operation-third"), error => error instanceof Conflict && error.status === 409,
     "Old metadata does not grant a different request permission to delete another execution's lock.");
   assert.equal(writes, 1);
+}
+
+async function verifyOperationJournalReads() {
+  class Conflict extends Error {
+    constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
+  }
+  const operationId = "c".repeat(64);
+  const journal = { schemaVersion: 1, operationId, status: "running", phase: "validating" };
+  const read = productionWorkerFunction("readOperationJournal", {
+    operationsRoot: "/fixture/operations",
+    SandboxOperationError: Conflict
+  }) as (sandbox: {
+    exists(path: string): Promise<{ exists: boolean }>;
+    readFile(path: string, options: { encoding: string }): Promise<{ content: string }>;
+  }, operationId: string) => Promise<unknown>;
+  const adapter = (exists: () => Promise<{ exists: boolean }>, readFile: () => Promise<{ content: string }>) => ({ exists, readFile });
+
+  assert.equal(await read(adapter(async () => ({ exists: false }), async () => { throw new Error("unexpected read"); }), operationId), undefined,
+    "An explicitly absent journal did not remain the sole not-found case.");
+  const existsFailure = new TypeError("simulated exists RPC failure");
+  await assert.rejects(read(adapter(async () => { throw existsFailure; }, async () => ({ content: "" })), operationId), error => error === existsFailure,
+    "An exists RPC failure was misreported as a missing journal.");
+  const readFailure = new TypeError("simulated readFile RPC failure");
+  await assert.rejects(read(adapter(async () => ({ exists: true }), async () => { throw readFailure; }), operationId), error => error === readFailure,
+    "A readFile RPC failure was misreported as a missing journal.");
+  for (const content of ["{not-json", "null", JSON.stringify({ ...journal, operationId: "wrong" }), JSON.stringify({ ...journal, schemaVersion: 2 })]) {
+    await assert.rejects(
+      read(adapter(async () => ({ exists: true }), async () => ({ content })), operationId),
+      error => error instanceof Conflict && error.status === 500 && error.payload.error === "operation_journal_invalid",
+      "Malformed or mismatched retained journal bytes did not fail loudly."
+    );
+  }
+  assert.deepEqual(await read(adapter(async () => ({ exists: true }), async () => ({ content: JSON.stringify(journal) })), operationId), journal);
+
+  const status = productionWorkerFunction("operationStatus", {
+    readOperationJournal: read,
+    SandboxOperationError: Conflict,
+    publicOperationStatus: productionWorkerFunction("publicOperationStatus", {}),
+    startQueuedOperation: async () => { throw new Error("unexpected queued operation"); },
+    advanceRunningOperation: async () => { throw new Error("unexpected running operation"); }
+  });
+  const fetchStatus = (sandbox: unknown) => productionWorkerFetch({
+    authorized: () => true,
+    sandboxFor: async () => sandbox,
+    operationStatus: status,
+    json: (body: unknown, responseStatus = 200) => Response.json(body, { status: responseStatus }),
+    SandboxOperationError: Conflict
+  });
+  const missingResponse = await fetchStatus(adapter(async () => ({ exists: false }), async () => ({ content: "" })))(
+    new Request(`https://sandbox.example/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
+  assert.equal(missingResponse.status, 404);
+  assert.deepEqual(await missingResponse.json(), { error: "operation_not_found", operationId });
+  const transportResponse = await fetchStatus(adapter(async () => { throw existsFailure; }, async () => ({ content: "" })))(
+    new Request(`https://sandbox.example/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
+  assert.equal(transportResponse.status, 500);
+  assert.equal((await transportResponse.json() as { error?: string }).error, "sandbox_operation_failed",
+    "The GET handler misreported a journal transport failure as operation_not_found.");
+  const malformedResponse = await fetchStatus(adapter(async () => ({ exists: true }), async () => ({ content: "null" })))(
+    new Request(`https://sandbox.example/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
+  assert.equal(malformedResponse.status, 500);
+  assert.deepEqual(await malformedResponse.json(), { error: "operation_journal_invalid", operationId });
+}
+
+async function verifySubmissionJournalReadSafety() {
+  const operationId = "d".repeat(64);
+  const payloadHash = "e".repeat(64);
+  const input = { action: "apply", expectedRevision: oldRevision, files: [], publicInputJson: "{}" };
+  class Conflict extends Error {
+    constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
+  }
+  const readOperationJournal = productionWorkerFunction("readOperationJournal", {
+    operationsRoot: "/fixture/operations",
+    SandboxOperationError: Conflict
+  });
+  const submit = productionWorkerFunction("submitGeneration", {
+    canonicalFiles: (files: unknown) => files,
+    canonicalJson: JSON.stringify,
+    digest: async (value: string) => value.includes(":apply:") ? operationId : payloadHash,
+    readOperationJournal,
+    operationsRoot: "/fixture/operations",
+    readActiveGeneration: async () => ({ operationId: "another-operation", revision: oldRevision }),
+    operationRequestPath: () => "/fixture/operations/request.json",
+    writeOperationJournal: async (_sandbox: unknown, journal: unknown) => { writes.push({ kind: "journal", journal }); }
+  });
+  const writes: unknown[] = [];
+  const commands: string[] = [];
+  const sandbox = (exists: () => Promise<{ exists: boolean }>, readFile: () => Promise<{ content: string }>) => ({
+    exists,
+    readFile,
+    mkdir: async () => undefined,
+    exec: async (command: string) => { commands.push(command); return { success: true }; },
+    writeFile: async (path: string, content: string) => { writes.push({ kind: "file", path, content }); }
+  });
+
+  for (const fixture of [{
+    name: "exists RPC failure",
+    error: new TypeError("simulated retained journal exists RPC failure"),
+    adapter: () => sandbox(async () => { throw new TypeError("simulated retained journal exists RPC failure"); }, async () => ({ content: "" }))
+  }, {
+    name: "readFile RPC failure",
+    error: new TypeError("simulated retained journal readFile RPC failure"),
+    adapter: () => sandbox(async () => ({ exists: true }), async () => { throw new TypeError("simulated retained journal readFile RPC failure"); })
+  }, {
+    name: "malformed JSON",
+    error: undefined,
+    adapter: () => sandbox(async () => ({ exists: true }), async () => ({ content: "{not-json" }))
+  }]) {
+    await assert.rejects(submit(fixture.adapter(), "session", input), error => fixture.error
+      ? error instanceof TypeError && error.message === fixture.error.message
+      : error instanceof Conflict && error.payload.error === "operation_journal_invalid",
+    `Submission continued after an initial ${fixture.name}.`);
+    assert.deepEqual(commands, [], `Submission acquired a lock after an initial ${fixture.name}.`);
+    assert.deepEqual(writes, [], `Submission wrote bytes after an initial ${fixture.name}.`);
+  }
+
+  let readAttempts = 0;
+  const secondReadFailure = new TypeError("simulated second journal read RPC failure");
+  await assert.rejects(submit(sandbox(async () => {
+    readAttempts += 1;
+    if (readAttempts === 1) return { exists: false };
+    throw secondReadFailure;
+  }, async () => ({ content: "" })), "session", input), error => error === secondReadFailure,
+  "Submission continued after the journal re-read under its acceptance lock failed.");
+  assert.deepEqual(commands, [
+    `mkdir /fixture/operations/${operationId}.accept.lock`,
+    `rm -rf /fixture/operations/${operationId}.accept.lock`
+  ], "Submission did not release only its acquired lock after the second journal read failed.");
+  assert.deepEqual(writes, [], "Submission wrote bytes after its second journal read failed.");
+
+  commands.length = 0;
+  const accepted = await submit(sandbox(async () => ({ exists: false }), async () => ({ content: "" })), "session", input) as { operationId?: string; status?: string };
+  assert.equal(accepted.operationId, operationId);
+  assert.equal(accepted.status, "queued", "A truly absent journal was not accepted as a new queued operation.");
+  assert.equal(writes.length, 2, "A new operation did not write exactly one request and one journal.");
+
+  writes.length = 0;
+  commands.length = 0;
+  const retained = { schemaVersion: 1, operationId, payloadHash, status: "running", phase: "validating" };
+  const replayed = await submit(sandbox(async () => ({ exists: true }), async () => ({ content: JSON.stringify(retained) })), "session", input) as { submissionReplayed?: boolean };
+  assert.equal(replayed.submissionReplayed, true, "An existing journal was not replayed.");
+  assert.deepEqual(commands, [], "Existing-journal replay acquired an acceptance lock.");
+  assert.deepEqual(writes, [], "Existing-journal replay rewrote retained bytes.");
 }
 
 async function verifyQueuedJournalRace() {

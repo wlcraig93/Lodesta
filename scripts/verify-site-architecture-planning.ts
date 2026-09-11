@@ -17,6 +17,7 @@ import {
   siteArchitectureSystemPrompt,
   siteArchitectureSystemPromptFor,
   validateSiteArchitecturePlan,
+  SiteAuthoringTerminalError,
   type RawSiteArchitecturePlan
 } from "../packages/site-agent";
 import {
@@ -535,6 +536,12 @@ assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), 
 assert.notEqual(siteArchitecturePromptIdentityFor("commercial-core-message-target"), siteArchitecturePromptIdentityFor("commercial-core-pull"));
 const reconstructionSource = await readFile("scripts/reconstruct-site-agent-workspace.ts", "utf8");
 const reconstructionRendererSource = await readFile("scripts/render-reconstructed-site-agent-workspace.ts", "utf8");
+const workflowSource = await readFile("packages/site-platform/workflow.ts", "utf8");
+assert.match(
+  workflowSource,
+  /errorCode: isSiteAuthoringTerminalError\(error\)\s*\? error\.code\s*:\s*error instanceof Error \? error\.name : "site_architecture_failed"/,
+  "Architecture event closure must retain a typed terminal provider failure code."
+);
 assert(
   reconstructionSource.includes("retainedContentModeForAuthoringProfile(authoringProfile)"),
   "Retained full-site runs cannot reconstruct the evidence mode selected by their authoring profile."
@@ -625,6 +632,132 @@ assert.equal(request?.model, siteArchitectureModelId);
 assert.deepEqual(request?.reasoning, { effort: "high" });
 assert.equal((request?.text as { format?: { name?: string } })?.format?.name, "exhaustive_site_architecture");
 
+let quotaAttempts = 0;
+const quotaAgent = new WebsiteManagerAgent({
+  create: async () => {
+    quotaAttempts += 1;
+    throw Object.assign(new Error("429 You have no credits remaining. Add credits to continue using the API."), {
+      status: 429,
+      headers: { "retry-after": "0" }
+    });
+  }
+});
+await assert.rejects(
+  () => quotaAgent.architect({ inventory }),
+  (error: unknown) => {
+    assert(error instanceof SiteAuthoringTerminalError);
+    assert.equal(error.code, "provider_quota_exhausted");
+    assert.equal(error.category, "provider");
+    assert.equal(error.retryableByOwner, false);
+    return true;
+  }
+);
+assert.equal(quotaAttempts, 2, "Architecture quota failures retain the existing two-attempt transport retry boundary.");
+
+let statuslessQuotaAttempts = 0;
+const statuslessQuotaAgent = new WebsiteManagerAgent({
+  create: async () => {
+    statuslessQuotaAttempts += 1;
+    throw new Error("429 You have no credits remaining. Add credits to continue using the API.");
+  }
+});
+await assert.rejects(
+  () => statuslessQuotaAgent.architect({ inventory }),
+  (error: unknown) => {
+    assert(error instanceof SiteAuthoringTerminalError);
+    assert.equal(error.code, "provider_quota_exhausted");
+    assert.equal(error.category, "provider");
+    assert.equal(error.retryableByOwner, false);
+    return true;
+  }
+);
+assert.equal(statuslessQuotaAttempts, 1, "A statusless retained quota message must classify without inventing a transport retry.");
+
+let terminalAttempts = 0;
+const deadline = new SiteAuthoringTerminalError(
+  "deadline_exhausted",
+  "budget",
+  false,
+  "architecture fixture deadline exhausted"
+);
+const terminalAgent = new WebsiteManagerAgent({
+  create: async () => {
+    terminalAttempts += 1;
+    throw deadline;
+  }
+});
+await assert.rejects(
+  () => terminalAgent.architect({ inventory }),
+  (error: unknown) => {
+    assert.equal(error, deadline);
+    return true;
+  }
+);
+assert.equal(terminalAttempts, 1, "Preclassified terminal failures must not be reclassified or retried.");
+
+let transientAttempts = 0;
+const transientAgent = new WebsiteManagerAgent({
+  create: async () => {
+    transientAttempts += 1;
+    throw Object.assign(new Error("429 rate limit temporarily unavailable"), {
+      status: 429,
+      headers: { "retry-after": "0" }
+    });
+  }
+});
+await assert.rejects(
+  () => transientAgent.architect({ inventory }),
+  (error: unknown) => {
+    assert(error instanceof SiteAuthoringTerminalError);
+    assert.equal(error.code, "provider_temporarily_unavailable");
+    assert.equal(error.category, "provider");
+    assert.equal(error.retryableByOwner, true);
+    return true;
+  }
+);
+assert.equal(transientAttempts, 2, "Provider classification must not add an architecture retry beyond transport retry.");
+
+let invalidJsonAttempts = 0;
+const invalidJsonAgent = new WebsiteManagerAgent({
+  create: async () => {
+    invalidJsonAttempts += 1;
+    return architectureResponse("{not valid json") as never;
+  }
+});
+await assert.rejects(
+  () => invalidJsonAgent.architect({ inventory }),
+  (error: unknown) => {
+    assert(error instanceof SyntaxError);
+    assert(!(error instanceof SiteAuthoringTerminalError));
+    return true;
+  }
+);
+assert.equal(invalidJsonAttempts, 1, "Local JSON parsing must remain outside provider-error classification.");
+
+let invalidPlanAttempts = 0;
+const invalidPlanAgent = new WebsiteManagerAgent({
+  create: async () => {
+    invalidPlanAttempts += 1;
+    return architectureResponse(JSON.stringify({
+      ...rawPlan,
+      sourceDispositions: {
+        ...rawPlan.sourceDispositions,
+        "/": { disposition: "preserved", targetPath: "/ant-control" }
+      }
+    })) as never;
+  }
+});
+await assert.rejects(
+  () => invalidPlanAgent.architect({ inventory }),
+  (error: unknown) => {
+    assert(error instanceof SiteAuthoringTerminalError);
+    assert.equal(error.code, "authoring_unresolved");
+    assert.notEqual(error.code, "provider_quota_exhausted");
+    return true;
+  }
+);
+assert.equal(invalidPlanAttempts, 1, "Local plan validation must remain outside provider-error classification.");
+
 request = undefined;
 const commercialCore = await agent.architect({
   inventory,
@@ -701,5 +834,24 @@ function page(id: string, path: string, title: string, extractedText: string, he
     producer: "test",
     inputHash: `sha256:${"e".repeat(64)}`,
     createdAt: "2026-08-03T00:00:00.000Z"
+  };
+}
+
+function architectureResponse(outputText: string) {
+  return {
+    id: "response_architecture_fixture",
+    model: siteArchitectureModelId,
+    output: [],
+    output_text: outputText,
+    status: "completed",
+    error: null,
+    incomplete_details: null,
+    usage: {
+      input_tokens: 1_000,
+      input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+      output_tokens: 500,
+      output_tokens_details: { reasoning_tokens: 100 },
+      total_tokens: 1_500
+    }
   };
 }

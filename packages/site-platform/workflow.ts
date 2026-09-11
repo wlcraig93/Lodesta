@@ -1705,7 +1705,9 @@ export class SiteAuthoringWorkflow {
         apiProvider: "openai",
         modelId: siteArchitectureModelId,
         modelDurationMs: Date.now() - startedAt,
-        errorCode: error instanceof Error ? error.name : "site_architecture_failed",
+        errorCode: isSiteAuthoringTerminalError(error)
+          ? error.code
+          : error instanceof Error ? error.name : "site_architecture_failed",
         summary: { sourceInventoryHash, sourcePaths: inventory.length }
       }).catch(() => undefined);
       throw error;

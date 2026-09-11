@@ -750,16 +750,24 @@ async function structuredResponse(input: {
 }) {
   assertOpenAiStrictJsonSchema(input.schema, input.name);
   const startedAt = Date.now();
-  const response = await createWithTransportRetry(input.client, routedResponseParams({
-    model: input.route.modelId, instructions: input.system,
-    input: [{ role: "user", type: "message", content: input.content as never }],
-    store: false, parallel_tool_calls: false, reasoning: { effort: input.reasoningEffort },
-    text: { verbosity: siteAgentTextVerbosity, format: { type: "json_schema", name: input.name, strict: true, schema: input.schema } },
-    max_output_tokens: input.maxOutputTokens
-  }, input.providerCapabilities), {
-    signal: input.signal,
-    modelId: input.route.modelId
-  });
+  let response: ManagerResponse;
+  try {
+    response = await createWithTransportRetry(input.client, routedResponseParams({
+      model: input.route.modelId, instructions: input.system,
+      input: [{ role: "user", type: "message", content: input.content as never }],
+      store: false, parallel_tool_calls: false, reasoning: { effort: input.reasoningEffort },
+      text: { verbosity: siteAgentTextVerbosity, format: { type: "json_schema", name: input.name, strict: true, schema: input.schema } },
+      max_output_tokens: input.maxOutputTokens
+    }, input.providerCapabilities), {
+      signal: input.signal,
+      modelId: input.route.modelId
+    });
+  } catch (error) {
+    // Keep parsing and plan validation below outside this boundary: only the
+    // provider request itself carries a provider failure classification.
+    if (isSiteAuthoringTerminalError(error)) throw error;
+    throw classifyModelProviderError(error);
+  }
   if (!response.output_text) throw new Error("Website manager response did not contain structured output text.");
   return { value: JSON.parse(response.output_text) as unknown, usage: usageForModel(input.route.modelId, response.usage, Date.now() - startedAt) };
 }

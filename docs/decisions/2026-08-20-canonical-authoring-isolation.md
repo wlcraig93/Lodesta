@@ -39,6 +39,12 @@ Capability CSS belongs to the sandbox/compiler toolchain, not the immutable runt
 
 Live workspace previews compile with the active scaffold and intentionally receive the new containment after deployment. This changes preview rendering without rewriting workspace source or retained finalized artifacts.
 
+### September 13 containment correction
+
+The reviewed Luna edit exposed a conflict between authored panel insets and the platform's redundant header-derived `height`/`max-height`. With a measured header bottom of 135px and authored `top: 6.4rem; bottom: 0; height: auto`, the inherited maximum height left a 33px strip of inert page visible. A focused browser fixture reproduces this independently of model execution.
+
+Use the existing fixed top/bottom insets to establish remaining viewport height; remove the separate header-derived height and maximum height. This preserves the accepted containment boundary, opaque token surface, internal scrolling, focus/scroll locking and authored drawer/sheet overrides. It does not restore platform artwork, impose visual composition or add authoring orchestration. The fixture covers both overflowing default content and the authored-top regression. Capability CSS still belongs to the compiler toolchain: deployment changes future builds and live workspace previews, never retained finalized artifact bytes or runtime JavaScript. The regenerated toolchain identity is `lodesta-static-site-workspace@sha256:76721e43b34a24cad5984ad396a424ad67d1b24220f1d51d332cc9e0cd21929a`; deployment evidence is recorded separately in the authoring status.
+
 Before the skill split, the exact R8 eight-item initial-build skill, identity, compact prompt identity, V2 runtime, and authoring profile were frozen under `.design/canonical-authoring-bakeoff/` for private experiment use only. The fixture is unreachable from live profile selection.
 
 ## Evidence sequence

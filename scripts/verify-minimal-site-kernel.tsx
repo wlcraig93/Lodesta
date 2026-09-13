@@ -44,7 +44,7 @@ assert.match(v4Styles, /navigation-panel.*hidden/s);
 assert.match(v4Styles, /data-lodesta-menu-toggle.*min-height:\s*2\.75rem/s);
 assert.match(v4Styles, /navigation-behavior="modal".*position:\s*fixed/s);
 assert.match(v4Styles, /inset:\s*var\(--lodesta-navigation-top, 0px\) 0 0/);
-assert.match(v4Styles, /height:\s*calc\(100dvh - var\(--lodesta-navigation-top, 0px\)\)/);
+assert.doesNotMatch(v4Styles, /(?:height|max-height):\s*calc\(100dvh - var\(--lodesta-navigation-top/);
 assert.match(v4Styles, /overscroll-behavior:\s*contain/);
 assert.match(v4Styles, /background:\s*var\(--site-color-background, Canvas\)/);
 assert.doesNotMatch(v4Styles, /navigation-icon|transition:|navigation-panel\]\s+a|navigation-panel\].*>\s+nav/);

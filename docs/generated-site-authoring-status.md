@@ -1,12 +1,33 @@
 # Generated-site authoring status
 
-Date: 2026-09-11
+Date: 2026-09-13
 
 ## Current decision: generator still under evaluation
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current checkpoint: context treatment deployed; funding and sandbox reliability still unresolved
+### Current checkpoint: funding restored; released context compared; neither fresh candidate accepted
+
+Journal-read correction `26af1b577012994c4c61a7de2c298f428e5b3883` passed CI `34601247274` and coordinated release `34601768196`. Independent evidence matches web `52846f80-7030-4969-ade6-5a207f9ceb13`, worker `4c67a9e7-f3f5-44f6-8aea-81425c124f38`, its startup identity and active blue sandbox `sandbox_deployment_5a90c0442675d8620cdd1457a35e3bc0` to that SHA. The first release canary and a separate fresh-session ten-pair canary passed. Health was verified, email disabled and maintenance released. This validates the narrow reader correction and tested operations, not the unknown underlying historical provider incident. Evidence: `.design/v4-production-readiness-2026-09-04/release-26af1b57/` and the `settled-26af1b57-authorized-canary` packet under recovery-validation.
+
+The user's API funding is restored and two fresh authoring runs completed on that same release/context and frozen Tree authority. Production remains Luna; Terra is an explicit experiment, not a default switch. Costs below are catalog estimates, not invoice totals.
+
+| Fresh candidate | Routes | Wall time | Estimated model cost | Delivery unchanged |
+| --- | ---: | ---: | ---: | --- |
+| Luna `version_48274f2b98eb797c7c3d0ff1fc37729a` | 29 | 18m20s | $0.21254179 | Rejected |
+| Terra `version_43f2aca9d85cabafcabe982f952862e1` | 34 | 29m10s | $2.70465295 | Rejected |
+
+Both pass the hard gate and preserve the captured 4.7 Google display/link. All-route exact-artifact captures have no recorded errors or overflow (87 Luna and 102 Terra viewport observations). Neither fact establishes launch quality. Luna improves authentic asset choice, company-specific proof, form-status guidance and desktop article layout, but rewrites Mike R.'s quotation, mislabels a construction scene as clearing, and puts generic asides before mobile answers. Terra fixes the quotation, explicit clearing claim, narrow article order and full-screen menu; it instead crops the worker out of its desktop/tablet hero, repeats the nonexistent required-marker wording, delays its phone form and thins useful source content. Terra is not a justified quality upgrade at roughly 12.7 times this Luna run's cost. Different fresh architecture/provider/date and repair paths prevent causal or reliability claims.
+
+Luna retained one authored compilation failure and one inspection failure whose cause payload expired before final collection; do not label that unexplained event infrastructure-clean. Terra self-repaired two compilation errors and two contrast finish failures. Its initial caller bootstrap TypeError and two local collector fetch failures remain separate from hosted model execution. Native inspection blocks and useful proof excerpts reached the author; the local packet omits inspection image binaries, so the exact pixels visible during those calls cannot be reconstructed from that packet. No evidence justifies weakening security, adding another prompt layer, or adding orchestration.
+
+One explicit reviewer-directed Luna edit (`run_1520846874a84f0fa4199d3c9349380f`, $2 fuse) produced `version_f7c2bf2c4f1ed4acf31a79d17e4a7928` in 10m17.906s for $0.12216439 estimated, with no failed tools and a passed hard gate. The first invocation stopped before reservation/enqueue on a caller connection timeout; a separately reviewed full-preflight retry succeeded. The edit fixes the quotation, construction-photo placement, mobile answer order and specific source omissions while preserving routes, legal/form authority, assets and rating/link. All 87 route/viewport observations have no recorded errors or overflow. It remains a private manual engineering-QA edit, not a production critic, mandatory second pass or fresh-build acceptance. About's headline remains oversized, Contact still delays its first field, Gallery retains one stale clearing-photo claim, and opened navigation leaves a bottom strip. No site was published and no inquiry or notification was sent.
+
+The navigation strip has a reproduced platform cause: header-derived maximum height competes with authored top/bottom insets. The existing runtime fixture measures a 33px gap with a 135px header and authored 102px top. Removing only redundant `height`/`max-height` makes this case fill the viewport while preserving overflowing default-panel containment, drawer/sheet overrides and keyboard/scroll behavior. TypeScript, full local preflight (including generated-site browser rendering) and launch-flow smoke pass. A separate local derivative of the exact retained home HTML/CSS removes only those two platform declarations, preserving authored CSS bytes: the 32.70px phone and 26.39px tablet gaps become zero, with focus, Escape and scroll behavior preserved. That diagnostic uses locally built unchanged V4 JavaScript and does not claim an independently verified retained runtime-patch hash. Existing authored header overlap remains and is part of the next scoped site edit. Evidence: `recovery-validation/modal-inset-regression/`. The regenerated toolchain identity is `lodesta-static-site-workspace@sha256:76721e43b34a24cad5984ad396a424ad67d1b24220f1d51d332cc9e0cd21929a`. Coordinated deployment is pending; this correction cannot change the already-retained candidate. It adds no prompt, critic, retry or state machine. See the September 13 addendum in `docs/decisions/2026-08-20-canonical-authoring-isolation.md`.
+
+Private evidence: `.design/image-authoring-treatment-2026-09-10/recovery-validation/{fresh-luna-context-funded-26af1b57,fresh-terra-context-funded-26af1b57,funded-luna-reviewed-edit-26af1b57}/` and the two version-specific `funded-context/DESIGN_REVIEW.md` files under `.design/v4-production-readiness-2026-09-04/candidate-reviews/`.
+
+### Earlier checkpoint: context treatment deployed; funding and sandbox reliability unresolved at that time
 
 Provider-classification correction `10e5697198a31796090b565bf8302be5190a8edc` passed all five CI jobs (`34551917702`) and coordinated release `34552335639`. Independent evidence confirms exact-SHA web `935367ad-6a2a-4b07-b9cc-4e635490631b`, worker `16a0b835-2785-4aa5-ab74-1af1ab6141f3`, worker startup and active green sandbox `sandbox_deployment_98a5225202048a18eb8e30c74b0a8cca`. Live health has no errors, email notifications remain disabled, and maintenance is released.
 

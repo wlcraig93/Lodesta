@@ -1,6 +1,8 @@
 // V4 owns modal state and spatial containment without owning trigger artwork,
 // menu composition, breakpoints, spacing, typography, or motion. Zero-specificity
 // defaults remain deliberately overridable by authored site classes.
+// Fixed top/bottom insets supply the remaining viewport height. A separate height
+// or max-height tied to the measured header would conflict with authored insets.
 export const platformCapabilityStyles = `:where([data-lodesta-menu-toggle]) {
   min-width: 2.75rem;
   min-height: 2.75rem;
@@ -17,8 +19,6 @@ export const platformCapabilityStyles = `:where([data-lodesta-menu-toggle]) {
   inset: var(--lodesta-navigation-top, 0px) 0 0;
   width: 100%;
   max-width: none;
-  height: calc(100dvh - var(--lodesta-navigation-top, 0px));
-  max-height: calc(100dvh - var(--lodesta-navigation-top, 0px));
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--site-color-background, Canvas);

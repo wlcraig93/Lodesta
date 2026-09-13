@@ -20,7 +20,7 @@ await assert.rejects(() => buildSiteRuntimeBytes("site-runtime-v2"), /only site-
 assert.match(v4CapabilityStyles, /navigation-panel\]\[hidden\].*display:\s*none\s*!important/s);
 assert.match(v4CapabilityStyles, /navigation-behavior="modal".*position:\s*fixed/s);
 assert.match(v4CapabilityStyles, /inset:\s*var\(--lodesta-navigation-top, 0px\) 0 0/);
-assert.match(v4CapabilityStyles, /height:\s*calc\(100dvh - var\(--lodesta-navigation-top, 0px\)\)/);
+assert.doesNotMatch(v4CapabilityStyles, /(?:height|max-height):\s*calc\(100dvh - var\(--lodesta-navigation-top/);
 assert.match(v4CapabilityStyles, /background:\s*var\(--site-color-background, Canvas\)/);
 assert(!v4CapabilityStyles.includes("navigation-icon"), "V4 retained platform trigger artwork.");
 assert(!/navigation-panel[^}]*\b(?:display:\s*(?:flex|grid)|align-items|min-height)/s.test(v4CapabilityStyles), "V4 imposed inner navigation-link layout.");
@@ -29,7 +29,7 @@ assert(!/\b(?:inset|height|width|position)[^;]*!important/.test(v4CapabilityStyl
 assert(
   platformCapabilityStyles.includes('[data-lodesta-navigation-panel]:not([hidden])')
     && platformCapabilityStyles.includes('inset: var(--lodesta-navigation-top, 0px) 0 0;')
-    && platformCapabilityStyles.includes('height: calc(100dvh - var(--lodesta-navigation-top, 0px));')
+    && !platformCapabilityStyles.includes('height: calc(100dvh - var(--lodesta-navigation-top, 0px));')
     && !/\b(?:inset|height|width|position)[^;]*!important/.test(platformCapabilityStyles),
   "Navigation geometry is not author-overridable."
 );
@@ -299,6 +299,7 @@ try {
   await v4Toggle.click();
   assert.equal(await v4Toggle.getAttribute("aria-expanded"), "true");
   assert(await v4Panel.isVisible(), "V4 did not open the authored panel.");
+  await v4Panel.locator("nav").evaluate((element) => { element.style.minHeight = "1200px"; });
   assert.deepEqual(await v4Panel.evaluate((element) => {
     const computed = getComputedStyle(element);
     const bounds = element.getBoundingClientRect();
@@ -310,7 +311,8 @@ try {
       overflowY: computed.overflowY,
       overscrollBehavior: computed.overscrollBehavior,
       backgroundColor: computed.backgroundColor,
-      linkDisplay: getComputedStyle(element.querySelector("a")!).display
+      linkDisplay: getComputedStyle(element.querySelector("a")!).display,
+      containsOverflow: element.scrollHeight > element.clientHeight
     };
   }), {
     position: "fixed",
@@ -320,7 +322,8 @@ try {
     overflowY: "auto",
     overscrollBehavior: "contain",
     backgroundColor: "rgb(255, 255, 255)",
-    linkDisplay: "grid"
+    linkDisplay: "grid",
+    containsOverflow: true
   }, "V4 did not provide contained modal geometry while preserving authored link layout.");
   assert.deepEqual(await v4.evaluate(() => ({
     bodyOverflow: document.body.style.overflow,
@@ -329,6 +332,7 @@ try {
     focusedLabel: document.activeElement?.getAttribute("aria-label")
   })), { bodyOverflow: "hidden", rootOverflow: "hidden", mainInert: true, focusedLabel: "Close navigation" }, "V4 did not retain trusted modal state and focus behavior.");
   await v4.keyboard.press("Escape");
+  await v4Panel.locator("nav").evaluate((element) => { element.style.minHeight = ""; });
   assert.equal(await v4Toggle.getAttribute("aria-expanded"), "false");
   assert.equal(await v4.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Open navigation", "V4 did not restore trigger focus.");
   const floorToggle = v4.locator('#v4-floor-toggle');
@@ -346,6 +350,36 @@ try {
   await drawerToggle.click();
   assert.equal(await v4.locator("#v4-drawer").evaluate((element) => Math.round(element.getBoundingClientRect().width)), 312, "Authored V4 drawer geometry did not override the containment default.");
   await v4.keyboard.press("Escape");
+  await v4.evaluate(() => {
+    const header = document.querySelector<HTMLElement>(".v4-header");
+    if (!header) throw new Error("Expected fixture header was unavailable.");
+    header.style.height = "135px";
+    const style = document.createElement("style");
+    style.id = "v4-authored-top-geometry";
+    style.textContent = "#v4-navigation{top:6.4rem;bottom:0;height:auto}";
+    document.head.appendChild(style);
+    dispatchEvent(new Event("resize"));
+  });
+  await v4.waitForTimeout(100);
+  await v4Toggle.click();
+  const authoredTopBounds = await v4Panel.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return {
+      runtimeTop: element.style.getPropertyValue("--lodesta-navigation-top"),
+      top: Math.round(bounds.top), bottom: Math.round(bounds.bottom), height: Math.round(bounds.height),
+      overflowY: getComputedStyle(element).overflowY
+    };
+  });
+  assert.deepEqual(authoredTopBounds, { runtimeTop: "135px", top: 102, bottom: 844, height: 742, overflowY: "auto" },
+    "An authored modal top with bottom:0 and height:auto did not fill the remaining viewport while retaining containment.");
+  await v4.keyboard.press("Escape");
+  await v4.evaluate(() => {
+    document.querySelector("#v4-authored-top-geometry")?.remove();
+    const header = document.querySelector<HTMLElement>(".v4-header");
+    if (!header) throw new Error("Expected fixture header was unavailable.");
+    header.style.height = "72px";
+    dispatchEvent(new Event("resize"));
+  });
   await v4.fill('input[name="name"]', "V4 visitor");
   const formCountBeforeV4 = forms.length;
   await v4.click('form button[type="submit"]');

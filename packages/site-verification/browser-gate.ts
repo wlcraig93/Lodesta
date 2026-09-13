@@ -451,7 +451,7 @@ async function runArtifactBrowserGateOnce(input: {
         if (metrics.textSurfaceBoundaryCount > 0) {
           routeFindings.push(finding(
             "render.text_surface_boundary",
-            `${metrics.textSurfaceBoundaryCount} meaningful text element(s) cross a positioned decorative color boundary at ${viewport.name}. Keep each text block on one stable, readable surface. Examples: ${metrics.textSurfaceBoundaryExamples.join("; ")}.`,
+            `${metrics.textSurfaceBoundaryCount} possible text/decorative-surface overlap(s) at ${viewport.name}. Inspect actual layering and readability: these geometry estimates do not resolve paint order or nearer backgrounds. Do not change readable content solely to clear this advisory. Examples: ${metrics.textSurfaceBoundaryExamples.join("; ")}.`,
             route.path,
             "render",
             "warning"
@@ -2045,7 +2045,7 @@ const browserInspectionSource = String.raw`(() => {
         (colorTools.textFor(element).length >= 20 || Boolean(element.closest("h1")))
         && !element.closest('[aria-hidden="true"],svg'))
     ])];
-    const conventionalLowContrast = contrastText
+    const lowContrast = contrastText
       .map((element) => ({ element, ...colorTools.contrastFor(element) }))
       .filter((item) => item.reliable && item.ratio < item.requiredRatio);
     const resolvedPixel = (value) => {
@@ -2096,14 +2096,12 @@ const browserInspectionSource = String.raw`(() => {
               background.channels[1],
               background.channels[2],
               background.channels[3] * pseudoOpacity
-            ],
-            backgroundValue: pseudo.backgroundColor
+            ]
           });
         }
       }
       return surfaces;
     };
-    const pseudoLowContrast = [];
     const textSurfaceBoundaries = [];
     for (const element of contrastText) {
       const elementRect = rectValue(element.getBoundingClientRect());
@@ -2130,18 +2128,16 @@ const browserInspectionSource = String.raw`(() => {
         const large = fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700);
         const requiredRatio = large ? 3 : 4.5;
         const ratio = colorTools.contrast(effectiveForeground, surface.background);
-        if (ratio < requiredRatio) pseudoLowContrast.push({
-          element,
-          reliable: true,
-          ratio,
-          requiredRatio,
-          foreground: foregroundValue,
-          background: surface.backgroundValue
-        });
+        // Pseudo geometry does not establish the painted text backdrop. Keep
+        // this signal advisory, including full coverage, rather than treating
+        // its uncomposited colors as a proven accessibility failure.
+        if (ratio < requiredRatio && (overlapRatio < 0.08 || overlapRatio > 0.92)) textSurfaceBoundaries.push(
+          colorTools.selectorFor(element) + " \"" + colorTools.textFor(element).slice(0, 80)
+          + "\" may lose contrast over " + colorTools.selectorFor(surface.ancestor) + surface.pseudoName
+          + " (paint order unverified)"
+        );
       }
     }
-    const lowContrast = [...conventionalLowContrast, ...pseudoLowContrast].filter((item, index, items) =>
-      items.findIndex((candidate) => candidate.element === item.element && candidate.background === item.background) === index);
     const managed = [...document.querySelectorAll("[data-lodesta-map],[data-lodesta-form-id],[data-lodesta-gallery],[data-lodesta-disclosure]")];
     const clippedManagedContent = managed.filter((element) => {
       if (!colorTools.visible(element)) return false;

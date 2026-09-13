@@ -184,6 +184,14 @@ Two Luna-only architecture probes are retained. Wording alone failed to broaden 
 
 Private evidence and detailed review: `affordable-comparison/hd-luna/luna/` within the September 4 production-readiness evidence bundle.
 
+### September 13 decorative-overlay contrast correction
+
+Fresh Sol reference `run_4a3aa039f38b4844a22e2280e9405c52` failed its $5 cost fuse after two finish failures. Its last retained verification reported dark gallery-button text against an ancestor's translucent decorative pseudo-element, although the retained authored CSS gives the button an opaque gold background inside a higher-layer content panel. A focused fixture using the actual browser gate reproduces the false positive on that same CSS arrangement, including nested button text; genuine low-contrast text on a known opaque background remains a blocking control.
+
+Do not solve this with a new stacking-order approximation. The pseudo-element heuristic estimates rectangles and colors but does not establish paint order, intervening backgrounds, transforms, group opacity or the composited pixels. An initial opaque-background shortcut passed the narrow fixture, but independent review found a counterexample with an overlay painted above the panel. That shortcut is discarded. Pseudo-derived contrast predictions instead join the existing warning-only `render.text_surface_boundary` evidence, including full-coverage cases. Its wording explicitly requests visual assessment without requiring a change to readable content. Reliable conventional contrast and Axe serious/critical accessibility findings remain blocking and unchanged. No prompt, authoring stage, model default, retry or runtime presentation changes.
+
+This is an evidence-confidence correction, not permission to ship unreadable overlays. A real decorative-overlay readability problem may now require visual review when the existing reliable checks cannot prove it. The generator still has to meet the same customer-ready visual standard. Exact final source and attempted screenshot retrieval were unavailable for the failed Sol run, so the fixture does not retroactively establish that its whole site passes or that every earlier finding was false. Keep the failed run and its cost, and validate a future fresh build only after the corrected verifier is deployed. Static, complete browser and sandbox preflight components, final typecheck and isolated launch-flow smoke pass. Coordinated deployment is still required; no launch acceptance is implied by this addendum.
+
 ## Sequence
 
 1. Correct demonstrated verifier defects using retained artifacts and focused fixtures. The September 4 cookie-table diagnostic found 65.8% reported preservation versus 96.3% with proper text boundaries, without changing the website. Validate semantic text boundaries, table-header accessibility attributes, and reachable scrollable content. Keep content-deletion and real-clipping failures blocking.

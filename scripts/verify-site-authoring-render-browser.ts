@@ -1501,6 +1501,68 @@ assert(
   `A low-contrast primary-heading fragment crossing a decorative pseudo-element escaped the rendered advisory: ${JSON.stringify(primaryHeadingDecorationBrowser.findings)}`
 );
 
+const opaqueForegroundOverPseudoMarkup = `<section class="opaque-foreground-over-pseudo">
+  <p class="pseudo-exposed">Genuine pseudo-surface contrast failure.</p>
+  <div class="opaque-near-panel">
+    <p class="safe-near-panel-copy">Readable copy on the nearer opaque panel.</p>
+    <a class="opaque-gold-button" href="/contact"><span>Opaque gold control</span></a>
+    <a class="bad-near-panel-control" href="/contact">Genuine near-surface contrast failure</a>
+  </div>
+</section>`;
+const opaqueForegroundOverPseudoPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</main>", `${opaqueForegroundOverPseudoMarkup}</main>`) }
+    : route),
+  files: prepared.files.map((file) => {
+    if (file.path === "index.html") {
+      return { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${opaqueForegroundOverPseudoMarkup}</main>`)) };
+    }
+    return file.path === "site.css"
+      ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}
+.opaque-foreground-over-pseudo{position:relative;min-height:420px;display:grid;place-items:center;background:#fff}.opaque-foreground-over-pseudo::after{content:"";position:absolute;inset:0;background:rgba(9,45,33,.6)}.pseudo-exposed{position:absolute;z-index:1;top:18px;color:#162e25}.opaque-near-panel{position:relative;z-index:2;padding:48px;background:#0b2d23}.safe-near-panel-copy{color:#fff}.opaque-near-panel a{min-height:50px;display:inline-flex;align-items:center;padding:12px 22px;font-weight:750;text-decoration:none}.opaque-gold-button{color:#162e25;background:#f0bd58;border:1px solid #f0bd58}.bad-near-panel-control{color:#162e25;background:transparent;border:1px solid currentColor}`) }
+      : file;
+  })
+};
+const opaqueForegroundOverPseudoBrowser = await runArtifactBrowserGate({
+  prepared: opaqueForegroundOverPseudoPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-opaque-foreground-over-pseudo",
+  routePaths: ["/"],
+  viewports: [{ name: "desktop", width: 1280, height: 900 }]
+});
+const opaqueForegroundContrastMessages = opaqueForegroundOverPseudoBrowser.findings
+  .filter((finding) => finding.id === "render.contrast")
+  .map((finding) => finding.message);
+const opaqueForegroundPseudoAdvisory = opaqueForegroundOverPseudoBrowser.findings.find((finding) =>
+  finding.id === "render.text_surface_boundary"
+    && finding.message.includes("Genuine pseudo-surface contrast failure")
+    && finding.message.includes("Opaque gold control"));
+assert(
+  opaqueForegroundContrastMessages.some((message) => message.includes("Genuine near-surface contrast failure")),
+  `A transparent control with poor contrast against its nearest opaque surface escaped verification: ${JSON.stringify(opaqueForegroundContrastMessages)}`
+);
+assert(
+  !opaqueForegroundContrastMessages.some((message) => message.includes("Genuine pseudo-surface contrast failure")),
+  `Uncomposited pseudo-surface geometry was incorrectly treated as proven contrast: ${JSON.stringify(opaqueForegroundContrastMessages)}`
+);
+assert(
+  opaqueForegroundPseudoAdvisory
+    && !isTechnicalReleaseBlocker(opaqueForegroundPseudoAdvisory)
+    && opaqueForegroundPseudoAdvisory.message.includes("paint order")
+    && opaqueForegroundPseudoAdvisory.message.includes("nearer backgrounds"),
+  `Possible pseudo-surface overlap, including content on an opaque foreground, lost its explicit paint-order advisory: ${JSON.stringify(opaqueForegroundOverPseudoBrowser.findings)}`
+);
+assert(
+  !opaqueForegroundContrastMessages.some((message) => message.includes("Opaque gold control")),
+  `Nested text on an opaque gold control was incorrectly evaluated against a more distant pseudo-surface: ${JSON.stringify(opaqueForegroundContrastMessages)}`
+);
+assert(
+  !opaqueForegroundContrastMessages.some((message) => message.includes("Readable copy on the nearer opaque panel")),
+  `Readable transparent text on a nearer opaque panel was incorrectly evaluated against a more distant pseudo-surface: ${JSON.stringify(opaqueForegroundContrastMessages)}`
+);
+
 const headerBrandCollisionMarkup = '<div class="header-utility-collision-fixture"><span>Thoughtful pest control for Raleigh NC</span></div>';
 const headerBrandCollisionLogo = '<img class="header-overlap-logo-fixture" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Official business logo">';
 const headerBrandCollisionPrepared = {

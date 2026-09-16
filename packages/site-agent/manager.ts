@@ -1496,10 +1496,11 @@ export const websiteManagerTools: Tool[] = [
       alt: { type: "string", minLength: 1, maxLength: 500 }
     }
   }),
-  tool("inspect_site", "Build the current workspace if needed, then inspect actual desktop, tablet, mobile, and opened mobile-navigation pixels in Lodesta's browser together with concrete render findings. For an initial build, pass null for the architecture-selected starting sample; passing '/' inspects only the homepage. Pass an exact route to investigate a finding, changed pixels, or distinct content and composition not represented by that sample. For an edit, pass null to use the selected route and automatically outline the selected element, or pass another affected route for route-level evidence. This never runs hard release verification.", {
+  tool("inspect_site", "Build the current workspace if needed, then inspect actual desktop, tablet, mobile, and opened mobile-navigation pixels in Lodesta's browser together with concrete render findings. For an initial build, pass null for the architecture-selected starting sample; passing '/' inspects only the homepage. Pass an exact route to investigate a finding, changed pixels, or distinct content and composition not represented by that sample. Route screenshots sample the page, not every section. To see an uncertain element close up, supply an exact route and its CSS selector; if visible, the first matching element is centered and outlined instead of the ordinary route frames. With selector null, preserve ordinary inspection behavior, including the owner's selected element when applicable; for an edit, route null uses the owner's selected route. This never runs hard release verification.", {
     type: "object", additionalProperties: false, properties: {
-      route: { type: ["string", "null"], pattern: "^/" }
-    }, required: ["route"]
+      route: { type: ["string", "null"], pattern: "^/", maxLength: 300 },
+      selector: { type: ["string", "null"], minLength: 1, maxLength: 500 }
+    }, required: ["route", "selector"]
   }),
   tool("request_input", "Pause and ask the owner one consequential question when essential direction is unavailable. Do not use this for routine creative choices you can make well.", {
     type: "object", additionalProperties: false, required: ["question"],

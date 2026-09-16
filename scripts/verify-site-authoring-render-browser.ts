@@ -2233,6 +2233,127 @@ assert.equal(focusedCaptures.length, 3, "Selection-aware homepage verification d
 assert(focusedCaptures.every((capture) => capture.focusSelector === ".hero"));
 assert(!focusedBrowser.findings.some((finding) => finding.id === "render.inspection_selection_missing"));
 
+// Route-level review frames deliberately sample the top, middle, and bottom of
+// long pages rather than tiling every pixel. Keep a target in the gap between
+// those frames to prove that the existing focus-selector path exposes a native
+// close-up without changing the ordinary sampling algorithm.
+const inspectionGapMarkup = '<div class="inspection-sampling-spacer"><section class="inspection-gap-target" aria-label="Focused inspection target">Focused inspection target</section></div>';
+const inspectionGapPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/contact"
+    ? { ...route, html: route.html.replace("<main>", `<main>${inspectionGapMarkup}`) }
+    : route),
+  files: prepared.files.map((file) => file.path === "contact/index.html"
+    ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("<main>", `<main>${inspectionGapMarkup}`)) }
+    : file.path === "site.css"
+      ? {
+          ...file,
+          bytes: Buffer.from(`${file.bytes.toString("utf8")}
+.inspection-sampling-spacer{height:3200px;position:relative}
+.inspection-gap-target{position:absolute;top:1060px;left:20%;width:60%;height:100px;background:#f000ff;color:#120014;display:grid;place-items:center}`)
+        }
+      : file)
+};
+assert(
+  inspectionGapPrepared.routes.find((route) => route.path === "/contact")!.html.includes("inspection-gap-target"),
+  "Below-fold focus fixture did not alter the expected contact route."
+);
+const inspectionGapViewports = [
+  { name: "desktop" as const, width: 1280, height: 800 },
+  { name: "tablet" as const, width: 768, height: 1024 },
+  { name: "mobile" as const, width: 375, height: 812 }
+];
+const magentaBounds = async (bytes: Buffer) => {
+  const { data, info } = await sharp(bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  let count = 0;
+  let minX = info.width;
+  let minY = info.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < info.height; y += 1) {
+    for (let x = 0; x < info.width; x += 1) {
+      const offset = (y * info.width + x) * info.channels;
+      if (data[offset] !== 240 || data[offset + 1] !== 0 || data[offset + 2] !== 255) continue;
+      count += 1;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  return { count, minX, minY, maxX, maxY, width: info.width, height: info.height };
+};
+const inspectionGapDefaultBrowser = await runArtifactBrowserGate({
+  prepared: inspectionGapPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-inspection-gap-default",
+  routePaths: ["/contact"],
+  captureMode: "review",
+  viewports: inspectionGapViewports
+});
+const inspectionGapDefaultCaptures = inspectionGapDefaultBrowser.captures.filter((capture) => capture.stage === "settled");
+assert.deepEqual(
+  inspectionGapDefaultCaptures.map((capture) => `${capture.viewport}:${capture.frame}`),
+  ["desktop:top", "desktop:middle", "desktop:bottom", "tablet:top", "mobile:top", "mobile:middle", "mobile:bottom"],
+  "Below-fold fixture did not retain the expected default sampled frames."
+);
+for (const capture of inspectionGapDefaultCaptures) {
+  const bounds = await magentaBounds(capture.bytes);
+  assert.equal(bounds.count, 0, `Default ${capture.viewport}:${capture.frame} unexpectedly included the between-frame target.`);
+}
+const inspectionGapFocusedBrowser = await runArtifactBrowserGate({
+  prepared: inspectionGapPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-inspection-gap-focused",
+  routePaths: ["/contact"],
+  captureMode: "review",
+  focusSelector: ".inspection-gap-target",
+  viewports: inspectionGapViewports
+});
+const inspectionGapFocusedCaptures = inspectionGapFocusedBrowser.captures.filter((capture) => capture.frame === "focus");
+assert.equal(inspectionGapFocusedCaptures.length, 3, "Below-fold focus did not retain one native frame per requested viewport.");
+for (const capture of inspectionGapFocusedCaptures) {
+  const viewport = inspectionGapViewports.find((candidate) => candidate.name === capture.viewport)!;
+  const bounds = await magentaBounds(capture.bytes);
+  assert.equal(bounds.width, viewport.width, `Focused ${capture.viewport} PNG lost its native viewport width.`);
+  assert.equal(bounds.height, viewport.height, `Focused ${capture.viewport} PNG lost its native viewport height.`);
+  assert(bounds.count > 10_000, `Focused ${capture.viewport} PNG did not contain the target surface.`);
+  assert(bounds.minX >= 0 && bounds.minY >= 0 && bounds.maxX < bounds.width && bounds.maxY < bounds.height, `Focused ${capture.viewport} target was clipped.`);
+  assert(bounds.maxY - bounds.minY + 1 >= 99 && bounds.maxY - bounds.minY + 1 <= 101, `Focused ${capture.viewport} PNG did not contain the target's full 100px height.`);
+  assert(Math.abs((bounds.minX + bounds.maxX) / 2 - bounds.width / 2) <= 2, `Focused ${capture.viewport} target was not horizontally centered.`);
+  assert(Math.abs((bounds.minY + bounds.maxY) / 2 - bounds.height / 2) <= 4, `Focused ${capture.viewport} target was not vertically centered.`);
+}
+assert(!inspectionGapFocusedBrowser.findings.some((finding) =>
+  finding.id === "render.inspection_selection_missing" || finding.id === "render.inspection_selection_invalid"));
+
+for (const selectorFixture of [
+  { selector: ".inspection-target-does-not-exist", findingId: "render.inspection_selection_missing", prefix: "missing" },
+  { selector: "[", findingId: "render.inspection_selection_invalid", prefix: "invalid" }
+] as const) {
+  const fallbackBrowser = await runArtifactBrowserGate({
+    prepared: inspectionGapPrepared,
+    buildInput,
+    blobStore: new MemoryBlobStore(),
+    capturePrefix: `verification/site-authoring-render-inspection-gap-${selectorFixture.prefix}`,
+    routePaths: ["/contact"],
+    captureMode: "review",
+    focusSelector: selectorFixture.selector,
+    viewports: [{ name: "mobile", width: 375, height: 812 }]
+  });
+  assert(
+    fallbackBrowser.findings.some((finding) => finding.id === selectorFixture.findingId && finding.message.includes(selectorFixture.selector)),
+    `${selectorFixture.prefix} selector did not retain bounded fallback evidence.`
+  );
+  assert(
+    fallbackBrowser.captures.some((capture) => capture.viewport === "mobile" && capture.stage === "settled" && capture.frame === "top"),
+    `${selectorFixture.prefix} selector did not fall back to an ordinary route frame.`
+  );
+  assert(!fallbackBrowser.captures.some((capture) => capture.frame === "focus"), `${selectorFixture.prefix} selector unexpectedly retained a focus frame.`);
+}
+console.log(JSON.stringify({ ok: true, focusedInspection: "between-frame-native-png", viewports: inspectionGapViewports.map(({ name, width, height }) => ({ name, width, height })), selectorFallback: ["missing", "invalid"] }));
+
 const axeSabotage = `<script>window.axe=undefined;Object.defineProperty(window,"axe",{value:undefined,writable:false,configurable:false});</script>`;
 const axeUnavailablePrepared = {
   ...prepared,

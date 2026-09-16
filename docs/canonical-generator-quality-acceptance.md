@@ -194,6 +194,18 @@ This is an evidence-confidence correction, not permission to ship unreadable ove
 
 ## Sequence
 
+### September 16 optional element inspection
+
+The current three-position desktop/phone review samples can leave vertical gaps on long pages; tablet review captures only the opening. The browser already supports centering a selected element, but initial authors previously could not request it. The controller now exposes `inspect_site({ route: "/contact", selector: "form" })` through that existing capture path. A non-null selector requires an explicit route and otherwise returns a recoverable tool error before building. A null selector preserves the existing ordinary/owner-selected inspection. Explicit author targets do not inherit an unrelated owner-selection label, and cached evidence matches route, selector and effective label.
+
+This supplies an optional way to examine an uncertain element, not a required review phase. It adds no critic, retry, per-action limit, screenshot quota, presentation rule or release blocker. An element larger than a viewport is still only partially shown; the author can choose a smaller child. Existing missing/invalid/hidden-target warnings and route-level fallback remain. Focus outlines are inspection-only and never mutate retained source or published artifacts. Mechanical inspection and exhaustive `finish` verification are unchanged.
+
+The model-facing optional field is represented as required-but-nullable for [strict function calling](https://developers.openai.com/api/docs/guides/function-calling#strict-mode). Only the authoring platform identity changes to `site-authoring-platform@sha256:6a2e2655bdca09fd04e051245d33fc3458f5f7074deedd5ff81e967fd88dcbe5`; the runtime, toolchain, system prompt, skill and verification-policy identities remain unchanged. Local tests and later hosted authoring must be reported separately: access to a better view is not proof that an author will choose it or improve its judgment.
+
+The separate retained-screenshot recognition experiment remains unexecuted pending explicit data-sharing approval. This optional tool change neither executes nor substitutes for that blocked API request.
+
+### Acceptance sequence
+
 1. Correct demonstrated verifier defects using retained artifacts and focused fixtures. The September 4 cookie-table diagnostic found 65.8% reported preservation versus 96.3% with proper text boundaries, without changing the website. Validate semantic text boundaries, table-header accessibility attributes, and reachable scrollable content. Keep content-deletion and real-clipping failures blocking.
 2. Record a replay of the failed artifact under the corrected verifier before spending another generation on the same failure. Keep source and evaluation identities explicit.
 3. Simplify the canonical authoring guidance and repeated inspection instructions around business truth, customer purpose, evidence, composition, and working behavior. Preserve useful tool contracts. Avoid adding a sentence for each historical aesthetic mistake.

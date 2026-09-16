@@ -633,8 +633,13 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     setPhase: (phase: string) => void
   ): Promise<ManagerToolExecution> {
     const parsed = managerToolArguments.inspect_site.parse(args);
+    if (parsed.selector && !parsed.route) {
+      return result({ ok: false, error: "inspection_selector_requires_route", message: "Supply an exact route with selector, or use selector: null for the ordinary inspection." });
+    }
     const route = parsed.route ?? (this.options.kind === "initial_build" ? undefined : this.options.selection?.route);
     const selection = this.options.selection?.route === route ? this.options.selection : undefined;
+    const selector = parsed.selector ?? selection?.selector;
+    const label = parsed.selector ? undefined : selection?.label;
     let buildPerformed = false;
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
       setPhase("build");
@@ -667,15 +672,16 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     const cached = Boolean(
       this.visualInspection
       && this.visualInspection.modelSummary.requestedRoute === route
-      && this.visualInspection.modelSummary.requestedSelector === selection?.selector
+      && this.visualInspection.modelSummary.requestedSelector === selector
+      && this.visualInspection.modelSummary.selectionLabel === label
     );
     if (!cached) {
       this.inspections += 1;
       const phaseStartedAt = Date.now();
       this.visualInspection = await this.options.inspectVisual(this.currentFiles(), this.sandboxRevision, {
         route,
-        selector: selection?.selector,
-        label: selection?.label
+        selector,
+        label
       }, signal, (phase, durationMs) => {
         setPhase(phase);
         if (durationMs === undefined) return;

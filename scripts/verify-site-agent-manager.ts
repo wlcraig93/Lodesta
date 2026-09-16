@@ -246,6 +246,9 @@ const inspectionTool = websiteManagerTools.find(
 assert(inspectionTool?.type === "function");
 assert.match(inspectionTool.description!, /initial build, pass null.*starting sample.*passing '\/' inspects only the homepage/i);
 assert.match(inspectionTool.description!, /exact route.*distinct content and composition not represented/i);
+assert.match(inspectionTool.description!, /exact route and its CSS selector/);
+assert(inspectionTool.parameters);
+assert.deepEqual(inspectionTool.parameters.required, ["route", "selector"]);
 const finishTool = websiteManagerTools.find(
   (tool) => tool.type === "function" && tool.name === "finish"
 );
@@ -1483,7 +1486,7 @@ await assert.rejects(
 );
 
 const glyphGuardResponses = [
-  { name: "inspect_site", arguments: { route: null } },
+  { name: "inspect_site", arguments: { route: null, selector: null } },
   ...Array.from({ length: 3 }, () => ({
     name: "finish",
     arguments: { ownerMessage: "Ready" }

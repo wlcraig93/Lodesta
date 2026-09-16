@@ -290,7 +290,7 @@ const visualRuntime = new WorkspaceManagerRuntime<string>({
     return {
       inspectionHash: `sha256:${"c".repeat(64)}`,
       modelSummary: {
-        requestedRoute: target.route, requestedSelector: target.selector, routes: ["/", "/services"],
+        requestedRoute: target.route, requestedSelector: target.selector, selectionLabel: target.label, routes: ["/", "/services"],
         visualEvidenceRoutes: ["/"],
         visualEvidenceFrames: [
           { imageIndex: 1, route: "/", viewport: "tablet", frame: "focus", width: 768, height: 1024 },
@@ -411,6 +411,9 @@ assert.equal(visualBuilds, 2, "Finish rebuilt a workspace whose exact hash alrea
 assert.equal(visualMechanicalInspections, 2, "Finish repeated the mechanical sweep for an unchanged workspace hash.");
 assert.equal(visualReleaseVerifications, 1, "Finish did not run the exhaustive release verification after a mechanical inspection.");
 let initialBuildTarget: { route?: string; selector?: string; label?: string } | undefined;
+let initialVisualCalls = 0;
+let initialBuildCalls = 0;
+let initialMechanicalCalls = 0;
 const initialBuildVisualRuntime = new WorkspaceManagerRuntime<string>({
   kind: "initial_build",
   publicBuildInputId: "input_initial_visual",
@@ -426,23 +429,38 @@ const initialBuildVisualRuntime = new WorkspaceManagerRuntime<string>({
     selector: "section.hero > h1",
     label: "Hero heading"
   },
-  applyBuild: async () => ({ revision: "sandbox_initial_visual_2", buildDurationMs: 1, previewPath: "/preview" }),
+  applyBuild: async () => {
+    initialBuildCalls += 1;
+    return { revision: "sandbox_initial_visual_2", buildDurationMs: 1, previewPath: "/preview" };
+  },
   inspectVisual: async (_files, _sandboxRevision, target) => {
+    initialVisualCalls += 1;
     initialBuildTarget = target;
     return {
       inspectionHash: `sha256:${"f".repeat(64)}`,
-      modelSummary: { requestedRoute: target.route, routes: ["/", "/services", "/contact"] },
+      modelSummary: { requestedRoute: target.route, requestedSelector: target.selector, routes: ["/", "/services", "/contact"] },
       diagnosticSummary: {}
     };
   },
-  inspect: async () => ({
-    passed: true,
-    inspectionHash: `sha256:${"d".repeat(64)}`,
-    modelSummary: {},
-    diagnosticSummary: {},
-    checkpoint: "verified"
-  })
+  inspect: async () => {
+    initialMechanicalCalls += 1;
+    return {
+      passed: true,
+      inspectionHash: `sha256:${"d".repeat(64)}`,
+      modelSummary: {},
+      diagnosticSummary: {},
+      checkpoint: "verified"
+    };
+  }
 });
+const missingFocusRoute = await initialBuildVisualRuntime.execute({
+  callId: "inspect-selector-without-route", name: "inspect_site", arguments: { route: null, selector: "form" }
+});
+assert.equal(missingFocusRoute.diagnosticOutput.error, "inspection_selector_requires_route");
+assert.equal(missingFocusRoute.diagnosticOutput.ok, false);
+assert.equal(initialBuildCalls, 0, "An ambiguous focus target triggered a build.");
+assert.equal(initialVisualCalls, 0);
+assert.equal(initialMechanicalCalls, 0);
 const initialBuildInspection = await initialBuildVisualRuntime.execute({
   callId: "inspect-initial-representative",
   name: "inspect_site",
@@ -454,6 +472,37 @@ assert.deepEqual(initialBuildTarget, {
   selector: undefined,
   label: undefined
 }, "An initial-build inspection was incorrectly narrowed to the editor's homepage selection.");
+const initialFilesBeforeFocus = initialBuildVisualRuntime.currentFiles();
+const focusCall = { callId: "inspect-author-form", name: "inspect_site" as const, arguments: { route: "/contact", selector: "form" } };
+const authorFocus = await initialBuildVisualRuntime.execute(focusCall);
+assert.equal(authorFocus.diagnosticOutput.ok, true);
+assert.deepEqual(initialBuildTarget, { route: "/contact", selector: "form", label: undefined });
+assert.equal(initialVisualCalls, 2);
+const cachedAuthorFocus = await initialBuildVisualRuntime.execute({ ...focusCall, callId: "inspect-author-form-cached" });
+assert.equal(cachedAuthorFocus.diagnosticOutput.cached, true);
+assert.equal(initialVisualCalls, 2);
+await initialBuildVisualRuntime.execute({ ...focusCall, callId: "inspect-author-submit", arguments: { route: "/contact", selector: "form button" } });
+assert.equal(initialVisualCalls, 3, "Changing the focus selector reused stale visual evidence.");
+await initialBuildVisualRuntime.execute({ ...focusCall, callId: "inspect-author-route", arguments: { route: "/contact", selector: null } });
+assert.equal(initialVisualCalls, 4, "A focused capture was reused as whole-route evidence.");
+assert.deepEqual(initialBuildTarget, { route: "/contact", selector: undefined, label: undefined });
+assert.equal(initialBuildCalls, 1, "Changing only the focus target rebuilt unchanged source.");
+assert.equal(initialMechanicalCalls, 1, "Changing only the focus target repeated the mechanical pass.");
+assert.deepEqual(initialBuildVisualRuntime.currentFiles(), initialFilesBeforeFocus);
+assert.throws(() => managerToolArguments.inspect_site.parse({ route: "/contact", selector: "  " }));
+assert.throws(() => managerToolArguments.inspect_site.parse({ route: "/contact", selector: "x".repeat(501) }));
+await visualRuntime.execute({ callId: "inspect-override-owner-selection", name: "inspect_site", arguments: { route: "/", selector: "form" } });
+assert.deepEqual(inspectedTarget, { route: "/", selector: "form", label: undefined }, "An explicit focus target inherited the unrelated owner selection label.");
+await visualRuntime.execute({ callId: "inspect-return-owner-selection", name: "inspect_site", arguments: { route: null, selector: null } });
+assert.deepEqual(inspectedTarget, { route: "/", selector: "section.hero > h1", label: "Hero heading" });
+const beforeSameSelectorOverride = visualInspections;
+const sameSelectorOverride = await visualRuntime.execute({ callId: "inspect-same-owner-selector-explicit", name: "inspect_site", arguments: { route: "/", selector: "section.hero > h1" } });
+assert.equal(sameSelectorOverride.diagnosticOutput.cached, false);
+assert.equal(visualInspections, beforeSameSelectorOverride + 1);
+assert.deepEqual(inspectedTarget, { route: "/", selector: "section.hero > h1", label: undefined });
+await visualRuntime.execute({ callId: "inspect-same-selector-owner-again", name: "inspect_site", arguments: { route: null, selector: null } });
+assert.equal(visualInspections, beforeSameSelectorOverride + 2);
+assert.deepEqual(inspectedTarget, { route: "/", selector: "section.hero > h1", label: "Hero heading" });
 const routeNormalizationRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
   publicBuildInputId: "input_route_normalization",

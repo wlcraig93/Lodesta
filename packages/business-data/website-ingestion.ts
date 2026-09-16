@@ -520,9 +520,13 @@ export function selectSourceOfferingFacts(
     const evidenceClass = evidenceClassByUrl.get(page.url) ?? "unknown";
     if (evidenceClass !== "first_party") return [];
     const path = new URL(page.url).pathname;
+    const explicitServicePath = /\/(?:services?|solutions?)\//i.test(path);
+    const projectEvidencePath = /\/(?:portfolio|gallery|projects?|work|case-stud(?:y|ies))(?:\/|$)/i.test(path);
+    const projectEvidencePurpose = page.purposeTags.includes("gallery") || page.purposeTags.includes("case_study");
     if (
-      page.purposeTags.includes("location")
-      || page.purposeTags.includes("blog")
+      page.purposeTags.includes("blog")
+      || (page.purposeTags.includes("location") && !explicitServicePath)
+      || ((projectEvidencePath || projectEvidencePurpose) && !explicitServicePath)
       || /\/(?:locations?|service-areas?|areas-we-serve|blog|news|articles?|resources?)(?:\/|$)/i.test(path)
     ) return [];
     const segment = path.split("/").filter(Boolean).at(-1)
@@ -530,7 +534,7 @@ export function selectSourceOfferingFacts(
     if (!segment || isUtilityOfferingRouteSegment(segment)) return [];
     const name = canonicalOfferingName(segment.replace(/[-_]+/g, " "), serviceAreaIdentities);
     if (!name || !isPlausibleOfferingName(name)) return [];
-    const serviceShapedPath = /\/(?:services?|solutions?)\//i.test(path)
+    const serviceShapedPath = explicitServicePath
       || /\b(?:control|removal|extermination|exclusion|fumigation|inspection|management|repair|installation|replacement|testing|treatment|filtration|sanitizing|abandonment|trenching|drilling|service)s?\b/i.test(name);
     if (!page.purposeTags.includes("service_detail") && !serviceShapedPath) return [];
     const supporting = page.sourceTextBlocks.find((block) => normalizedText(block.displayText).includes(normalizedText(name)));

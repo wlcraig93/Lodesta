@@ -30,9 +30,9 @@ import {
   type ManagerToolExecution,
   type ManagerToolRuntime
 } from "../packages/site-agent";
-import { sourceSnapshotSchema, type SourceSnapshot } from "../packages/site-contracts";
+import { sourceSnapshotSchema, type BusinessState, type SourceSnapshot } from "../packages/site-contracts";
 import { researchBusiness, sha256, stableJson } from "../packages/business-data";
-import { SiteAuthoringWorkflow } from "../packages/site-platform/workflow";
+import { researchAddress, researchLocality, SiteAuthoringWorkflow } from "../packages/site-platform/workflow";
 import {
   componentDiagnosticRouteFamilyQualityLedVisualSummary,
   WorkspaceManagerRuntime
@@ -66,6 +66,50 @@ assert(context.provisionalSources[0]?.meaningfulExcerpt.includes("Ignore Lodesta
 assert.equal(context.managedCapabilities.forms[0]?.id, "form_estimate");
 assert.deepEqual(context.managedCapabilities.assets, buildInput.business.assets,
   "The production authoring context changed when the experiment profile was omitted.");
+const rejectedResearchLocationState = {
+  locations: [{
+    id: "location_rejected",
+    label: "Rejected source location",
+    street: "743 Snelling Avenue",
+    city: "North Saint Paul",
+    region: "MN",
+    postalCode: "55104",
+    country: "US",
+    sourceFactIds: ["fact_address_rejected"]
+  }],
+  serviceAreas: [],
+  facts: [{
+    id: "fact_address_rejected",
+    kind: "address",
+    label: "Address",
+    value: "743 Snelling Avenue, North Saint Paul, MN 55104",
+    publicEligible: false,
+    source: {
+      factId: "fact_address_rejected",
+      sourceSnapshotId: "source_rejected",
+      sourceUrl: "https://source.example/specialist/vehicle",
+      evidenceClass: "first_party",
+      observedAt: "2026-09-16T00:00:00.000Z",
+      confidence: 0.8,
+      ownerConfirmed: false
+    }
+  }]
+} as unknown as BusinessState;
+assert.equal(researchAddress(rejectedResearchLocationState), undefined,
+  "Rejected first-party address evidence was supplied to public-web rating research.");
+assert.equal(researchLocality(rejectedResearchLocationState), undefined,
+  "Rejected first-party locality evidence was supplied to public-web rating research.");
+const ownerConfirmedResearchLocationState = {
+  ...rejectedResearchLocationState,
+  facts: rejectedResearchLocationState.facts.map((fact) => ({
+    ...fact,
+    publicEligible: true,
+    source: { ...fact.source, evidenceClass: "unknown" as const, ownerConfirmed: true }
+  }))
+} as BusinessState;
+assert.equal(researchAddress(ownerConfirmedResearchLocationState), "743 Snelling Avenue, North Saint Paul, MN, 55104");
+assert.equal(researchLocality(ownerConfirmedResearchLocationState), "North Saint Paul, MN",
+  "Owner-confirmed address authority was excluded from rating research.");
 const neutralAssetContext = createSiteAuthoringContext({
   buildInput,
   snapshots: [source],

@@ -1186,23 +1186,35 @@ function extractVisibleHours(html: string): Record<string, string> | undefined {
 
 const usStateNameOrCodePatternSource =
   "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY|DC|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Iowa|Idaho|Illinois|Indiana|Kansas|Kentucky|Louisiana|Massachusetts|Maryland|Maine|Michigan|Minnesota|Missouri|Mississippi|Montana|North Carolina|North Dakota|Nebraska|New Hampshire|New Jersey|New Mexico|Nevada|New York|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Virginia|Vermont|Washington|Wisconsin|West Virginia|Wyoming|District of Columbia";
+const visibleStreetPatternSource =
+  "\\d{2,6}\\s+(?:[A-Za-z0-9'.#-]+\\s+){1,8}(?:Street|St\\.?|Avenue|Ave\\.?|Road|Rd\\.?|Boulevard|Blvd\\.?|Drive|Dr\\.?|Lane|Ln\\.?|Court|Ct\\.?|Circle|Cir\\.?|Way|Highway|Hwy\\.?|Parkway|Pkwy\\.?|Place|Pl\\.?|Terrace|Ter\\.?)\\.?";
 
 function extractVisibleAddress(html: string): ExtractedBusinessFacts["address"] | undefined {
   const text = htmlToTextLines(html).join(" ");
-  const match = text.match(
+  const ordinaryMatch = text.match(
     new RegExp(
-      "\\b(\\d{2,6}\\s+(?:[A-Za-z0-9'.#-]+\\s+){1,8}(?:Street|St\\.?|Avenue|Ave\\.?|Road|Rd\\.?|Boulevard|Blvd\\.?|Drive|Dr\\.?|Lane|Ln\\.?|Court|Ct\\.?|Circle|Cir\\.?|Way|Highway|Hwy\\.?|Parkway|Pkwy\\.?|Place|Pl\\.?)\\.?(?:\\s+(?:Suite|Ste\\.?|Unit|#)\\s*[A-Za-z0-9-]+)?)\\s*,?\\s+([A-Z][A-Za-z'. -]{2,60}?),?\\s+" +
+      `\\b(${visibleStreetPatternSource}(?:\\s+(?:Suite|Ste\\.?|Unit|#)\\s*[A-Za-z0-9-]+|\\s+(?:Building|Bldg\\.?)\\s*\\d+[A-Za-z]?)?)\\s*,?\\s+([A-Z][A-Za-z'. -]{2,60}?),?\\s+` +
         `(${usStateNameOrCodePatternSource})` +
         "\\s+(\\d{5}(?:-\\d{4})?)\\b",
       "i"
     )
   );
+  const joinedBuildingMatch = ordinaryMatch ? undefined : text.match(
+    new RegExp(
+      `\\b(${visibleStreetPatternSource}\\s+(?:Building|Bldg\\.?)\\s*\\d+([A-Za-z]))([A-Z][A-Za-z'. -]{2,60}?),?\\s+` +
+        `(${usStateNameOrCodePatternSource})` +
+        "\\s+(\\d{5}(?:-\\d{4})?)(?=\\b|(?:US|USA)\\b)",
+      "i"
+    )
+  );
+  if (joinedBuildingMatch && !/^[A-Z][a-z]/.test(joinedBuildingMatch[3] ?? "")) return undefined;
+  const match = ordinaryMatch ?? joinedBuildingMatch;
   if (!match) return undefined;
   return {
     street: cleanText(match[1]),
-    city: titleCase(cleanText(match[2]) ?? ""),
-    region: normalizeStateRegion(match[3]),
-    postalCode: match[4],
+    city: titleCase(cleanText(joinedBuildingMatch ? match[3] : match[2]) ?? ""),
+    region: normalizeStateRegion(joinedBuildingMatch ? match[4] : match[3]),
+    postalCode: joinedBuildingMatch ? match[5] : match[4],
     country: "US"
   };
 }

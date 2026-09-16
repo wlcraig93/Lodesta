@@ -77,6 +77,30 @@ export function preferBusinessNameCandidate(current: string | undefined, candida
   return candidateScore > currentScore ? candidate : current;
 }
 
+/** Disambiguate a homepage title using independently selected first-party names.
+ * A title's last segment is often a slogan. Do not let that positional hint win
+ * over an equally plausible title segment corroborated on multiple other pages.
+ * Ambiguity and a stronger existing candidate keep the existing selection.
+ */
+export function corroboratedHomepageBusinessName(input: {
+  current: string | undefined;
+  homepageTitle: string | undefined;
+  otherPageNames: Array<string | undefined>;
+  hostname: string;
+}) {
+  const candidates = [...new Set(input.homepageTitle?.split(/\s+(?:\|+|[\u2013\u2014-])\s+/).map(value => value.trim()).filter(Boolean) ?? [])];
+  const current = input.current;
+  if (candidates.length < 2 || !current || !candidates.some(candidate => normalizedId(candidate) === normalizedId(current))) return current;
+  const eligible = candidates.filter(candidate => candidate.length <= 80
+    && businessNameCandidateScore(candidate, input.hostname) > 0
+    && businessNameCandidateScore(candidate, input.hostname) >= businessNameCandidateScore(current, input.hostname));
+  const supported = eligible.map(candidate => ({ candidate, count: input.otherPageNames.filter(name => name
+    && normalizedId(name) === normalizedId(candidate)).length })).sort((left, right) => right.count - left.count);
+  const winner = supported[0];
+  return winner && winner.count >= 2 && winner.count > (supported[1]?.count ?? 0)
+    ? winner.candidate : input.current;
+}
+
 export function businessNameCandidateScore(candidate: string, hostname: string) {
   const normalizedCandidate = normalizedId(candidate);
   const normalizedHost = normalizedId(hostname.replace(/^www\./, "").split(".")[0] ?? "");

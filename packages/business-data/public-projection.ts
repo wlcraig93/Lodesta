@@ -21,6 +21,11 @@ export type CreatePublicBuildInput = {
   runtimeSeriesId: string;
 };
 
+export function publishEligibleBusinessFacts(state: Pick<BusinessState, "facts">) {
+  return state.facts.filter((fact) =>
+    fact.publicEligible && (fact.source.ownerConfirmed || fact.source.evidenceClass === "first_party"));
+}
+
 export function createPublicBuildInput(input: CreatePublicBuildInput): SitePublicBuildInput {
   const state = businessStateSchema.parse(input.state);
   const intent = siteIntentSchema.parse(input.intent);
@@ -33,8 +38,7 @@ export function createPublicBuildInput(input: CreatePublicBuildInput): SitePubli
   if (nonUsLocation) {
     throw new Error(`Public build input supports US locations only; ${nonUsLocation.id} uses ${nonUsLocation.country}.`);
   }
-  const eligibleFacts = state.facts
-    .filter((fact) => fact.publicEligible && (fact.source.ownerConfirmed || fact.source.evidenceClass === "first_party"));
+  const eligibleFacts = publishEligibleBusinessFacts(state);
   const eligibleFactById = new Map(eligibleFacts.map((fact) => [fact.id, fact]));
   const eligibleFactIds = new Set(eligibleFactById.keys());
   const proof = state.proof.filter((item) => item.status === "confirmed"

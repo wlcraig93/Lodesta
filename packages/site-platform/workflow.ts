@@ -10,6 +10,7 @@ import {
   researchGoogleAggregateRating,
   retainedProspectGoogleAggregateRatingSnapshot,
   retainedContactConsensus,
+  publishEligibleBusinessFacts,
   researchBusiness,
   sha256,
   stableJson,
@@ -5528,19 +5529,36 @@ function webResearchUsageForRun(usage: WebResearchUsage): SiteAgentRun["usage"] 
   };
 }
 
-function researchLocality(state: BusinessState) {
-  const location = state.locations[0];
+export function researchLocality(state: BusinessState) {
+  const location = researchLocation(state);
   const exact = [location?.city, location?.region].filter(Boolean).join(", ");
   if (exact) return exact;
-  return state.serviceAreas.slice(0, 3).map((area) => area.label).join(", ") || undefined;
+  const eligibleFactIds = researchEligibleFactIds(state, "service_area");
+  return state.serviceAreas
+    .filter((area) => area.sourceFactIds.some((factId) => eligibleFactIds.has(factId)))
+    .slice(0, 3)
+    .map((area) => area.label)
+    .join(", ") || undefined;
 }
 
-function researchAddress(state: BusinessState) {
-  const location = state.locations[0];
+export function researchAddress(state: BusinessState) {
+  const location = researchLocation(state);
   if (!location) return undefined;
   return [location.street, location.city, location.region, location.postalCode]
     .filter(Boolean)
     .join(", ") || undefined;
+}
+
+function researchLocation(state: BusinessState) {
+  const eligibleAddressFactIds = researchEligibleFactIds(state, "address");
+  return state.locations.find((location) =>
+    location.sourceFactIds.some((factId) => eligibleAddressFactIds.has(factId)));
+}
+
+function researchEligibleFactIds(state: BusinessState, kind: BusinessState["facts"][number]["kind"]) {
+  return new Set(publishEligibleBusinessFacts(state)
+    .filter((fact) => fact.kind === kind)
+    .map((fact) => fact.id));
 }
 
 function normalizedWebsiteEvidenceIdentity(value: string) {

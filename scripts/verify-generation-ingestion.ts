@@ -3,6 +3,7 @@ import dns from "node:dns/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { mock } from "node:test";
 import { gzipSync } from "node:zlib";
+import { corroboratedHomepageBusinessName } from "../lib/business-fact-normalization";
 import { explicitServiceAreaListEvidence, summarizeCrawlHtml, type CrawlAssessment } from "../lib/crawler";
 import {
   crawlWebsiteForGeneration,
@@ -140,6 +141,38 @@ assert.equal(genericTitleCrawl.crawl.pageSummaries[0]?.extractedFacts.name, "ELE
 assert.equal(genericTitleCrawl.crawl.extractedFacts.name, "CEDAR ELECTRIC",
   "Generation's first-title merge ignored the shared selector and a stronger retained first-party business name.");
 
+const sloganIdentityOrigin = "https://padt.identity-fixture.example";
+const sloganIdentityCrawl = await crawlWebsiteForGeneration({
+  url: sloganIdentityOrigin + "/",
+  validateUrl: async value => value,
+  limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+  sleep: async () => undefined,
+  fetchImpl: async input => {
+    const path = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url).pathname;
+    if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+    if (path === "/") return response(`<title>Pristine Auto Detailing | Austin's Premier Auto Spa</title>
+      <main><h1>Austin's Premier Auto Spa</h1><a href="/about">About</a><a href="/contact">Contact</a></main>`, 200);
+    if (path === "/about" || path === "/contact") return response(`<title>Pristine Auto Detailing | ${path === "/about" ? "About" : "Contact"}</title>
+      <main><p>First-party business information.</p></main>`, 200);
+    return response("missing", 404, "text/plain");
+  }
+});
+assert.equal(sloganIdentityCrawl.crawl.pageSummaries[0]?.extractedFacts.name, "Austin's Premier Auto Spa",
+  "The fixture no longer exercises the ambiguous homepage title selection.");
+assert.equal(sloganIdentityCrawl.crawl.extractedFacts.name, "Pristine Auto Detailing",
+  "The homepage slogan displaced the name corroborated by two first-party pages.");
+const nameCorroboration = {
+  current: "Austin's Premier Auto Spa", homepageTitle: "Pristine Auto Detailing | Austin's Premier Auto Spa",
+  hostname: "padt.identity-fixture.example"
+};
+assert.equal(corroboratedHomepageBusinessName({ ...nameCorroboration, otherPageNames: ["Pristine Auto Detailing"] }), nameCorroboration.current);
+assert.equal(corroboratedHomepageBusinessName({ ...nameCorroboration,
+  otherPageNames: ["Pristine Auto Detailing", "Pristine Auto Detailing", nameCorroboration.current, nameCorroboration.current]
+}), nameCorroboration.current, "Conflicting equally corroborated identities must not acquire a positional winner.");
+assert.equal(corroboratedHomepageBusinessName({ ...nameCorroboration, current: "PADT Auto Company",
+  otherPageNames: ["Pristine Auto Detailing", "Pristine Auto Detailing"]
+}), "PADT Auto Company", "Weaker title corroboration must not replace an already stronger name.");
+
 const squarespaceRules = parseRobotsPolicy("User-agent: *\nDisallow: /*?author=*\n");
 assert.equal(robotsAllows(`${origin}/`, squarespaceRules.rules), true);
 assert.equal(robotsAllows(`${origin}/about?author=123`, squarespaceRules.rules), false);
@@ -241,6 +274,100 @@ assert.deepEqual(selectSourceContactAndLocation(specificBranchCrawl, { phone: "+
   geo: undefined,
   hours: undefined
 }, "A specific first-party branch URL lost its own contact/location scope.");
+
+const joinedBuildingAddress = summarizeCrawlHtml(`<!doctype html><title>Contact</title><main>
+  <a href="/contact"><strong>Address:</strong> 2000 Windy Terrace Building 22ACedar Park, Texas 78613USA</a>
+  <a href="tel:512-948-1506">512-948-1506</a>
+</main>`, "https://address-conflict.example/contact");
+assert.deepEqual(joinedBuildingAddress.extractedFacts.address, {
+  street: "2000 Windy Terrace Building 22A",
+  city: "Cedar Park",
+  region: "TX",
+  postalCode: "78613",
+  country: "US"
+}, "A numbered Building unit joined to the city hid an otherwise complete visible address.");
+for (const visibleAddress of [
+  "123 Main Street, Austin, TX 78701.",
+  "123 Main Street, Austin, TX 78701, USA"
+]) {
+  assert.deepEqual(summarizeCrawlHtml(`<!doctype html><main>${visibleAddress}</main>`, "https://address-fixture.example/").extractedFacts.address, {
+    street: "123 Main Street",
+    city: "Austin",
+    region: "TX",
+    postalCode: "78701",
+    country: "US"
+  }, `Ordinary address punctuation was rejected: ${visibleAddress}`);
+}
+for (const ambiguousAddress of [
+  "123 Main Streetville, TX 78701",
+  "123 Main Terrace Building 22Cedar Park, TX 78701",
+  "123 Main Terrace Building 22ABC Town, TX 78701",
+  "123 Main Street Suite 22Austin, TX 78701",
+  "123 Main Street, Austin, TX 787011"
+]) {
+  assert.equal(
+    summarizeCrawlHtml(`<!doctype html><main>${ambiguousAddress}</main>`, "https://address-fixture.example/").extractedFacts.address,
+    undefined,
+    `Ambiguous address segmentation was guessed: ${ambiguousAddress}`
+  );
+}
+const foreignSpecialistAddress = summarizeCrawlHtml(`<!doctype html><title>Specialist service</title><main>
+  <a href="/contact"><strong>Address:</strong> 743 Snelling Avenue North Saint Paul, MN 55104</a>
+  <a href="tel:651-706-9895">651-706-9895</a>
+</main>`, "https://address-conflict.example/specialist/vehicle");
+const conflictingLocationCrawl = {
+  ...activeCrawlShell("https://address-conflict.example/"),
+  pageSummaries: [
+    { ...joinedBuildingAddress, source: "primary" as const },
+    { ...foreignSpecialistAddress, source: "sampled_internal" as const }
+  ]
+};
+assert.deepEqual(selectSourceContactAndLocation(conflictingLocationCrawl, { phone: "+15129481506" }), {
+  phone: "+15129481506",
+  email: undefined,
+  address: joinedBuildingAddress.extractedFacts.address,
+  geo: undefined,
+  hours: undefined
+}, "A clean but conflicting internal-page address displaced the primary first-party location.");
+const addressOrigin = "https://address-conflict.example";
+const addressDocuments = new Map([
+  ["/", `<!doctype html><title>Pristine Auto Detailing</title><main>
+    <p>${"First-party auto-detailing information for local customers. ".repeat(8)}</p>
+    <a href="/specialist/vehicle">Vehicle specialist</a>
+    <div><strong>Address:</strong> 2000 Windy Terrace Building 22ACedar Park, Texas 78613USA</div>
+    <a href="tel:512-948-1506">512-948-1506</a>
+  </main>`],
+  ["/specialist/vehicle", `<!doctype html><title>Vehicle specialist</title><main>
+    <p>${"First-party specialist information for local customers. ".repeat(8)}</p>
+    <div><strong>Address:</strong> 743 Snelling Avenue North Saint Paul, MN 55104</div>
+    <a href="tel:651-706-9895">651-706-9895</a>
+  </main>`]
+]);
+const addressDns = mock.method(dns, "lookup", async (hostname: string) => {
+  assert.equal(hostname, new URL(addressOrigin).hostname, "Address fixture attempted an unexpected DNS lookup.");
+  return [{ address: "93.184.216.34", family: 4 }];
+});
+syncBuiltinESMExports();
+const addressFetch = mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  assert.equal(url.origin, addressOrigin, "Address fixture attempted an unexpected network request.");
+  if (url.pathname === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+  const html = addressDocuments.get(url.pathname);
+  return html === undefined ? response("missing", 404, "text/plain") : response(html, 200);
+});
+try {
+  const ingestedAddressConflict = await ingestWebsite({ url: `${addressOrigin}/` });
+  assert.equal(ingestedAddressConflict.state.locations[0]?.street, "2000 Windy Terrace Building 22A");
+  assert.equal(ingestedAddressConflict.state.locations[0]?.city, "Cedar Park");
+  const retainedAddressFact = ingestedAddressConflict.state.facts.find((fact) => fact.kind === "address");
+  assert.equal(retainedAddressFact?.value, "2000 Windy Terrace Building 22A, Cedar Park, TX, 78613, US");
+  assert.equal(retainedAddressFact?.publicEligible, true,
+    "The parsed primary address remained rejected after conflicting internal-page evidence was scoped out.");
+} finally {
+  addressFetch.mock.restore();
+  addressDns.mock.restore();
+  syncBuiltinESMExports();
+}
 
 const reviewSummary = {
   ...summarizeCrawlHtml(`<!doctype html><title>Reviews</title><main><h1>Reviews</h1>
@@ -892,6 +1019,53 @@ assert.deepEqual(
   selectSourceOfferingFacts(offeringCrawl, offeringIngestion, []).map((offering) => offering.name),
   ["Bat Removal", "Well Pump Repair"],
   "CTA, blog, or location navigation fragments were admitted as canonical offering facts, or a clear service route was lost."
+);
+const mixedRoleOfferingPages = [
+  {
+    path: "/services/ceramic-coating",
+    title: "Ceramic coating in the Austin area",
+    purposeTags: ["service_detail", "location"] as const
+  },
+  {
+    path: "/services/paint-protection-film",
+    title: "Visit us for paint protection film",
+    purposeTags: ["service_detail", "location"] as const
+  },
+  {
+    path: "/portfolio/1972-porsche-911-targa-restoration",
+    title: "1972 Porsche 911 Targa restoration service project",
+    purposeTags: ["service_detail", "gallery"] as const
+  },
+  {
+    path: "/portfolio/custom-ppf-package-for-a-lamborghini-miura",
+    title: "Custom PPF package service project",
+    purposeTags: ["service_detail", "gallery"] as const
+  },
+  {
+    path: "/window-tint-installation",
+    title: "Window tint installation",
+    purposeTags: ["service_detail"] as const
+  }
+].map(({ path, title, purposeTags }) => ({
+  ...summarizeCrawlHtml(pageHtml(title), `${authorityOrigin}${path}`),
+  source: "sampled_internal" as const,
+  purposeTags: [...purposeTags]
+}));
+const mixedRoleOfferingCrawl = { ...authorityCrawl, pageSummaries: mixedRoleOfferingPages };
+const mixedRoleOfferingIngestion = {
+  ...authorityIngestion,
+  pages: mixedRoleOfferingPages.map((summary) => ({
+    ...authorityIngestion.pages[0]!,
+    url: summary.url,
+    finalUrl: summary.url,
+    summary,
+    evidenceClass: "first_party" as const
+  }))
+};
+assert.deepEqual(
+  selectSourceOfferingFacts(mixedRoleOfferingCrawl, mixedRoleOfferingIngestion, []).map((offering) => offering.name),
+  ["Ceramic Coating", "Paint Protection Film", "Window Tint Installation"],
+  "Incidental purpose tags displaced explicit service routes or promoted project evidence into canonical offerings."
 );
 const legacyOfferingPages = [
   {

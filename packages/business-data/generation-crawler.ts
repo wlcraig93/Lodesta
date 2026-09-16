@@ -8,7 +8,7 @@ import {
   type ExtractedBusinessFacts
 } from "@/lib/crawler";
 import { assertPublicFetchUrl, PublicFetchUrlError } from "@/lib/url-safety";
-import { preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
+import { corroboratedHomepageBusinessName, preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
 import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "./crawl-errors";
 import { isLikelyCmsTemplateOrSystemSourcePage } from "./source-page-classification";
 import {
@@ -1233,6 +1233,12 @@ function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], inges
   const mergedFacts = factPages.reduce((combined, page) => mergeExtractedFacts(combined, page.extractedFacts, source.hostname), emptyFacts());
   const facts = {
     ...mergedFacts,
+    name: corroboratedHomepageBusinessName({
+      current: mergedFacts.name,
+      homepageTitle: primary?.title,
+      otherPageNames: factPages.filter(page => page !== primary).map(page => page.extractedFacts.name),
+      hostname: source.hostname
+    }),
     phone: consensusPhone(factPages),
     hours: consensusHours(factPages)
   };

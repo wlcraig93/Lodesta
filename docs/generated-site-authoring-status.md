@@ -6,7 +6,15 @@ Date: 2026-09-16
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current checkpoint: optional close-up inspection verified locally; rollout pending
+### Current checkpoint: fresh private build completed; source-authority corrections verified locally
+
+The optional close-up release `43f4273d79e0a418986b2623b96392cfc9626497` passed CI `35144595959` and coordinated release `35145211531` attempt 1. Independent checks matched web and worker identities, verified healthy hosted control with maintenance released, and passed a separate fresh-session ten-pair sandbox canary. These deployment checks do not establish generator quality.
+
+A fresh private Pristine Auto Detailing Luna build produced a technically passing 28-route candidate in 20m48.164s for $0.21134310 catalog-estimated model cost. All 84 route/viewport captures completed without recorded browser errors or horizontal overflow. Independent source/pixel review rejects customer delivery: upstream extraction supplied the slogan as the name, portfolio projects as services, and a rejected Minnesota address to Google research; the official SVG logo was unsupported. Authored output also reuses unrelated imagery on named vehicle projects, loses service detail and misdirects an About CTA. See [the diagnostic and correction boundary](site-authoring-experiment-retrospective-2026-09-16.md). Local source-preparation fixes do not alter the retained candidate and are not yet a hosted quality improvement. No automatic critic, new authoring stage, prompt expansion or model-default change is introduced.
+
+Full local preflight and isolated launch-flow smoke pass. Independent review caught and resolved ZIP-punctuation and ambiguous address-boundary regressions before deployment. The historical diagnostic was moved to the established retrospective naming convention after the architecture check rejected its archived numbered path under a non-retrospective filename. No architecture guard was loosened. The source-authority platform identity is `site-authoring-platform@sha256:b78e501f2fa155a048d82cd67157f56777de643fa5d2e196f76e138bfdf730b7`; coordinated rollout and corrected fresh-generation evidence remain pending.
+
+### Earlier checkpoint: optional close-up inspection verified locally; rollout pending at that time
 
 The initial author can now request the existing centered/outlined element capture with an exact route and CSS selector. This addresses a demonstrated evidence-access limitation: top/middle/bottom screenshots can miss a below-fold element entirely. A synthetic native-pixel fixture proves ordinary samples omit the target while focused frames show its full surface at desktop, tablet and phone widths. Missing and invalid selectors retain warning evidence and fall back to route screenshots. Runtime fixtures verify explicit-route validation before building, unchanged source, owner-selection preservation and route/selector/label-aware caching.
 

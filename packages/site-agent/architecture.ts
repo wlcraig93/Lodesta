@@ -828,8 +828,46 @@ function retainedEvidencePreview(
     });
     if (testimonialPreview) return testimonialPreview;
   }
-  const candidates: Array<{ index: number; line: string; score: number; shortAttribution: boolean }> = [];
-  for (const [lineIndex, rawLine] of lines(page.extractedText).entries()) {
+  const candidates: Array<{ index: number; line: string; score: number; shortAttribution: boolean; wholeBlock?: boolean }> = [];
+  const sourceLines = lines(page.extractedText);
+  const headingNames = new Set(page.headings.map(normalizeLine));
+  if (page.title) headingNames.add(normalizeLine(page.title));
+  const headingIndexes = sourceLines.flatMap((line, index) => headingNames.has(normalizeLine(line)) ? [index] : []);
+  const blockLines = new Set<number>();
+  for (const [position, start] of headingIndexes.entries()) {
+    const heading = sourceLines[start]!;
+    const normalizedHeading = normalizeLine(heading);
+    // A repeated site-wide heading is normally chrome. The page's own first
+    // heading/title can also recur in service listings without losing its value.
+    const primaryHeading = normalizedHeading === normalizeLine(page.headings[0] ?? "")
+      && normalizedHeading === normalizeLine((page.title ?? "").split(/\s+[|–—-]\s+/)[0]!);
+    if ((!primaryHeading && (lineFrequency.get(normalizedHeading) ?? 0) >= 3)
+      || sourceLines.filter(line => normalizeLine(line) === normalizedHeading).length !== 1
+      || excludedPreviewLine(heading, input)) continue;
+    const end = headingIndexes[position + 1] ?? sourceLines.length;
+    const section = sourceLines.slice(start, end);
+    // This is a literal, bounded source excerpt, not an inferred list or offer.
+    // Long prose keeps the ordinary sentence path; short rows keep their heading
+    // and each other, even when the same useful rows occur on several pages.
+    if (section.some(line => line.length > 420 && !excludedPreviewLine(line, input))
+      || section.slice(1).filter(line => line.length < 45 && !excludedPreviewLine(line, input)).length < 2) continue;
+    const excerpt: string[] = [];
+    for (const line of section) {
+      if (excludedPreviewLine(line, input)) {
+        if (excerpt.at(-1) !== "[…]") excerpt.push("[…]");
+      } else excerpt.push(line);
+    }
+    const block = excerpt.join("\n");
+    // Oversized sections retain ordinary paragraph sampling. Only eligible
+    // whole blocks replace their individual rows, and are never later clipped.
+    if (block.length > (input.maxCharacters ?? 700)) continue;
+    for (let index = start; index < end; index += 1) blockLines.add(index);
+    candidates.push({ index: start * 100, line: block,
+      score: input.authorDigest ? authorDigestLineScore(block) : -start * 100,
+      shortAttribution: false, wholeBlock: true });
+  }
+  for (const [lineIndex, rawLine] of sourceLines.entries()) {
+    if (blockLines.has(lineIndex)) continue;
     if (isStructuredImageResourceLine(rawLine)) continue;
     // Extractors commonly collapse an entire article or testimonial into one
     // paragraph. Sentence segmentation keeps those source-rich pages visible
@@ -844,33 +882,42 @@ function retainedEvidencePreview(
       // across the crawl. On an explicit proof source, retain the attribution
       // even when the ordinary chrome-frequency filter would discard it.
       if (!shortAttribution && (lineFrequency.get(normalized) ?? 0) >= 3) continue;
-      if (/^(?:https?:\/\/|follow\b|read more\b|navigate\b|home\b|customer login\b|call now\b|contact us\b)/i.test(line)) continue;
-      if (/^(?:[A-Z0-9&'’ -]{20,})$/.test(line)) continue;
-      if (containsGatedBusinessClaim(line)) continue;
-      if (input.authorDigest && isLowSignalAuthorDigestLine(line, {
-        includeTestimonials: input.includeTestimonials
-      })) continue;
+      if (excludedPreviewLine(line, input)) continue;
       if (candidates.some((current) => normalizeLine(current.line) === normalized)) continue;
       candidates.push({ index, line, score: input.authorDigest ? authorDigestLineScore(line) : -index, shortAttribution });
     }
   }
   const ranked = input.authorDigest
     ? candidates.sort((left, right) => right.score - left.score || left.index - right.index)
-    : candidates;
-  const selected: Array<{ index: number; line: string }> = [];
+    : candidates.sort((left, right) => left.index - right.index);
+  const selected: Array<{ index: number; line: string; wholeBlock?: boolean }> = [];
   const maxCharacters = input.maxCharacters ?? 700;
   const maxLines = input.maxLines ?? 4;
   let totalCharacters = 0;
   for (const candidate of ranked) {
-    const remaining = maxCharacters - totalCharacters;
+    // Reserve an explicit excerpt boundary whenever a block is combined with
+    // another sample; excluded/intervening lines must not look contiguous.
+    const separator = candidate.wholeBlock || selected.some(item => item.wholeBlock) ? "\n[…]\n" : " ";
+    const prefixCharacters = selected.reduce((total, item) => total + item.line.length, 0) + selected.length * separator.length;
+    const remaining = maxCharacters - prefixCharacters;
     if (remaining < 4) break;
+    if (candidate.wholeBlock && candidate.line.length > remaining) continue;
     const line = truncatePreviewLine(candidate.line, remaining);
-    if (!candidate.shortAttribution && line.length < 45) continue;
-    selected.push({ index: candidate.index, line });
-    totalCharacters += line.length + 1;
+    if (!candidate.shortAttribution && !candidate.wholeBlock && line.length < 45) continue;
+    selected.push({ index: candidate.index, line, wholeBlock: candidate.wholeBlock });
+    totalCharacters = prefixCharacters + line.length;
     if (selected.length >= maxLines || totalCharacters >= maxCharacters) break;
   }
-  return selected.sort((left, right) => left.index - right.index).map((candidate) => candidate.line).join(" ").trim();
+  return selected.sort((left, right) => left.index - right.index).map((candidate) => candidate.line)
+    .join(selected.some(candidate => candidate.wholeBlock) ? "\n[…]\n" : " ").trim();
+}
+
+function excludedPreviewLine(line: string, input: { authorDigest?: boolean; includeTestimonials?: boolean }) {
+  return isStructuredImageResourceLine(line)
+    || /^(?:https?:\/\/|follow\b|read more\b|navigate\b|home\b|customer login\b|call now\b|contact us\b|back to\b)/i.test(line)
+    || /^(?:[A-Z0-9&'’ -]{20,})$/.test(line)
+    || containsGatedBusinessClaim(line)
+    || Boolean(input.authorDigest && isLowSignalAuthorDigestLine(line, input));
 }
 
 function retainedTestimonialPairPreview(

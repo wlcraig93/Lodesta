@@ -105,6 +105,8 @@ try {
     usage: { inputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0, outputTokens: 0, costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 0 }, startedAt: now });
   await repository.saveAgentRun(run);
   const mediaBytes = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#285649" } }).webp().toBuffer();
+  const largeSourcePhotoBytes = await sharp({ create: { width: 3_000, height: 2_000, channels: 3, background: "#793f34" } })
+    .jpeg({ quality: 92 }).toBuffer();
   const logoBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><rect x="40" y="20" width="80" height="60" fill="#183957"/></svg>');
   // Exercise the production evidence builder with the full canonical cap. The
   // manager request test separately proves these references and their shared
@@ -190,11 +192,17 @@ try {
   const mirroredWebsiteSource = canarySnapshots.find((snapshot) => snapshot.sourceType === "website")!;
   const inspectedPhoto = sourceSnapshotResourceSchema.parse({
     schemaVersion: 1, id: "resource_mirrored_service_photo", sourceSnapshotId: originalSnapshot.id,
-    captureKind: "http_response", role: "image", requestedUrl: "https://northstar.example/assets/service-photo.webp",
-    finalUrl: "https://northstar.example/assets/service-photo.webp", outcome: "fetched", status: 200, contentType: "image/webp",
-    storedEncoding: "identity", rawContentHash: sha256(mediaBytes), blobContentHash: sha256(mediaBytes),
-    storageKey: "fixture/service-photo", rawBytes: mediaBytes.length, storedBytes: mediaBytes.length,
+    captureKind: "http_response", role: "image", requestedUrl: "https://northstar.example/assets/service-photo.jpg",
+    finalUrl: "https://northstar.example/assets/service-photo.jpg", outcome: "fetched", status: 200, contentType: "image/jpeg",
+    storedEncoding: "identity", rawContentHash: sha256(largeSourcePhotoBytes), blobContentHash: sha256(largeSourcePhotoBytes),
+    storageKey: "fixture/service-photo", rawBytes: largeSourcePhotoBytes.length, storedBytes: largeSourcePhotoBytes.length,
     headers: {}, redirectChain: [], initiatorUrls: [homepage.requestedUrl], capturedAt: now, metadata: {}
+  });
+  const mismatchedPhoto = sourceSnapshotResourceSchema.parse({
+    ...inspectedPhoto, id: "resource_mismatched_service_photo", contentType: "image/png",
+    requestedUrl: "https://northstar.example/assets/mismatched-service-photo.png",
+    finalUrl: "https://northstar.example/assets/mismatched-service-photo.png",
+    storageKey: "fixture/mismatched-service-photo"
   });
   const secondarySnapshot = sourceSnapshotSchema.parse({
     ...originalSnapshot, id: "source_secondary_catalog", businessId: canary.buildInput.businessId,
@@ -224,15 +232,15 @@ try {
     requestedUrl: outsideSnapshot.sourceUrl!, finalUrl: outsideSnapshot.sourceUrl!, extractedText: "Outside source home",
     textContentHash: sha256("Outside source home")
   });
-  await repository.saveSourceSnapshotResources([inspectedPhoto]);
+  await repository.saveSourceSnapshotResources([inspectedPhoto, mismatchedPhoto]);
   await repository.saveSourceSnapshot(secondarySnapshot);
   await repository.saveSourceSnapshotResources([secondaryPhoto]);
   await repository.saveSourceSnapshotPages([secondaryPage]);
   await repository.saveSourceSnapshot(outsideSnapshot);
   await repository.saveSourceSnapshotResources([outsidePhoto]);
   await repository.saveSourceSnapshotPages([outsidePage]);
-  for (const asset of [inspectedPhoto, secondaryPhoto, outsidePhoto]) {
-    await store.putImmutable({ key: asset.storageKey!, bytes: mediaBytes, contentType: "image/webp", contentHash: sha256(mediaBytes) });
+  for (const asset of [inspectedPhoto, mismatchedPhoto, secondaryPhoto, outsidePhoto]) {
+    await store.putImmutable({ key: asset.storageKey!, bytes: largeSourcePhotoBytes, contentType: "image/jpeg", contentHash: sha256(largeSourcePhotoBytes) });
   }
   const inspectionSession = siteAgentSessionSchema.parse({ ...session, id: "session_asset_inspection",
     siteId: canary.site.id, publicBuildInputId: canary.buildInput.id, sandboxId: "sandbox_asset_inspection" });
@@ -243,24 +251,67 @@ try {
   const inspectionComplete = new Error("asset_inspection_fixture_complete");
   const inspectionManager = { run: async ({ runtime }: Parameters<WebsiteManagerAgent["run"]>[0]) => {
     const inspected = await runtime.execute({ callId: "inspect_catalog_assets", name: "inspect_assets", arguments: {
-      assetIds: [inspectedPhoto.id, secondaryPhoto.id, outsidePhoto.id]
+      assetIds: [inspectedPhoto.id, mismatchedPhoto.id, secondaryPhoto.id, outsidePhoto.id]
     } });
     const sourceAssets = inspected.diagnosticOutput.sourceAssets as Array<{
       resourceId: string; sourceId: string; sourcePageId: string;
     }>;
-    assert.deepEqual(sourceAssets.map((asset) => asset.resourceId).sort(), [inspectedPhoto.id, secondaryPhoto.id].sort(),
+    assert.deepEqual(sourceAssets.map((asset) => asset.resourceId).sort(), [inspectedPhoto.id, mismatchedPhoto.id, secondaryPhoto.id].sort(),
       "Inspect must include every active-catalog image and not leak a retained image outside it.");
     const mirrored = sourceAssets.find((asset) => asset.resourceId === inspectedPhoto.id)!;
+    const mismatched = sourceAssets.find((asset) => asset.resourceId === mismatchedPhoto.id)!;
     const secondary = sourceAssets.find((asset) => asset.resourceId === secondaryPhoto.id)!;
     assert.equal(mirrored.sourceId, mirroredWebsiteSource.id, "A mirrored resource must advertise the active logical source ID.");
     assert.equal(secondary.sourceId, secondarySnapshot.id, "The matching second catalog source must be retained in the result.");
     assert.equal(sourceAssets.some((asset) => asset.resourceId === outsidePhoto.id), false);
+    const blobsBeforeMismatch = await store.listPage();
+    const mismatchedAdoption = await runtime.execute({ callId: "adopt_mismatched_source_photo", name: "adopt_source_asset", arguments: {
+      sourceId: mismatched.sourceId, resourceId: mismatched.resourceId, sourcePageId: mismatched.sourcePageId,
+      kind: "photo", alt: "Mismatched fixture service photo"
+    } });
+    assert.equal(mismatchedAdoption.diagnosticOutput.error, "source_photo_mime_mismatch");
+    assert.equal((await repository.getAgentRun(inspectionRun.id))?.provisionalMedia?.revisions?.length ?? 0, 0,
+      "MIME-mismatched source photo persisted a provisional revision.");
+    assert.deepEqual(await store.listPage(), blobsBeforeMismatch,
+      "MIME-mismatched source photo persisted an asset derivative.");
+    const adoptedRefs: SitePublicBuildInput["business"]["assets"] = [];
     for (const asset of [mirrored, secondary]) {
       const adopted = await runtime.execute({ callId: `adopt_${asset.resourceId}`, name: "adopt_source_asset", arguments: {
         sourceId: asset.sourceId, resourceId: asset.resourceId, sourcePageId: asset.sourcePageId,
         kind: "photo", alt: "Fixture service photo"
       } });
       assert.equal(adopted.diagnosticOutput.ok, true, "The exact inspect tuple must be accepted by adoption.");
+      const ref = adopted.diagnosticOutput.asset as SitePublicBuildInput["business"]["assets"][number];
+      adoptedRefs.push(ref);
+      assert.equal(ref.mimeType, "image/webp");
+      assert.equal(Math.max(ref.width ?? 0, ref.height ?? 0), 2_560);
+    }
+    const replay = await runtime.execute({ callId: "adopt_mirrored_again", name: "adopt_source_asset", arguments: {
+      sourceId: mirrored.sourceId, resourceId: mirrored.resourceId, sourcePageId: mirrored.sourcePageId,
+      kind: "photo", alt: "Fixture service photo"
+    } });
+    assert.deepEqual(replay.diagnosticOutput.asset, adoptedRefs[0], "Repeated source-photo adoption did not reuse its active immutable revision.");
+    assert.deepEqual((await store.get(inspectedPhoto.storageKey!))!.bytes, largeSourcePhotoBytes,
+      "Source-photo preparation changed the retained source resource bytes.");
+    const retainedInspectionRun = await repository.getAgentRun(inspectionRun.id);
+    const preparedRevisions = retainedInspectionRun?.provisionalMedia?.revisions ?? [];
+    assert.equal(preparedRevisions.length, 2,
+      "Prepared derivatives must retain distinct source-bound revisions across source identities.");
+    assert(preparedRevisions.every(revision => revision.provenance.origin === "source_website"
+      && revision.provenance.preparation?.recipe === "source-photo-web"));
+    assert(preparedRevisions.every(revision => revision.id.includes("asset_revision_")));
+    for (const revision of preparedRevisions) {
+      const provenance = revision.provenance;
+      assert.equal(provenance.origin, "source_website");
+      assert(provenance.preparation?.recipe === "source-photo-web");
+      assert.equal(revision.id, `asset_revision_${sha256(stableJson({
+        sourceId: provenance.sourceSnapshotId,
+        resourceId: provenance.sourceResourceId,
+        rawContentHash: provenance.preparation.sourceContentHash,
+        sourcePhotoWebRecipeVersion: provenance.preparation.recipeVersion,
+        preparedContentHash: revision.contentHash
+      })).slice("sha256:".length, "sha256:".length + 32)}`,
+      "Prepared source-photo revision identity omitted its recipe version or prepared hash.");
     }
     throw inspectionComplete;
   } };

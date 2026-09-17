@@ -17,6 +17,7 @@ import {
 } from "../packages/site-verification";
 import { expectedSiteSandboxManifest } from "../packages/site-contracts";
 import { materializeSourceLogo } from "../packages/site-platform/source-logo-materialization";
+import { prepareSourcePhoto } from "../packages/site-platform/source-photo-preparation";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 import { BrowserVerificationInfrastructureError } from "../packages/site-verification/browser-gate";
 import { trustedFontFiles } from "../workers/site-sandbox/scaffold/platform/font-library";
@@ -750,6 +751,80 @@ assert(
     && undersizedProminentRasterFinding.message.includes("150×150px"),
   `A prominent raster enlarged beyond its intrinsic pixels escaped the source-suitability advisory: ${undersizedProminentRasterBrowser.findings.map((finding) => `${finding.id}:${finding.message}`).join(" | ")}`
 );
+
+// Exercise the prepared source-photo bytes through the actual browser-gate
+// asset route. The deliberate upscale makes the browser's decoded natural
+// dimensions observable through the existing source-suitability advisory.
+const sourcePhotoJpeg = await sharp({
+  create: { width: 3_000, height: 600, channels: 3, background: "#69483b" }
+}).jpeg({ quality: 92 }).toBuffer();
+const preparedSourcePhoto = await prepareSourcePhoto({
+  bytes: sourcePhotoJpeg,
+  mimeType: "image/jpeg",
+  sourceContentHash: sha256(sourcePhotoJpeg)
+});
+assert(preparedSourcePhoto.changed);
+assert.equal(preparedSourcePhoto.mimeType, "image/webp");
+assert.deepEqual([preparedSourcePhoto.width, preparedSourcePhoto.height], [2_560, 512]);
+const preparedSourcePhotoMetadata = await sharp(preparedSourcePhoto.bytes).metadata();
+assert.deepEqual(
+  [preparedSourcePhotoMetadata.format, preparedSourcePhotoMetadata.width, preparedSourcePhotoMetadata.height],
+  ["webp", preparedSourcePhoto.width, preparedSourcePhoto.height]
+);
+const preparedSourcePhotoRevisionId = "asset_revision_photo_prepared_source_browser";
+const preparedSourcePhotoStorageKey = "verification/assets/prepared-source-photo.webp";
+const preparedSourcePhotoBlobStore = new MemoryBlobStore();
+await preparedSourcePhotoBlobStore.putImmutable({
+  key: preparedSourcePhotoStorageKey,
+  bytes: preparedSourcePhoto.bytes,
+  contentType: preparedSourcePhoto.mimeType,
+  contentHash: preparedSourcePhoto.contentHash
+});
+const retainedPreparedSourcePhoto = await preparedSourcePhotoBlobStore.get(preparedSourcePhotoStorageKey);
+assert.equal(retainedPreparedSourcePhoto?.contentType, "image/webp");
+assert.deepEqual(retainedPreparedSourcePhoto?.bytes, preparedSourcePhoto.bytes);
+const preparedSourcePhotoBuildInput = {
+  ...buildInput,
+  business: {
+    ...buildInput.business,
+    assets: [{
+      assetId: "asset_photo_prepared_source_browser",
+      revisionId: preparedSourcePhotoRevisionId,
+      kind: "photo" as const,
+      contentHash: preparedSourcePhoto.contentHash,
+      storageKey: preparedSourcePhotoStorageKey,
+      mimeType: preparedSourcePhoto.mimeType,
+      alt: "Prepared source photo browser fixture",
+      width: preparedSourcePhoto.width,
+      height: preparedSourcePhoto.height,
+      origin: "source_website" as const,
+      sourceFactIds: [],
+      activeForFutureBuilds: true
+    }]
+  },
+  assetRevisionIds: [preparedSourcePhotoRevisionId]
+};
+const preparedSourcePhotoMarkup = `<img class="prepared-source-photo-fixture" alt="Prepared source photo browser fixture" src="/_lodesta/assets/${preparedSourcePhotoRevisionId}" style="display:block;width:960px;height:820px;object-fit:cover">`;
+const preparedSourcePhotoArtifact = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</main>", `${preparedSourcePhotoMarkup}</main>`) }
+    : route),
+  files: prepared.files.map((file) => file.path === "index.html"
+    ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${preparedSourcePhotoMarkup}</main>`)) }
+    : file)
+};
+const preparedSourcePhotoBrowser = await runArtifactBrowserGate({
+  prepared: preparedSourcePhotoArtifact, buildInput: preparedSourcePhotoBuildInput,
+  blobStore: preparedSourcePhotoBlobStore, capturePrefix: "verification/site-authoring-render-prepared-source-photo",
+  routePaths: ["/"], viewports: [{ name: "desktop", width: 1280, height: 900 }]
+});
+assert(preparedSourcePhotoBrowser.captures.some((capture) => capture.route === "/" && capture.viewport === "desktop"));
+assert(!preparedSourcePhotoBrowser.findings.some((finding) => finding.id === "render.broken_image"));
+const preparedSourcePhotoUpscale = preparedSourcePhotoBrowser.findings.find((finding) =>
+  finding.id === "render.raster_image_upscale" && finding.message.includes("prepared-source-photo-fixture"));
+assert(preparedSourcePhotoUpscale?.message.includes(`${preparedSourcePhoto.width}×${preparedSourcePhoto.height}px`),
+  `The browser did not report the prepared WebP's decoded natural dimensions: ${preparedSourcePhotoUpscale?.message ?? "missing finding"}`);
 const preparedSourceLogo = await materializeSourceLogo({
   bytes: paddedLogoPng,
   mimeType: "image/png",

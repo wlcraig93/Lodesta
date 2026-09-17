@@ -444,6 +444,63 @@ const readableDeepEvidence = createArchitectureEvidenceFiles([deepEvidencePage],
 assert.doesNotMatch(boundedDeepEvidence[1].content, /later source detail gives the retained route/i);
 assert.match(readableDeepEvidence[1].content, /later source detail gives the retained route/i);
 assert.doesNotMatch(readableDeepEvidence[1].content, /short routing sample cannot carr[^y]/i, "Readable preview ended in a partial word.");
+// Literal heading sections preserve short source rows without inferring offers.
+const bicycleScope = [
+  "Workshop Overhaul", "Back to all services", "Includes everything in Annual Service",
+  "The following work is included in this workshop visit:",
+  "Brake adjustment", "Wheel alignment", "Bearing cleaning", "Price", "$180"
+];
+const bicyclePage = page("page_bicycle", "/deep-service", "Workshop Overhaul",
+  [...bicycleScope, "Other information", "Contact us", "Home"].join("\n"),
+  ["Workshop Overhaul", "Other information"]);
+const repeatedScopePages = Array.from({ length: 3 }, (_, index) => page(
+  `page_shared_scope_${index}`, `/shared-${index}`, "Shared navigation",
+  ["Workshop Overhaul", "Brake adjustment", "Wheel alignment", "Home", "Contact us"].join("\n")
+));
+function scopePreview(sourcePages: SourceSnapshotPage[], mode: "indexed-pull-preview" | "indexed-pull-preview-readable" = "indexed-pull-preview-readable") {
+  const content = createArchitectureEvidenceFiles(sourcePages, deepEvidencePlan, { retainedContentMode: mode })[1]!.content;
+  const index = JSON.parse(content.slice("export const approvedSourceIndex = ".length, -" as const;\n".length));
+  return index.routes[0].evidencePreviews.map((item: { preview: string }) => item.preview).join("\n") as string;
+}
+const bicyclePreview = scopePreview([bicyclePage, ...repeatedScopePages]);
+assert.match(bicyclePreview, /Workshop Overhaul\n\[…\]\nIncludes everything in Annual Service/);
+assert.match(bicyclePreview, /workshop visit:\nBrake adjustment\nWheel alignment\nBearing cleaning\nPrice\n\$180/);
+assert.doesNotMatch(bicyclePreview, /Back to all services|Contact us|Home/);
+assert(bicyclePreview.length <= 1_400, "A source block exceeded the existing readable preview budget.");
+assert.match(scopePreview([{ ...bicyclePage, title: "Workshop Overhaul | Bicycle Services" }, ...repeatedScopePages]),
+  /Includes everything in Annual Service/, "A source title suffix hid its own repeated heading.");
+const filteredBlock = page("page_filtered_block", "/deep-service", "Workshop Overhaul", [
+  "Workshop Overhaul", "Brake adjustment", "Our services are guaranteed safe for children.",
+  JSON.stringify({ items: [{ url: `https://example.test/${"wheel-".repeat(80)}.jpg`, type: "image" }] }),
+  "Wheel alignment"
+].join("\n"));
+const filteredBlockPreview = scopePreview([filteredBlock]);
+assert.equal(filteredBlockPreview, "Workshop Overhaul\nBrake adjustment\n[…]\nWheel alignment");
+const oversizedBlock = page("page_large_block", "/deep-service", "Workshop Overhaul", [
+  "Workshop Overhaul", "A substantive source explanation must remain available when its surrounding section is too large for an atomic preview.",
+  ...Array.from({ length: 75 }, (_, index) => `Documented short source task ${index}`)
+].join("\n"));
+assert.match(scopePreview([oversizedBlock]), /substantive source explanation must remain available/,
+  "An oversized heading section suppressed ordinary prose sampling.");
+const budgetPrefix = ["Before choosing a workshop visit", "After reviewing the available options"].map(start =>
+  `${start}, ${"the customer can discuss the documented bicycle condition and the proposed work ".repeat(3)}with the workshop.`
+).join("\n");
+const constrainedPage = { ...bicyclePage, extractedText: `${budgetPrefix}\n${bicyclePage.extractedText}` };
+const constrainedPreview = scopePreview([constrainedPage], "indexed-pull-preview");
+assert(constrainedPreview.length <= 700);
+// An atomic block must never be trimmed between its introduction and scope.
+assert.doesNotMatch(constrainedPreview, /Workshop Overhaul|following work is included/,
+  "A block that could not fit the remaining budget leaked its heading or lead-in.");
+const chromeOnlyPage = page("page_chrome", "/deep-service", "Navigation", "Navigation\nHome\nContact us\nRead more");
+assert.equal(scopePreview([chromeOnlyPage]), "", "Short navigation was mistaken for a substantive source block.");
+const unrelatedNavigation = page("page_unrelated_navigation", "/deep-service", "About the workshop",
+  "Services\nRepairs\nRentals\nAbout the workshop\nOur workshop explains the condition of the bicycle before recommending appropriate work.",
+  ["Services", "About the workshop"]);
+const repeatedNavigation = Array.from({ length: 3 }, (_, index) => page(
+  `page_nav_${index}`, `/nav-${index}`, "Another page", "Services\nRepairs\nRentals"
+));
+assert.doesNotMatch(scopePreview([unrelatedNavigation, ...repeatedNavigation]), /Services|Repairs|Rentals/,
+  "A repeated first navigation heading was mistaken for page identity.");
 const imageResourceJson = JSON.stringify({
   items: [{ url: "https://cdn.example.test/gallery/vehicle-one.jpg", type: "image" }],
   group: "Service Intro Gallery"

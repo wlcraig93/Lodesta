@@ -5,11 +5,80 @@ import { sha256 } from "../packages/business-data";
 import { createImageBytes, imageCreationModel, managerToolArguments, websiteManagerTools } from "../packages/site-agent";
 import { assetRevisionSchema, type AssetRevisionRef } from "../packages/site-contracts";
 import { WorkspaceManagerRuntime } from "../packages/site-platform/manager-runtime";
-import { reusableActiveSourceAssetRef } from "../packages/site-platform/workflow";
+import { reusableActiveSourceAssetIdentityRef, reusableActiveSourceAssetRef } from "../packages/site-platform/workflow";
+import { prepareSourcePhoto, sourcePhotoWebRecipeVersion } from "../packages/site-platform/source-photo-preparation";
 import { createMediaContactSheet } from "../packages/site-verification";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const validSiteSource = 'export const siteDefinition = { routes: [{ path: "/", element: <main><h1>Home</h1></main> }] };';
+
+const largeSourcePhoto = await sharp({
+  create: { width: 3_000, height: 2_000, channels: 3, background: "#8b4134" }
+}).jpeg({ quality: 92 }).toBuffer();
+const retainedLargeSourcePhoto = Buffer.from(largeSourcePhoto);
+const largePreparedPhoto = await prepareSourcePhoto({
+  bytes: largeSourcePhoto, mimeType: "image/jpeg", sourceContentHash: sha256(largeSourcePhoto)
+});
+assert.equal(largePreparedPhoto.changed, true);
+assert.equal(largePreparedPhoto.mimeType, "image/webp");
+assert.equal(Math.max(largePreparedPhoto.width, largePreparedPhoto.height), 2_560);
+assert(largePreparedPhoto.bytes.length < largeSourcePhoto.length);
+assert.deepEqual(largePreparedPhoto.preparation?.operations, ["resize_inside", "encode_webp"]);
+assert.equal(largePreparedPhoto.preparation?.recipeVersion, sourcePhotoWebRecipeVersion);
+assert.deepEqual(largeSourcePhoto, retainedLargeSourcePhoto, "Preparation mutated the retained source bytes.");
+
+const efficientPixels = Buffer.alloc(320 * 200 * 3);
+for (let index = 0; index < efficientPixels.length; index++) efficientPixels[index] = (index * 31) % 256;
+const efficientSmallPhoto = await sharp(efficientPixels, { raw: { width: 320, height: 200, channels: 3 } })
+  .jpeg({ quality: 20 }).toBuffer();
+const unchangedSmallPhoto = await prepareSourcePhoto({
+  bytes: efficientSmallPhoto, mimeType: "image/jpeg", sourceContentHash: sha256(efficientSmallPhoto)
+});
+assert.equal(unchangedSmallPhoto.changed, false, "An efficient small source photo grew into a delivery derivative.");
+assert.equal(unchangedSmallPhoto.bytes, efficientSmallPhoto);
+assert.equal(unchangedSmallPhoto.contentHash, sha256(efficientSmallPhoto));
+assert.equal(unchangedSmallPhoto.preparation, undefined);
+await assert.rejects(() => prepareSourcePhoto({
+  bytes: efficientSmallPhoto, mimeType: "image/png", sourceContentHash: sha256(efficientSmallPhoto)
+}), /source_photo_mime_mismatch/);
+
+const animatedWebpFrames = await Promise.all(["#8b4134", "#304b62"].map(background =>
+  sharp({ create: { width: 16, height: 16, channels: 3, background } }).png().toBuffer()));
+const animatedWebp = await sharp(animatedWebpFrames, { join: { animated: true } })
+  .webp({ loop: 0, delay: [100, 100] }).toBuffer();
+await assert.rejects(() => prepareSourcePhoto({
+  bytes: animatedWebp, mimeType: "image/webp", sourceContentHash: sha256(animatedWebp)
+}), /source_photo_animation_unsupported/);
+const unsupportedTiff = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#315a46" } })
+  .tiff().toBuffer();
+await assert.rejects(() => prepareSourcePhoto({
+  bytes: unsupportedTiff, mimeType: "image/png", sourceContentHash: sha256(unsupportedTiff)
+}), /source_photo_decode_format_unsupported/);
+
+const orientedPhoto = await sharp({ create: { width: 40, height: 80, channels: 3, background: "#304b62" } })
+  .jpeg().withMetadata({ orientation: 6 }).toBuffer();
+const orientedPrepared = await prepareSourcePhoto({
+  bytes: orientedPhoto, mimeType: "image/jpeg", sourceContentHash: sha256(orientedPhoto)
+});
+assert.equal(orientedPrepared.changed, true);
+assert.deepEqual([orientedPrepared.width, orientedPrepared.height], [80, 40]);
+assert(orientedPrepared.preparation?.operations.includes("auto_orient"));
+await assert.rejects(() => prepareSourcePhoto({
+  bytes: Buffer.from("not an image"), mimeType: "image/jpeg", sourceContentHash: sha256("not an image")
+}), /source_photo_decode_failed/);
+await assert.rejects(() => prepareSourcePhoto({
+  bytes: orientedPhoto, mimeType: "image/jpeg", sourceContentHash: `sha256:${"0".repeat(64)}`
+}), /source_photo_content_hash_mismatch/);
+const oversizedPhoto = await sharp({
+  create: { width: 9_000, height: 9_000, channels: 3, background: "#444444" }
+}).png({ compressionLevel: 9 }).toBuffer();
+await assert.rejects(() => prepareSourcePhoto({
+  bytes: oversizedPhoto, mimeType: "image/png", sourceContentHash: sha256(oversizedPhoto)
+}), /source_photo_pixel_limit_exceeded/);
+const truncatedPhoto = largeSourcePhoto.subarray(0, Math.floor(largeSourcePhoto.length / 2));
+await assert.rejects(() => prepareSourcePhoto({
+  bytes: truncatedPhoto, mimeType: "image/jpeg", sourceContentHash: sha256(truncatedPhoto)
+}), /source_photo_(decode|preparation)_failed/);
 
 const strictPreparedPhotoRevision = {
   schemaVersion: 1, id: "asset_revision_prepared_photo", assetId: "asset_prepared_photo", businessId: "business_test",
@@ -646,6 +715,19 @@ const buildInputWithExistingSourceAsset = {
   },
   assetRevisionIds: [existingSourceAsset.revisionId]
 };
+assert.equal(reusableActiveSourceAssetIdentityRef({ buildInput: buildInputWithExistingSourceAsset,
+  assetId: existingSourceAsset.assetId, kind: "photo" }), existingSourceAsset,
+  "An already-active legacy source photo was not reused before future-only preparation.");
+assert.throws(() => reusableActiveSourceAssetIdentityRef({
+  buildInput: { ...buildInputWithExistingSourceAsset, business: { ...buildInputWithExistingSourceAsset.business,
+    assets: [{ ...existingSourceAsset, origin: "owner_upload" }] } },
+  assetId: existingSourceAsset.assetId, kind: "photo"
+}), /source_asset_active_identity_mismatch/);
+assert.throws(() => reusableActiveSourceAssetIdentityRef({
+  buildInput: { ...buildInputWithExistingSourceAsset, business: { ...buildInputWithExistingSourceAsset.business,
+    assets: [existingSourceAsset, { ...existingSourceAsset, revisionId: "asset_revision_duplicate" }] } },
+  assetId: existingSourceAsset.assetId, kind: "photo"
+}), /source_asset_active_identity_conflict/);
 assert.equal(reusableActiveSourceAssetRef({
   buildInput: buildInputWithExistingSourceAsset,
   revisionId: existingSourceAsset.revisionId,

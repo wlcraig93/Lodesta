@@ -173,6 +173,7 @@ import { sendOwnerOperationalEmail } from "@/lib/owner-notifications";
 import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
 import { scopedVisualInspectionRoutePaths } from "./visual-inspection-scope";
 import { logoPresentationRecipeVersion } from "./logo-preparation";
+import { prepareSourcePhoto, sourcePhotoWebRecipeVersion } from "./source-photo-preparation";
 import { canonicalSourceLogoAssetId, canonicalSourceLogoRevisionId, materializeCanonicalSourceLogo, materializeSourceLogo } from "./source-logo-materialization";
 
 export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
@@ -2418,18 +2419,35 @@ export class SiteAuthoringWorkflow {
             return canonical.ref;
           }
           const assetId = deterministicId("asset", { sourceId, resourceId });
+          const existingActiveRef = kind === "photo"
+            ? reusableActiveSourceAssetIdentityRef({ buildInput: effectiveBuildInput, assetId, kind })
+            : undefined;
+          if (existingActiveRef) return existingActiveRef;
           const blob = await this.blobStore.get(resource.storageKey);
           if (!blob) throw new Error("source_asset_blob_missing");
           const raw = decodeRetainedSourceResource(resource, blob.bytes);
-          const adoptedBytes = raw;
-          const adoptedMimeType = mimeType;
-          const adoptedContentHash = asContentHash(resource.rawContentHash);
-          const dimensions = await sharp(raw, { limitInputPixels: 80_000_000, animated: false }).metadata();
-          const revisionId = deterministicId("asset_revision", {
-            sourceId,
-            resourceId,
-            rawContentHash: resource.rawContentHash
-          });
+          const sourceRasterMimeType = mimeType as "image/png" | "image/jpeg" | "image/webp";
+          const sourceContentHash = asContentHash(resource.rawContentHash);
+          const prepared = kind === "photo"
+            ? await prepareSourcePhoto({ bytes: raw, mimeType: sourceRasterMimeType, sourceContentHash })
+            : undefined;
+          const adoptedBytes = prepared?.bytes ?? raw;
+          const adoptedMimeType = prepared?.mimeType ?? sourceRasterMimeType;
+          const adoptedContentHash = prepared?.contentHash ?? sourceContentHash;
+          const dimensions = prepared ?? await sharp(raw, { limitInputPixels: 80_000_000, animated: false }).metadata();
+          const revisionId = prepared?.changed
+            ? deterministicId("asset_revision", {
+                sourceId,
+                resourceId,
+                rawContentHash: resource.rawContentHash,
+                sourcePhotoWebRecipeVersion,
+                preparedContentHash: prepared.contentHash
+              })
+            : deterministicId("asset_revision", {
+                sourceId,
+                resourceId,
+                rawContentHash: resource.rawContentHash
+              });
           // Source-mirror blobs are content-addressed globally and may be
           // shared by repeated ingestions of the same public website. Asset
           // revisions are business-bound authorities, so each adopted image
@@ -2443,7 +2461,7 @@ export class SiteAuthoringWorkflow {
             contentHash: adoptedContentHash,
             storageKey: adoptedStorageKey,
             mimeType: adoptedMimeType,
-            reuseContentMatch: true
+            reuseContentMatch: !prepared?.changed
           });
           if (activeRef) return activeRef;
           await this.blobStore.putImmutable({
@@ -2470,7 +2488,8 @@ export class SiteAuthoringWorkflow {
               sourcePageUrl: page.finalUrl ?? page.requestedUrl,
               sourceSnapshotId: sourceId,
               sourceResourceId: resourceId,
-              alt
+              alt,
+              ...(prepared?.preparation ? { preparation: prepared.preparation } : {})
             },
             createdAt: snapshot.capturedAt
           });
@@ -5605,6 +5624,22 @@ export function reusableActiveSourceAssetRef(input: {
   if (!contentMatch) return undefined;
   if (contentMatch.mimeType !== input.mimeType) throw new Error("source_asset_retained_content_mismatch");
   return contentMatch;
+}
+
+export function reusableActiveSourceAssetIdentityRef(input: {
+  buildInput: SitePublicBuildInput;
+  assetId: string;
+  kind: AssetRevisionRef["kind"];
+}) {
+  const matches = input.buildInput.business.assets.filter((candidate) =>
+    candidate.assetId === input.assetId && candidate.activeForFutureBuilds);
+  if (matches.length > 1) throw new Error("source_asset_active_identity_conflict");
+  const active = matches[0];
+  if (!active) return undefined;
+  if (active.origin !== "source_website" || active.kind !== input.kind) {
+    throw new Error("source_asset_active_identity_mismatch");
+  }
+  return active;
 }
 
 function messageRole(session: SiteAgentSession, actorId: string): "owner" | "operator" {

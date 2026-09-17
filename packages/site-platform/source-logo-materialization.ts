@@ -1,5 +1,6 @@
 import { sha256, stableJson } from "@/packages/business-data";
 import { decodeRetainedSourceResource, type RetainedSourceResource } from "@/packages/business-data/source-mirror";
+import { DomUtils, parseDocument } from "htmlparser2";
 import sharp from "sharp";
 import {
   assetRevisionRefSchema,
@@ -149,13 +150,16 @@ export async function materializeCanonicalSourceLogo(input: {
   /** An author may identify a missed mark from retained pixels only when no active logo exists. */
   selectedResourceId?: string;
 }): Promise<CanonicalSourceLogo | CanonicalSourceLogoUnavailable> {
-  const candidates = rankSourceAssetCandidates({
+  const rankedCandidates = rankSourceAssetCandidates({
     resources: input.resources.map(({ resource }) => resource),
     pages: input.pages,
     includeSvgLogoCandidates: true
   }).filter((candidate) => input.selectedResourceId
     ? candidate.resource.id === input.selectedResourceId
     : candidate.likelyKind === "logo");
+  const candidates = input.selectedResourceId
+    ? rankedCandidates
+    : homepageHomeLinkLogoCandidates(rankedCandidates, input.pages, input.resources);
   if (!candidates.length) {
     return { status: "unavailable", reason: "no_logo_candidate", unusableCandidates: [] };
   }
@@ -232,6 +236,94 @@ export async function materializeCanonicalSourceLogo(input: {
   }
 
   return { status: "unavailable", reason: "logo_candidates_unusable", unusableCandidates };
+}
+
+/**
+ * A customer homepage's image link back to that same homepage is stronger
+ * identity evidence than a generic `logo` filename. When retained HTML supplies
+ * that evidence, restrict selection to that group: an unusable header mark must
+ * not fall through to a partner or specialist logo. Multiple linked variants
+ * preserve the existing relative ranking. Without retained document evidence,
+ * ordinary ranking remains the fallback.
+ */
+function homepageHomeLinkLogoCandidates(
+  candidates: SourceAssetCandidate[],
+  pages: SourceSnapshotPage[],
+  resources: RetainedSourceResource[]
+) {
+  if (candidates.length < 2) return candidates;
+  const retainedById = new Map(resources.map((entry) => [entry.resource.id, entry]));
+  const homeLinkedImages = new Set<string>();
+  for (const page of pages.filter((candidate) => candidate.path === "/")) {
+    const retained = retainedById.get(page.resourceId);
+    if (!retained?.bytes || !/text\/html/i.test(retained.resource.contentType ?? "")) continue;
+    let html: string;
+    try {
+      html = decodeRetainedSourceResource(retained.resource, retained.bytes).toString("utf8");
+    } catch {
+      continue;
+    }
+    for (const imageUrl of homepageHomeLinkImageUrls(html, page.finalUrl ?? page.requestedUrl)) {
+      homeLinkedImages.add(imageUrl);
+    }
+  }
+  const matched = candidates.filter((candidate) =>
+    homeLinkedImages.has(normalizedEvidenceUrl(candidate.resource.finalUrl ?? candidate.resource.requestedUrl))
+  );
+  return matched.length ? matched.map((candidate) => ({
+    ...candidate,
+    relevanceReasons: [...candidate.relevanceReasons, "image is linked to the homepage from the retained homepage"]
+  })) : candidates;
+}
+
+function homepageHomeLinkImageUrls(html: string, homepageUrl: string) {
+  const values = new Set<string>();
+  const document = parseDocument(html, { decodeEntities: true });
+  const anchors = DomUtils.findAll(
+    (node) => node.type === "tag" && node.name === "a",
+    document.children
+  );
+  for (const anchor of anchors) {
+    const href = anchor.attribs.href;
+    if (!href || !isHomepageTarget(href, homepageUrl)) continue;
+    const images = DomUtils.findAll(
+      (node) => node.type === "tag" && node.name === "img",
+      anchor.children
+    );
+    for (const image of images) {
+      for (const name of ["src", "data-src"]) {
+        const value = image.attribs[name];
+        if (value) values.add(normalizedEvidenceUrl(value, homepageUrl));
+      }
+      const srcset = image.attribs.srcset;
+      for (const entry of srcset?.split(",") ?? []) {
+        const value = entry.trim().split(/\s+/, 1)[0];
+        if (value) values.add(normalizedEvidenceUrl(value, homepageUrl));
+      }
+    }
+  }
+  return values;
+}
+
+function isHomepageTarget(value: string, homepageUrl: string) {
+  if (!value.trim() || /^[#?]/.test(value.trim())) return false;
+  try {
+    const target = new URL(value, homepageUrl);
+    const homepage = new URL(homepageUrl);
+    return target.origin === homepage.origin && target.pathname.replace(/\/+$/, "") === homepage.pathname.replace(/\/+$/, "");
+  } catch {
+    return false;
+  }
+}
+
+function normalizedEvidenceUrl(value: string, base?: string) {
+  try {
+    const url = new URL(value.replaceAll("&amp;", "&"), base);
+    url.hash = "";
+    return url.href;
+  } catch {
+    return value;
+  }
 }
 
 /**

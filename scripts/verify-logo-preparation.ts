@@ -9,6 +9,7 @@ import {
   materializeSourceLogo,
   sourceLogoPreparedRevisionId
 } from "../packages/site-platform/source-logo-materialization";
+import { rankSourceAssetCandidates } from "../packages/site-platform/source-resource-ranking";
 import { sourceSnapshotPageSchema, sourceSnapshotResourceSchema, sourceSnapshotSchema } from "../packages/site-contracts";
 
 const transparentPadded = await sharp({
@@ -270,6 +271,35 @@ const sourceLogoEntry = (id: string, bytes: Buffer, path: string, contentType = 
   }),
   bytes
 });
+const sourceDocumentEntry = (html: string) => {
+  const bytes = Buffer.from(html);
+  return {
+    resource: sourceSnapshotResourceSchema.parse({
+      schemaVersion: 1,
+      id: page.resourceId,
+      sourceSnapshotId: snapshot.id,
+      captureKind: "http_response",
+      role: "document",
+      requestedUrl: page.requestedUrl,
+      finalUrl: page.finalUrl,
+      outcome: "fetched",
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      storedEncoding: "identity",
+      rawContentHash: sha256(bytes),
+      blobContentHash: sha256(bytes),
+      storageKey: `source-mirror/${sha256(bytes).slice(7)}.bin`,
+      rawBytes: bytes.length,
+      storedBytes: bytes.length,
+      headers: {},
+      redirectChain: [],
+      initiatorUrls: [page.requestedUrl],
+      capturedAt: snapshot.capturedAt,
+      metadata: {}
+    }),
+    bytes
+  };
+};
 const canonical = await materializeCanonicalSourceLogo({
   snapshot,
   pages: [page],
@@ -292,6 +322,108 @@ assert.equal(canonical.revision.provenance.origin, "source_website");
 assert.equal(canonical.revision.provenance.sourceSnapshotId, snapshot.id);
 assert.equal(canonical.revision.provenance.sourceResourceId, undefined,
   "Existing raster provenance changed shape under the same deterministic revision identity.");
+
+const exactLengthSvg = (source: string, bytes: number) => {
+  const padding = bytes - Buffer.byteLength(source);
+  assert(padding >= 0);
+  return Buffer.from(source.replace("</svg>", `${" ".repeat(padding)}</svg>`));
+};
+const porscheSpecialistLogo = exactLengthSvg(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="380" height="488" viewBox="0 0 380 488"><path fill="#111" d="M0 0h380v488H0z"/></svg>',
+  18_911
+);
+const pristineBusinessLogo = exactLengthSvg(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="331" height="77" viewBox="0 0 331 77"><path fill="#111" d="M0 0h331v77H0z"/></svg>',
+  12_832
+);
+const porscheUrl = "https://cdn.prod.website-files.com/64aeacbc660c41c0352856c7/64c154b45e92d9ea81c153be_PorscheLogoNew.svg";
+const pristineUrl = "https://cdn.prod.website-files.com/661fb5d27d5fec91160b4b8e/6637b84b273968f93dd9af3f_PristineTXNewLogo.svg";
+const porscheFixture = sourceLogoEntry(
+  "source_resource_4d8652b6f9fab0c2cb2a6b57",
+  porscheSpecialistLogo,
+  "PorscheLogoNew.svg",
+  "image/svg+xml"
+);
+const pristineFixture = sourceLogoEntry(
+  "source_resource_fe8c27c72feb4b17056f80d3",
+  pristineBusinessLogo,
+  "PristineTXNewLogo.svg",
+  "image/svg+xml"
+);
+const porscheEntry = { ...porscheFixture, resource: sourceSnapshotResourceSchema.parse({
+  ...porscheFixture.resource, requestedUrl: porscheUrl, finalUrl: porscheUrl
+}) };
+const pristineEntry = { ...pristineFixture, resource: sourceSnapshotResourceSchema.parse({
+  ...pristineFixture.resource, requestedUrl: pristineUrl, finalUrl: pristineUrl
+}) };
+assert((porscheEntry.resource.rawBytes ?? 0) > (pristineEntry.resource.rawBytes ?? 0),
+  "Structurally matched regression fixture no longer reproduces the original file-size winner.");
+assert.equal(rankSourceAssetCandidates({
+  pages: [page], resources: [porscheEntry.resource, pristineEntry.resource], includeSvgLogoCandidates: true
+})[0]?.resource.id, porscheEntry.resource.id,
+"The structurally matched fixture no longer reproduces the original canonical-logo ranking defect.");
+const retainedHomepage = sourceDocumentEntry(`<!doctype html><html><body>
+  <!-- <a href="/"><img src="${porscheUrl}"></a> -->
+  <script>const misleading = '<a href="/"><img src="${porscheUrl}"></a>';</script>
+  <a data-href="/"><img src="${porscheUrl}"></a>
+  <a href="   "><img src="${porscheUrl}"></a>
+  <a href="#clients"><img src="${porscheUrl}"></a>
+  <a href="?filter=brand"><img src="${porscheUrl}"></a>
+  <nav><a href=/#top class="nav-logo-link"><img src=${pristineUrl} class="logo"></a></nav>
+  <a href="/specialist/porsche-2"><img src="${porscheUrl}" class="home-specialist-list-logo"></a>
+  <a href="https://external.example/"><img src="${porscheUrl}"></a>
+</body></html>`);
+const homepageLinkedCanonical = await materializeCanonicalSourceLogo({
+  snapshot,
+  pages: [page],
+  resources: [porscheEntry, pristineEntry, retainedHomepage],
+  businessName: "Pristine Auto Detailing"
+});
+assert.equal(homepageLinkedCanonical.status, "canonical");
+if (homepageLinkedCanonical.status !== "canonical") throw new Error("Homepage-linked business logo was unavailable.");
+assert.equal(homepageLinkedCanonical.candidate.resource.id, pristineEntry.resource.id,
+  "A larger specialist logo displaced the retained homepage home-link logo.");
+assert(homepageLinkedCanonical.candidate.relevanceReasons.includes(
+  "image is linked to the homepage from the retained homepage"
+));
+
+const absoluteHomepage = sourceDocumentEntry(`<!doctype html><html><body>
+  <a href="https://example.com/"><img srcset="${pristineUrl} 1x"></a>
+  <a href="/specialist/porsche-2"><img data-src="${porscheUrl}"></a>
+</body></html>`);
+const absoluteHomepageCanonical = await materializeCanonicalSourceLogo({
+  snapshot,
+  pages: [page],
+  resources: [porscheEntry, pristineEntry, absoluteHomepage],
+  businessName: "Pristine Auto Detailing"
+});
+assert.equal(absoluteHomepageCanonical.status, "canonical");
+if (absoluteHomepageCanonical.status !== "canonical") throw new Error("Absolute homepage-link evidence was unavailable.");
+assert.equal(absoluteHomepageCanonical.candidate.resource.id, pristineEntry.resource.id,
+  "Absolute same-origin homepage-link evidence was not honored.");
+
+const malformedHomepageLogo = sourceLogoEntry(
+  "source_resource_malformed_homepage_logo",
+  Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 331 77"><path'),
+  "BusinessLogo.svg",
+  "image/svg+xml"
+);
+const retainedMalformedHomepage = sourceDocumentEntry(`<!doctype html><html><body>
+  <a href="/"><img src="/BusinessLogo.svg"></a>
+  <a href="/partner"><img src="/PorscheLogoNew.svg"></a>
+</body></html>`);
+const unusableHomepageCanonical = await materializeCanonicalSourceLogo({
+  snapshot,
+  pages: [page],
+  resources: [porscheEntry, malformedHomepageLogo, retainedMalformedHomepage],
+  businessName: "Example"
+});
+assert.equal(unusableHomepageCanonical.status, "unavailable",
+  "An unusable homepage identity mark fell through to a valid partner logo.");
+if (unusableHomepageCanonical.status !== "unavailable") throw new Error("Unusable homepage logo selected a partner mark.");
+assert.deepEqual(unusableHomepageCanonical.unusableCandidates, [
+  { resourceId: malformedHomepageLogo.resource.id, reason: "decode_failed" }
+]);
 
 const svgCanonical = await materializeCanonicalSourceLogo({
   snapshot,

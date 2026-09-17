@@ -37,7 +37,9 @@ await mapConcurrent(sites, 12, async (site) => {
     if (!revision || revision.provenance.origin !== "source_website") {
       throw new Error(`Active source logo ${asset.revisionId} is unavailable or has mismatched provenance.`);
     }
-    const preparation = revision.provenance.preparation;
+    const preparation = revision.provenance.preparation?.recipe === "logo-presentation"
+      ? revision.provenance.preparation
+      : undefined;
     const sourceResourceId = revision.provenance.sourceResourceId;
     const expectedRevisionId = preparation
       ? asset.assetId === canonicalSourceLogoAssetId(site.businessId)

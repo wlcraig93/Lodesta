@@ -830,6 +830,7 @@ function retainedEvidencePreview(
   }
   const candidates: Array<{ index: number; line: string; score: number; shortAttribution: boolean }> = [];
   for (const [lineIndex, rawLine] of lines(page.extractedText).entries()) {
+    if (isStructuredImageResourceLine(rawLine)) continue;
     // Extractors commonly collapse an entire article or testimonial into one
     // paragraph. Sentence segmentation keeps those source-rich pages visible
     // in the bounded preview instead of dropping the line at the length cap.
@@ -925,7 +926,7 @@ function isLowSignalAuthorDigestLine(line: string, input: { includeTestimonials?
   }
   return !input.includeTestimonials && (
     /^\s*["“]/.test(line)
-    || /\b(?:my husband|my wife|my home|i have been|i've been|i couldn't|highly recommend|fully satisfied|our needs|gives us peace of mind|since they started|when he arrived|when she arrived|he took care|she took care|with surge pest control is always)\b/i.test(line)
+    || /\b(?:my husband|my wife|my home|i have been|i've been|i couldn't|highly recommend|fully satisfied|our needs|gives us peace of mind|since they started|when he arrived|when she arrived|he took care|she took care)\b/i.test(line)
   );
 }
 
@@ -935,17 +936,39 @@ function previewSegments(rawLine: string) {
   return sentences.length > 1 ? sentences : [line];
 }
 
+function isStructuredImageResourceLine(rawLine: string) {
+  let value: unknown;
+  try {
+    value = JSON.parse(rawLine);
+  } catch {
+    return false;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (!Object.keys(record).every((key) => key === "items" || key === "group")) return false;
+  if (record.group !== undefined && typeof record.group !== "string") return false;
+  const items = record.items;
+  return Array.isArray(items)
+    && items.length > 0
+    && items.every((item) => item !== null
+      && typeof item === "object"
+      && !Array.isArray(item)
+      && Object.keys(item).every((key) => key === "url" || key === "type")
+      && (item as { type?: unknown }).type === "image"
+      && typeof (item as { url?: unknown }).url === "string"
+      && /^https?:\/\//i.test((item as { url: string }).url));
+}
+
 function authorDigestLineScore(line: string) {
   let score = Math.min(3, line.length / 120);
-  if (/\b(?:we|our|us|surge|company|team|technicians?)\b/i.test(line)) score += 5;
+  if (/\b(?:we|our|us|company|team|technicians?)\b/i.test(line)) score += 5;
   if (/\b(?:mission|purpose|approach|relationship[- ]based|locally owned|family owned|founded|started|committed|the way we'd want)\b/i.test(line)) score += 7;
-  if (/\b(?:homeowners?|customers?|property|project|service|inspection|estimate|treatment|team|crew|work|pest control|tree care)\b/i.test(line)) score += 2;
-  if (/\b(?:ants?|roaches?|rodents?|mosquitoes?|termites?|bed bugs?|bees?|wasps?|spiders?|scorpions?)\b/i.test(line)) score += 1;
+  if (/\b(?:homeowners?|customers?|property|project|service|inspection|estimate|treatment|team|crew|work)\b/i.test(line)) score += 2;
   return score;
 }
 
 function containsGatedBusinessClaim(line: string) {
-  const describesBusiness = /\b(?:we|our|us|surge|company|team|technicians?|services?|methods?|treatments?|plans?|programs?)\b/i.test(line);
+  const describesBusiness = /\b(?:we|our|us|company|team|technicians?|services?|methods?|treatments?|plans?|programs?)\b/i.test(line);
   const gatedQuality = /\b(?:licensed|insured|certified|award(?:ed|s)?|ratings?|reviews?|guarantee(?:d|s)?|warrant(?:y|ies)|safe(?:ty|r|st)?|eco[- ]?friendly|environmentally friendly|non[- ]?toxic|pet[- ]?safe|child[- ]?safe|organic|free (?:estimates?|inspections?|consultations?|quotes?)|same[- ]?day|24\s*\/\s*7|emergency|permanent(?:ly)?|years? of experience)\b/i.test(line);
   const directSafetyClaim = /\b(?:eco[- ]?friendly|environmentally friendly|non[- ]?toxic|pet[- ]?safe|child[- ]?safe|safe for (?:people|pets|children|famil(?:y|ies)|the environment)|gentle on (?:your )?home|kind to the earth)\b/i.test(line);
   const gatedCadence = /\b(?:every (?:\d+|one|two|three|other) months?|every month|other month|quarterly|bi[- ]?monthly|recurring visits?|more frequent service|respond within)\b/i.test(line);

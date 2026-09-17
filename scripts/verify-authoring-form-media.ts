@@ -422,7 +422,7 @@ async function verifyGeneratedMediaProvenanceFinalization() {
     for (const form of input.forms) await repository.saveFormDefinition(form);
     await repository.savePublicBuildInput(input);
 
-    const ancestor = fixtureAdoptedSourceRevision("asset_revision_provenance_ancestor");
+    const ancestor = fixtureAdoptedSourceRevision("asset_revision_provenance_ancestor", true);
     const edited = fixtureGeneratedRevision("asset_revision_provenance_edited", [ancestor.id]);
     const sibling = fixtureGeneratedRevision("asset_revision_provenance_sibling", [ancestor.id]);
     const renderedRefs = [edited, sibling].map(fixtureGeneratedRef);
@@ -653,13 +653,17 @@ function fixtureGeneratedRevision(id: string, sourceAssetRevisionIds: string[]):
   });
 }
 
-function fixtureAdoptedSourceRevision(id: string): AssetRevision {
+function fixtureAdoptedSourceRevision(id: string, prepared = false): AssetRevision {
   return assetRevisionSchema.parse({
     schemaVersion: 1, id, assetId: id.replace("asset_revision_", "asset_"), businessId: "business_synthetic_verification",
     contentHash: sha256(id), storageKey: `site-assets/business_synthetic_verification/${id}`, mimeType: "image/webp",
     bytes: 16, width: 16, height: 16, origin: "source_website",
     provenance: { origin: "source_website", sourceUrl: "https://northstar.example/source.webp",
-      sourcePageUrl: "https://northstar.example/gallery", sourceSnapshotId: "source_owner", sourceResourceId: "resource_fixture_source" },
+      sourcePageUrl: "https://northstar.example/gallery", sourceSnapshotId: "source_owner", sourceResourceId: "resource_fixture_source",
+      ...(prepared ? { preparation: { processor: "sharp", recipe: "source-photo-web", recipeVersion: 1,
+        sourceContentHash: sha256("fixture-original-photo"), sourceMimeType: "image/jpeg", sourceWidth: 3000,
+        sourceHeight: 2000, maxEdge: 2560, outputFormat: "webp", quality: 90, effort: 4,
+        operations: ["resize_inside", "encode_webp"] as const } } : {}) },
     createdAt: "2026-09-10T00:00:00.000Z"
   });
 }

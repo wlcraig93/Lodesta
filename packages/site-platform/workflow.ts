@@ -477,14 +477,14 @@ export class SiteAuthoringWorkflow {
         if (
           retainedRef.kind === "logo"
           && retainedRevision.provenance.origin === "source_website"
-          && retainedRevision.provenance.preparation
+          && retainedRevision.provenance.preparation?.recipe === "logo-presentation"
           && (!retainedRevision.width || !retainedRevision.height)
         ) {
           throw new Error(`retained_canary_logo_dimensions_missing:${retainedRef.revisionId}`);
         }
         const logoMaterialization = retainedRef.kind === "logo"
           && retainedRevision.provenance.origin === "source_website"
-          && !retainedRevision.provenance.preparation
+          && retainedRevision.provenance.preparation?.recipe !== "logo-presentation"
           ? await materializeSourceLogo({
               bytes: blob.bytes,
               mimeType: retainedRevision.mimeType,

@@ -11,6 +11,35 @@ import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 const validSiteSource = 'export const siteDefinition = { routes: [{ path: "/", element: <main><h1>Home</h1></main> }] };';
 
+const strictPreparedPhotoRevision = {
+  schemaVersion: 1, id: "asset_revision_prepared_photo", assetId: "asset_prepared_photo", businessId: "business_test",
+  contentHash: sha256("prepared-photo"), storageKey: "site-assets/business_test/prepared-photo",
+  mimeType: "image/webp", bytes: 1_024, width: 2_560, height: 1_706, origin: "source_website",
+  provenance: { origin: "source_website", sourceUrl: "https://example.com/photo.jpg",
+    sourcePageUrl: "https://example.com/", sourceSnapshotId: "snapshot_test", sourceResourceId: "resource_photo",
+    preparation: { processor: "sharp", recipe: "source-photo-web", recipeVersion: 1,
+      sourceContentHash: sha256("source-photo"), sourceMimeType: "image/jpeg", sourceWidth: 3_000,
+      sourceHeight: 2_000, maxEdge: 2_560, outputFormat: "webp", quality: 90, effort: 4,
+      operations: ["resize_inside", "encode_webp"] } }, createdAt: "2026-09-17T00:00:00.000Z"
+} as const;
+assert.doesNotThrow(() => assetRevisionSchema.parse(strictPreparedPhotoRevision));
+const strictPhotoPreparation = strictPreparedPhotoRevision.provenance.preparation;
+for (const invalidPreparation of [
+  { ...strictPhotoPreparation, recipe: "unknown-photo-recipe" },
+  { ...strictPhotoPreparation, recipeVersion: 2 },
+  { ...strictPhotoPreparation, maxEdge: 2_048 },
+  { ...strictPhotoPreparation, unrecognizedSetting: true }
+]) {
+  assert.throws(() => assetRevisionSchema.parse({
+    ...strictPreparedPhotoRevision,
+    provenance: { ...strictPreparedPhotoRevision.provenance, preparation: invalidPreparation }
+  }));
+}
+assert.throws(() => assetRevisionSchema.parse({
+  ...strictPreparedPhotoRevision,
+  provenance: { ...strictPreparedPhotoRevision.provenance, unrecognizedProvenanceField: true }
+}));
+
 const image = await sharp({
   create: { width: 320, height: 180, channels: 3, background: "#b84f34" }
 }).webp().toBuffer();

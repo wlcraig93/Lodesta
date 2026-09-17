@@ -127,7 +127,7 @@ async function prepareCutover(state: BusinessState, ref: AssetRevisionRef): Prom
   });
   if (
     retainedRevision.id === revisionId
-    && retainedRevision.provenance.preparation
+    && retainedRevision.provenance.preparation?.recipe === "logo-presentation"
     && retainedRevision.width
     && retainedRevision.height
   ) {

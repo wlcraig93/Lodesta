@@ -224,7 +224,7 @@ const assetProvenanceSchema = z.discriminatedUnion("origin", [
     sourceSnapshotId: identifier,
     sourceResourceId: identifier.optional(),
     alt: z.string().max(500).optional(),
-    preparation: z.object({
+    preparation: z.union([z.object({
       processor: z.literal("sharp"),
       recipe: z.literal("logo-presentation"),
       recipeVersion: z.literal(1),
@@ -245,7 +245,20 @@ const assetProvenanceSchema = z.discriminatedUnion("origin", [
       }).strict(),
       backgroundColor: z.string().regex(/^#[a-f0-9]{6}$/).optional(),
       confidence: z.number().min(0).max(1)
-    }).strict().optional()
+    }).strict(), z.object({
+      processor: z.literal("sharp"),
+      recipe: z.literal("source-photo-web"),
+      recipeVersion: z.literal(1),
+      sourceContentHash: contentHash,
+      sourceMimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+      sourceWidth: z.number().int().positive(),
+      sourceHeight: z.number().int().positive(),
+      maxEdge: z.literal(2560),
+      outputFormat: z.literal("webp"),
+      quality: z.literal(90),
+      effort: z.literal(4),
+      operations: z.array(z.enum(["auto_orient", "resize_inside", "encode_webp"])).min(1).max(3)
+    }).strict()]).optional()
   }).strict(),
   z.object({
     origin: z.literal("owner_upload"),

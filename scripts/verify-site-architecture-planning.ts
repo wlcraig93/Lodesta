@@ -444,6 +444,87 @@ const readableDeepEvidence = createArchitectureEvidenceFiles([deepEvidencePage],
 assert.doesNotMatch(boundedDeepEvidence[1].content, /later source detail gives the retained route/i);
 assert.match(readableDeepEvidence[1].content, /later source detail gives the retained route/i);
 assert.doesNotMatch(readableDeepEvidence[1].content, /short routing sample cannot carr[^y]/i, "Readable preview ended in a partial word.");
+const imageResourceJson = JSON.stringify({
+  items: [{ url: "https://cdn.example.test/gallery/vehicle-one.jpg", type: "image" }],
+  group: "Service Intro Gallery"
+});
+const nonImageJson = JSON.stringify({
+  items: [{ label: "Maintenance interval", value: "Varies with use and conditions" }],
+  group: "Source facts"
+});
+const imageJsonWithProse = JSON.stringify({
+  items: [{ url: "https://cdn.example.test/gallery/vehicle-captioned.jpg", type: "image" }],
+  group: "Project evidence",
+  description: "This caption identifies the documented vehicle and the work shown in the retained source."
+});
+const mixedUnparseableProse = "This useful source sentence remains even though a trailing token looks like {\"type\":\"image\" without valid JSON.";
+const imageResourceSourceText = [
+  imageResourceJson,
+  "This retained service explanation gives the customer a concrete basis for comparing the available work.",
+  nonImageJson,
+  imageJsonWithProse,
+  mixedUnparseableProse
+].join("\n");
+const imageResourcePage = page("page_deep_service_image_resource", "/deep-service", "Deep Service", imageResourceSourceText);
+const imageResourceEvidence = createArchitectureEvidenceFiles([imageResourcePage], deepEvidencePlan, {
+  retainedContentMode: "indexed-pull-preview-readable"
+})[1]!.content;
+assert.equal(imageResourcePage.extractedText, imageResourceSourceText, "Preview filtering mutated the exact retained source text.");
+assert.doesNotMatch(imageResourceEvidence, /vehicle-one\.jpg|Service Intro Gallery/,
+  "A structured image-resource record consumed readable preview space.");
+assert.match(imageResourceEvidence, /concrete basis for comparing the available work/,
+  "Image-resource filtering removed adjacent ordinary source prose.");
+assert.match(imageResourceEvidence, /Maintenance interval.*Varies with use and conditions/,
+  "Image-resource filtering removed a parseable non-image JSON fact record.");
+assert.match(imageResourceEvidence, /caption identifies the documented vehicle/,
+  "Image-resource filtering removed a JSON record that carried additional prose.");
+assert.match(imageResourceEvidence, /useful source sentence remains even though a trailing token looks like/,
+  "Image-resource filtering removed mixed prose that was not valid JSON.");
+
+const neutralDigestText = [
+  "Surge ants roaches termites mosquitoes and scorpions appear throughout this unrelated taxonomy sentence.",
+  "We help customers compare the visible condition with the practical choices available for the property.",
+  "Our team documents the work clearly so each customer can understand the project and its next step.",
+  "A project begins with the observable condition and the information needed to make a useful decision.",
+  "The company explains the service in plain language and keeps the customer's immediate question central."
+].join("\n");
+const neutralDigestPage = page("page_neutral_digest", "/deep-service", "Deep Service", neutralDigestText);
+const neutralDigestEvidence = createArchitectureEvidenceFiles([neutralDigestPage], deepEvidencePlan, {
+  retainedContentMode: "indexed-pull-preview-author-digest"
+})[1]!.content;
+assert.doesNotMatch(neutralDigestEvidence, /unrelated taxonomy sentence/,
+  "Pest-specific names still receive privileged author-digest ranking.");
+assert.match(neutralDigestEvidence, /customers compare the visible condition/,
+  "Removing vertical-specific digest weights displaced useful neutral business evidence.");
+const legacyPhrasePage = page(
+  "page_legacy_phrase",
+  "/deep-service",
+  "Deep Service",
+  "With Surge Pest Control is always an awkward but potentially source-significant sentence that a generic formatter must not blacklist by business name."
+);
+const legacyPhraseEvidence = createArchitectureEvidenceFiles([legacyPhrasePage], deepEvidencePlan, {
+  retainedContentMode: "indexed-pull-preview-author-digest"
+})[1]!.content;
+assert.match(legacyPhraseEvidence, /potentially source-significant sentence/,
+  "The author digest still applies the retired Surge-specific prose blacklist.");
+const genericGatedClaimBoundaryPage = page(
+  "page_generic_gated_claim_boundary",
+  "/deep-service",
+  "Deep Service",
+  [
+    "A storm surge barrier may use certified components selected for the site's documented conditions and engineering requirements.",
+    "Our team is certified to provide this service for every property and project."
+  ].join("\n")
+);
+const genericGatedClaimBoundaryEvidence = createArchitectureEvidenceFiles(
+  [genericGatedClaimBoundaryPage],
+  deepEvidencePlan,
+  { retainedContentMode: "indexed-pull-preview-readable" }
+)[1]!.content;
+assert.match(genericGatedClaimBoundaryEvidence, /storm surge barrier may use certified components/,
+  "A historical business-name literal still suppresses unrelated storm-surge technical prose.");
+assert.doesNotMatch(genericGatedClaimBoundaryEvidence, /Our team is certified/,
+  "Removing a business-name literal weakened the generic gated business-claim filter.");
 const authorDigestEvidence = createArchitectureEvidenceFiles(pages, plan, { retainedContentMode: "indexed-pull-preview-author-digest" });
 assert.deepEqual(authorDigestEvidence.map((file) => file.path), ["src/approved-architecture.ts", "src/approved-source-index.ts"]);
 assert.match(authorDigestEvidence[1].content, /"evidencePreviews": \[/);

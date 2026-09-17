@@ -1,5 +1,13 @@
 # Fresh business source-authority diagnostic retrospective
 
+## September 17 corrective-release failure: real RPC boundary, not another lifecycle guess
+
+Commit `2023b5af5f6a0cf7c3821446c0628bf80f2bed16` passed local preflight/smoke and Linux CI `35240326651`; coordinated release `35241054773` then failed both initial applies before registration, maintenance or controller changes. The ordinary absent journal was returned as HTTP 500. The new guard checked the SDK's prototype `code` getter; real Worker-to-Durable-Object RPC preserves the own `errorResponse` field but loses that getter. Our mocked fixtures assigned an own top-level `code`, so they tested the wrong boundary. This was an implementation/testing error, not evidence against the authoring model or a reason to add lifecycle orchestration.
+
+A local Miniflare/workerd reproduction with actual SDK `FileClient` errors and the deployed compatibility date proves the serialized shape for missing-file, permission and destroyed-session errors, with raw `ENOENT` as a negative control. The production guard now uses only own `errorResponse.code === "FILE_NOT_FOUND"`; malformed and other errors propagate. The actual-function fixtures are corrected and the real RPC check is incorporated into the normal sandbox suite, deriving the compatibility date from blue/green configuration. Toolchain identity is `lodesta-static-site-workspace@sha256:109b7d3e71695b2215fe23fd7eb46c30149403ed89f2ef93f38a716ab950147c`. No SDK, prompt, model, retry, timeout or lifecycle change accompanies it. [Cloudflare's documented serialization contract](https://developers.cloudflare.com/workers/runtime-apis/rpc/error-handling/) explains the observed behavior.
+
+This establishes the new deterministic failure's cause, not the cause of the older SIGTERM/network interruptions or general hosted reliability. No fresh paid generation has started. Preserve all failures and require the normal coordinated release plus independent post-release checks before proceeding. Exact evidence: `.design/v4-production-readiness-2026-09-04/release-2023b5af/`.
+
 ## September 17 local follow-up: assets and accurate sandbox errors
 
 Three bounded corrections are implemented locally, not deployed and not evaluated in a new paid generation:

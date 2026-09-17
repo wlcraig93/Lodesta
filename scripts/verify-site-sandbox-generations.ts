@@ -180,19 +180,40 @@ async function verifyOperationJournalReads() {
     readFile(path: string, options: { encoding: string }): Promise<{ content: string }>;
   }, operationId: string) => Promise<unknown>;
   const adapter = (readFile: () => Promise<{ content: string }>) => ({ readFile });
-  const codedError = (code: string, message: string) => Object.assign(new Error(message), { code });
+  const sdkError = (code: string, message: string) => Object.assign(new Error(message), {
+    errorResponse: { code, message, context: {}, httpStatus: code === "FILE_NOT_FOUND" ? 404 : 500,
+      timestamp: "2026-09-17T00:00:00.000Z" }
+  });
 
   let directReads = 0;
-  const missing = codedError("FILE_NOT_FOUND", "simulated structured missing journal");
+  const missing = sdkError("FILE_NOT_FOUND", "simulated structured missing journal");
   assert.equal(await read(adapter(async () => { directReads += 1; throw missing; }), operationId), undefined,
     "A structured FILE_NOT_FOUND journal read did not remain the sole not-found case.");
   assert.equal(directReads, 1, "Journal absence performed more than one filesystem read.");
 
+  const inheritedErrorResponse = new Error("simulated inherited SDK response");
+  Object.setPrototypeOf(inheritedErrorResponse, {
+    errorResponse: { code: "FILE_NOT_FOUND", message: inheritedErrorResponse.message }
+  });
+  const inheritedCode = Object.assign(Object.create({ code: "FILE_NOT_FOUND" }) as Record<string, unknown>, {
+    message: "simulated inherited SDK response code"
+  });
+  const inheritedCodeResponse = Object.assign(new Error("simulated inherited SDK response code"), {
+    errorResponse: inheritedCode
+  });
+  const rawEnoent = Object.assign(new Error("simulated raw system ENOENT"), { code: "ENOENT" });
   const propagatedErrors = [
-    codedError("RPC_TRANSPORT_ERROR", "simulated read RPC interruption"),
-    codedError("FILESYSTEM_ERROR", "journal not found because the filesystem read failed"),
-    codedError("PERMISSION_DENIED", "simulated journal permission failure"),
-    codedError("ENOENT", "simulated raw system ENOENT"),
+    sdkError("RPC_TRANSPORT_ERROR", "simulated read RPC interruption"),
+    sdkError("FILESYSTEM_ERROR", "journal not found because the filesystem read failed"),
+    sdkError("PERMISSION_DENIED", "simulated journal permission failure"),
+    Object.assign(new Error("simulated top-level code lost its SDK response"), { code: "FILE_NOT_FOUND" }),
+    rawEnoent,
+    Object.assign(new Error("File not found: simulated journal"), { name: "FileNotFoundError" }),
+    Object.assign(new Error("simulated null SDK response"), { errorResponse: null }),
+    Object.assign(new Error("simulated string SDK response"), { errorResponse: "FILE_NOT_FOUND" }),
+    Object.assign(new Error("simulated SDK response without a code"), { errorResponse: { message: "missing code" } }),
+    inheritedErrorResponse,
+    inheritedCodeResponse,
     new TypeError("simulated readFile RPC failure")
   ];
   for (const readFailure of propagatedErrors) {
@@ -235,7 +256,7 @@ async function verifyOperationJournalReads() {
   assert.equal(transportResponse.status, 500);
   assert.equal((await transportResponse.json() as { error?: string }).error, "sandbox_operation_failed",
     "The GET handler misreported a journal transport failure as operation_not_found.");
-  const rawEnoentResponse = await fetchStatus(adapter(async () => { throw propagatedErrors[3]; }))(
+  const rawEnoentResponse = await fetchStatus(adapter(async () => { throw rawEnoent; }))(
     new Request(`http://127.0.0.1/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
   assert.equal(rawEnoentResponse.status, 500);
   assert.equal((await rawEnoentResponse.json() as { error?: string }).error, "sandbox_operation_failed",
@@ -275,7 +296,11 @@ async function verifySubmissionJournalReadSafety() {
     exec: async (command: string) => { commands.push(command); return { success: true }; },
     writeFile: async (path: string, content: string) => { writes.push({ kind: "file", path, content }); }
   });
-  const missing = () => Object.assign(new Error("simulated structured missing journal"), { code: "FILE_NOT_FOUND" });
+  const sdkError = (code: string, message: string) => Object.assign(new Error(message), {
+    errorResponse: { code, message, context: {}, httpStatus: code === "FILE_NOT_FOUND" ? 404 : 500,
+      timestamp: "2026-09-17T00:00:00.000Z" }
+  });
+  const missing = () => sdkError("FILE_NOT_FOUND", "simulated structured missing journal");
 
   for (const fixture of [{
     name: "readFile RPC failure",
@@ -283,8 +308,8 @@ async function verifySubmissionJournalReadSafety() {
     adapter: () => sandbox(async () => { throw new TypeError("simulated retained journal readFile RPC failure"); })
   }, {
     name: "filesystem failure containing not-found prose",
-    error: Object.assign(new Error("journal not found because its filesystem read failed"), { code: "FILESYSTEM_ERROR" }),
-    adapter: () => sandbox(async () => { throw Object.assign(new Error("journal not found because its filesystem read failed"), { code: "FILESYSTEM_ERROR" }); })
+    error: sdkError("FILESYSTEM_ERROR", "journal not found because its filesystem read failed"),
+    adapter: () => sandbox(async () => { throw sdkError("FILESYSTEM_ERROR", "journal not found because its filesystem read failed"); })
   }, {
     name: "malformed JSON",
     error: undefined,
@@ -595,7 +620,10 @@ async function verifyExplicitJournalAbsenceAfterCompilation() {
   });
   const sandbox = {
     readFile: async () => {
-      if (!visible) throw Object.assign(new Error("simulated structured missing journal"), { code: "FILE_NOT_FOUND" });
+      if (!visible) throw Object.assign(new Error("simulated structured missing journal"), {
+        errorResponse: { code: "FILE_NOT_FOUND", message: "simulated structured missing journal", context: {},
+          httpStatus: 404, timestamp: "2026-09-17T00:00:00.000Z" }
+      });
       return { content: JSON.stringify(compiling) };
     },
     processes: [process]

@@ -997,11 +997,17 @@ async function readOperationJournal(
     file = await sandbox.readFile(path, { encoding: "utf8" });
   } catch (error) {
     // The SDK's exists() masks command/session execution failures as absence.
-    // Only readFile's structured FILE_NOT_FOUND is authoritative here.
+    // Workers RPC preserves the SDK error's own errorResponse property, not
+    // its prototype code getter. Only that structured response is authoritative.
     if (error !== null
       && typeof error === "object"
-      && "code" in error
-      && error.code === "FILE_NOT_FOUND") return undefined;
+      && Object.hasOwn(error, "errorResponse")) {
+      const errorResponse = (error as { errorResponse?: unknown }).errorResponse;
+      if (errorResponse !== null
+        && typeof errorResponse === "object"
+        && Object.hasOwn(errorResponse, "code")
+        && (errorResponse as { code?: unknown }).code === "FILE_NOT_FOUND") return undefined;
+    }
     throw error;
   }
   let journal: OperationJournal;

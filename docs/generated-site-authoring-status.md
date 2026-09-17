@@ -6,7 +6,15 @@ Date: 2026-09-17
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current checkpoint: reviewed corrective release proceeding through existing gates
+### Current checkpoint: deterministic RPC error-classification defect corrected; release verification pending
+
+Corrective commit `2023b5af5f6a0cf7c3821446c0628bf80f2bed16` passed Linux CI `35240326651`, but release `35241054773` failed both inactive-slot canaries at the first apply. It reached neither registration, maintenance, controller rollout nor promotion. No paid generation started. This newly introduced defect is separate from the earlier provider interruptions: the direct-journal reader inspected the SDK's prototype `code` getter, which does not survive Worker-to-Durable-Object RPC. An ordinary missing journal therefore became HTTP 500.
+
+A real local workerd RPC reproduction using the installed SDK proves that its own `errorResponse.code` survives while the getter does not; permission/session errors preserve their distinct structured codes, and a raw own `ENOENT` remains distinct. This matches [Cloudflare's error-serialization contract](https://developers.cloudflare.com/workers/runtime-apis/rpc/error-handling/). The correction recognizes only own `errorResponse.code === "FILE_NOT_FOUND"`. Message matching, name matching and top-level-code fallbacks remain forbidden. Existing extracted production-function fixtures now model the actual serialized SDK shape rather than an invented own getter value. Toolchain identity: `lodesta-static-site-workspace@sha256:109b7d3e71695b2215fe23fd7eb46c30149403ed89f2ef93f38a716ab950147c`.
+
+The previous local tests missed this integration boundary; their pass did not prove deployability. The real RPC fixture is now part of `verify:sandbox` and derives the deployed compatibility date from the blue/green configurations. Complete local preflight (static, browser and sandbox), TypeScript and sequential local launch-flow smoke pass. No retry, timeout, SDK upgrade, lifecycle change or new authoring machinery is introduced. Earlier SIGTERM/RPC interruptions remain unexplained. The next paid comparison still requires the coordinated release, independent live identity/health readback and a separate fresh-session synthetic canary. Evidence: `.design/v4-production-readiness-2026-09-04/release-2023b5af/`.
+
+### Earlier checkpoint: reviewed corrective release proceeding through existing gates
 
 After authenticated provider diagnosis and the fresh unchanged-deployment canary below, independent review supports one new exact corrective commit through the existing CI and coordinated release workflow. This is not a rerun of the failed release or a claim that its provider interruption is fixed. The inactive-slot canary must pass before controller changes; the same-SHA controller, maintenance, promotion and health checks remain unchanged. A separate post-release synthetic canary and corrected shared source input are required before the Luna/Terra comparison. No retry, timeout, SDK, lifecycle or orchestration change is justified by the current evidence.
 

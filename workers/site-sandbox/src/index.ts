@@ -992,9 +992,18 @@ async function readOperationJournal(
   operationId: string
 ) {
   const path = `${operationsRoot}/${operationId}.json`;
-  const exists = await sandbox.exists(path);
-  if (exists.exists === false) return undefined;
-  const file = await sandbox.readFile(path, { encoding: "utf8" });
+  let file: { content: string };
+  try {
+    file = await sandbox.readFile(path, { encoding: "utf8" });
+  } catch (error) {
+    // The SDK's exists() masks command/session execution failures as absence.
+    // Only readFile's structured FILE_NOT_FOUND is authoritative here.
+    if (error !== null
+      && typeof error === "object"
+      && "code" in error
+      && error.code === "FILE_NOT_FOUND") return undefined;
+    throw error;
+  }
   let journal: OperationJournal;
   try {
     journal = JSON.parse(file.content) as OperationJournal;

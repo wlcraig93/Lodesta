@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { isContinuousAvailabilityValue as controllerAvailability } from "../packages/business-data/availability";
 import {
   googleAggregateRatingObservationFromSnapshot,
+  researchGoogleAggregateRating,
   retainedProspectGoogleAggregateRatingSnapshot
 } from "../packages/business-data/web-research";
 import { sitePublicBuildInputSchema, sourceSnapshotPageSchema, sourceSnapshotSchema, type SitePublicBuildInput } from "../packages/site-contracts";
@@ -1199,6 +1200,41 @@ const aggregateRatingSnapshot = sourceSnapshotSchema.parse({
     }
   }
 });
+const liveAcceptedRatingResearch = await mockedGoogleRatingResearch("https://www.google.com/maps?cid=123456789");
+assert(liveAcceptedRatingResearch);
+assert.equal(liveAcceptedRatingResearch.snapshot.payload.profileUrlDisposition, "accepted",
+  "Live research did not retain an accepted profile URL disposition.");
+assert.equal(googleAggregateRatingObservationFromSnapshot(liveAcceptedRatingResearch.snapshot)?.profileUrl,
+  "https://www.google.com/maps?cid=123456789",
+  "Live research changed or omitted an accepted exact Google profile URL.");
+
+const liveRatingResearchWithoutProfile = await mockedGoogleRatingResearch(null);
+assert(liveRatingResearchWithoutProfile);
+assert.equal(liveRatingResearchWithoutProfile.snapshot.payload.profileUrlDisposition, "not_returned",
+  "Live research did not distinguish a null profile URL from rejection.");
+const liveRatingObservationWithoutProfile = googleAggregateRatingObservationFromSnapshot(
+  liveRatingResearchWithoutProfile.snapshot
+);
+assert.equal(liveRatingObservationWithoutProfile?.profileUrl,
+  undefined, "Live research invented a destination for a null profile URL.");
+
+const rejectedStructuredProfileUrl = "https://reviews.example/private-candidate";
+const liveRejectedRatingResearch = await mockedGoogleRatingResearch(
+  rejectedStructuredProfileUrl,
+  rejectedStructuredProfileUrl
+);
+assert(liveRejectedRatingResearch);
+assert.equal(liveRejectedRatingResearch.snapshot.payload.profileUrlDisposition, "rejected",
+  "Live research did not retain a rejected profile URL disposition.");
+const liveRejectedRatingObservation = googleAggregateRatingObservationFromSnapshot(liveRejectedRatingResearch.snapshot);
+assert.equal(liveRejectedRatingObservation?.profileUrl,
+  undefined, "Live research admitted a rejected profile URL into authority.");
+assert.deepEqual(liveRejectedRatingObservation, liveRatingObservationWithoutProfile,
+  "Profile URL rejection changed the otherwise valid aggregate-rating authority.");
+assert(!JSON.stringify(liveRejectedRatingResearch.snapshot.payload.observation).includes(rejectedStructuredProfileUrl),
+  "Live research copied the rejected structured profile URL into its retained authority observation.");
+assert.deepEqual(liveRejectedRatingResearch.snapshot.payload.sources, [rejectedStructuredProfileUrl],
+  "Sanitized profile URL telemetry unexpectedly suppressed independent consulted-source evidence.");
 const retainedProspectRatingSnapshot = retainedProspectGoogleAggregateRatingSnapshot({
   businessId: input.businessId,
   businessName: "Northstar Collision Repair",
@@ -1211,6 +1247,8 @@ const retainedProspectRatingSnapshot = retainedProspectGoogleAggregateRatingSnap
   observedAt: "2026-08-31T12:00:00.000Z"
 });
 assert(retainedProspectRatingSnapshot, "A valid retained browser prospect rating was not materialized.");
+assert.equal(retainedProspectRatingSnapshot.payload.profileUrlDisposition, "accepted",
+  "Accepted browser prospect profile URL disposition was not retained.");
 assert.deepEqual(
   googleAggregateRatingObservationFromSnapshot(retainedProspectRatingSnapshot),
   {
@@ -1243,6 +1281,10 @@ const retainedRatingWithInvalidProfile = retainedProspectGoogleAggregateRatingSn
   observedAt: "2026-08-31T12:00:00.000Z"
 });
 assert(retainedRatingWithInvalidProfile);
+assert.equal(retainedRatingWithInvalidProfile.payload.profileUrlDisposition, "rejected",
+  "Rejected browser prospect profile URL disposition was not retained.");
+assert(!JSON.stringify(retainedRatingWithInvalidProfile.payload.observation).includes("https://reviews.example/northstar"),
+  "A rejected browser prospect profile URL was copied into retained authority.");
 assert.equal(
   googleAggregateRatingObservationFromSnapshot(retainedRatingWithInvalidProfile)?.profileUrl,
   undefined,
@@ -1257,6 +1299,8 @@ const retainedGoogleShareRating = retainedProspectGoogleAggregateRatingSnapshot(
   observedAt: "2026-08-31T12:00:00.000Z"
 });
 assert(retainedGoogleShareRating);
+assert.equal(retainedGoogleShareRating.payload.profileUrlDisposition, "accepted",
+  "Accepted Google share profile URL disposition was not retained.");
 assert.equal(googleAggregateRatingObservationFromSnapshot(retainedGoogleShareRating)?.profileUrl,
   "https://share.google/fixtureObservedListing", "Google's own share-link form was silently discarded.");
 const supportedGoogleShareLink = prepareSiteArtifact({
@@ -1267,15 +1311,36 @@ const supportedGoogleShareLink = prepareSiteArtifact({
 });
 assert(!errors(supportedGoogleShareLink).some(finding => finding.id === "fact.link_mismatch"),
   "An exact retained Google share destination failed final link verification.");
-for (const invalidUrl of ["http://share.google/fixtureObservedListing", "https://share.google.evil.example/listing", "https://evilshare.google/listing"]) {
+for (const invalidUrl of [
+  "http://share.google/fixtureObservedListing",
+  "https://share.google.evil.example/listing",
+  "https://evilshare.google/listing",
+  "not a URL"
+]) {
   const invalid = retainedProspectGoogleAggregateRatingSnapshot({
     businessId: input.businessId, businessName: "Northstar Collision Repair", sourceUrl: "https://northstar.example/",
     rating: 4.8, profileUrl: invalidUrl, observedAt: "2026-08-31T12:00:00.000Z"
   });
   assert(invalid);
+  assert.equal(invalid.payload.profileUrlDisposition, "rejected",
+    "Unsafe Google-like profile URL disposition was not retained as rejected.");
+  assert(!JSON.stringify(invalid.payload.observation).includes(invalidUrl),
+    "An unsafe Google-like profile URL was copied into retained authority.");
   assert.equal(googleAggregateRatingObservationFromSnapshot(invalid)?.profileUrl, undefined,
     "The Google share-link exception accepted an insecure or lookalike destination.");
 }
+const retainedRatingWithoutProfile = retainedProspectGoogleAggregateRatingSnapshot({
+  businessId: input.businessId,
+  businessName: "Northstar Collision Repair",
+  sourceUrl: "https://northstar.example/",
+  rating: 4.8,
+  observedAt: "2026-08-31T12:00:00.000Z"
+});
+assert(retainedRatingWithoutProfile);
+assert.equal(retainedRatingWithoutProfile.payload.profileUrlDisposition, "not_returned",
+  "Absent browser prospect profile URL disposition was not retained.");
+assert.equal(googleAggregateRatingObservationFromSnapshot(retainedRatingWithoutProfile)?.profileUrl, undefined,
+  "An absent browser prospect profile URL produced a destination.");
 const mismatchedGoogleShareLink = prepareSiteArtifact({
   authoredArtifact: artifact('<main><h1>Collision repair</h1><a href="https://share.google/unobservedOtherListing">Read reviews on Google</a></main>'),
   buildInput: input, runtimeSeriesId: "site-runtime-v4", sourceSnapshots: [retainedGoogleShareRating]
@@ -1853,6 +1918,87 @@ process.stdout.write(`${JSON.stringify({
   cssAssets: "tokenized",
   sourcePolicy: "ast"
 }, null, 2)}\n`);
+
+async function mockedGoogleRatingResearch(
+  profileUrl: string | null,
+  consultedSourceUrl = "https://support.google.com/business/"
+) {
+  const originalApiKey = process.env.OPENAI_API_KEY;
+  const originalBaseUrl = process.env.OPENAI_BASE_URL;
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  process.env.OPENAI_API_KEY = "offline-fixture-key";
+  process.env.OPENAI_BASE_URL = "https://offline-openai.test/v1";
+  globalThis.fetch = (async (request: string | URL | Request) => {
+    calls += 1;
+    const requestUrl = new URL(request instanceof Request ? request.url : request.toString());
+    assert.equal(requestUrl.origin, "https://offline-openai.test", "Google rating fixture attempted a non-fixture provider call.");
+    return new Response(JSON.stringify({
+      id: `response_google_rating_${calls}`,
+      object: "response",
+      created_at: 1_788_739_200,
+      status: "completed",
+      error: null,
+      incomplete_details: null,
+      model: "gpt-5.6-luna",
+      output: [
+        {
+          id: `message_google_rating_${calls}`,
+          type: "message",
+          status: "completed",
+          role: "assistant",
+          content: [{
+            type: "output_text",
+            annotations: [],
+            text: JSON.stringify({
+              status: "matched",
+              businessName: "Northstar Collision Repair",
+              locality: "Austin, TX",
+              rating: 4.8,
+              reviewCount: 127,
+              profileUrl,
+              identityEvidence: "Name, locality, and first-party website matched."
+            })
+          }]
+        },
+        {
+          id: `search_google_rating_${calls}`,
+          type: "web_search_call",
+          status: "completed",
+          action: {
+            type: "search",
+            query: "Northstar Collision Repair Austin",
+            sources: [{ type: "url", url: consultedSourceUrl, title: "Google Business Profile Help" }]
+          }
+        }
+      ],
+      usage: {
+        input_tokens: 100,
+        input_tokens_details: { cached_tokens: 0 },
+        output_tokens: 50,
+        output_tokens_details: { reasoning_tokens: 0 },
+        total_tokens: 150
+      }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const result = await researchGoogleAggregateRating({
+      businessId: input.businessId,
+      businessName: "Northstar Collision Repair",
+      locality: "Austin, TX",
+      sourceUrl: "https://northstar.example/",
+      capturedAt: "2026-08-31T12:00:00.000Z"
+    });
+    assert.equal(calls, 1, "Google rating fixture did not make exactly one mocked provider request.");
+    return result;
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = originalApiKey;
+    if (originalBaseUrl === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = originalBaseUrl;
+  }
+}
 
 function artifact(bodyHtml: string, metadata?: { title?: string; description?: string }) {
   return agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({

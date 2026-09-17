@@ -1,7 +1,7 @@
 // Each hash is derived from the canonical behavioral descriptor for the
 // component. Changing a descriptor is a clean contract replacement.
-// Descriptor: site-authoring-platform:observed-name-authority:explicit-missed-logo-adoption:question-scoped-metered-research:explicit-line-edit-semantics:scope-preserving-type-advisory:approved-document-mismatch-context:pending-navigation-resource-evidence:explicit-search-excerpts:intrinsic-media-dimensions:no-thumbnail-enlargement:image-edit-api-fidelity:image-tool-flare:optional-source-first-image-authoring:official-logo-image-boundary:retained-image-ancestry:durable-provisional-media:failure-only-sandbox-diagnostics:atomic-source-only-finalization:initial-curated-image-context:explicit-quote-omissions:visible-form-schema-status:architecture-provider-error-classification:author-selected-inspection-focus:corroborated-homepage-name:structural-service-routes:joined-unit-address:eligible-research-geography:page-identity-not-placeholder-components:meaningful-source-citations:2026-09-16
-export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:9b6984884e41ac81948b33e62bc62c91c30824a7c4f0ba87a9421377a0a1ff3b";
+// Descriptor: site-authoring-platform:observed-name-authority:explicit-missed-logo-adoption:question-scoped-metered-research:explicit-line-edit-semantics:scope-preserving-type-advisory:approved-document-mismatch-context:pending-navigation-resource-evidence:explicit-search-excerpts:intrinsic-media-dimensions:no-thumbnail-enlargement:image-edit-api-fidelity:image-tool-flare:optional-source-first-image-authoring:official-logo-image-boundary:retained-image-ancestry:durable-provisional-media:failure-only-sandbox-diagnostics:atomic-source-only-finalization:initial-curated-image-context:explicit-quote-omissions:visible-form-schema-status:architecture-provider-error-classification:author-selected-inspection-focus:corroborated-homepage-name:structural-service-routes:joined-unit-address:eligible-research-geography:page-identity-not-placeholder-components:meaningful-source-citations:self-contained-source-svg-logo:camelcase-source-asset-signals:google-profile-url-disposition:2026-09-17
+export const siteAuthoringPlatformIdentity = "site-authoring-platform@sha256:6fa8e88563ac16f3801ec231a5cc38bd634570a6007a8391e7b67e0ab6b46c53";
 export const canonicalSiteAuthoringRuntimeSeriesId = "site-runtime-v4" as const;
 export const siteSandboxApiIdentity = "site-sandbox-api@sha256:7ab8f1cdb4dc7ef49c81449a77178ed4d5ace537951d359350eba54050b8b85d";
 export const siteSandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7ea4cc097ac859295a97cf4ac7a94695da54f16eebc089312f9a6";
@@ -9,7 +9,7 @@ export const siteSandboxDurableObjectIdentity = "site-sandbox-durable-object@sha
 export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:49565a3bfd2348b4a3baa50be7641bccc4927a43d83b0222b4f262638509ff37";
 // Checked-in release identity for the compiler scaffold, including platform capability CSS.
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
-export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:76721e43b34a24cad5984ad396a424ad67d1b24220f1d51d332cc9e0cd21929a";
+export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:29e672a0460ac4a4c3c770c3379e77902ad3f7843aeffe57ecb54d20e87464c0";
 // Hash of the actual authoring system prompt. Tool/context changes are carried
 // by the platform identity; they do not redefine unchanged system-prompt bytes.
 export const websiteManagerPromptIdentity = "website-manager@sha256:ca3b2b5018747de7ff36e0a0b9efd6cb243e496a0893035144a5ca16e00fce88";

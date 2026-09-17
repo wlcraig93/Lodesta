@@ -2379,7 +2379,8 @@ export class SiteAuthoringWorkflow {
           if (resource.role !== "image" || resource.outcome !== "fetched" || !resource.storageKey || !resource.rawContentHash || !resource.blobContentHash || !resource.storedEncoding) {
             throw new Error("source_asset_not_adoptable");
           }
-          if (mimeType !== "image/png" && mimeType !== "image/jpeg" && mimeType !== "image/webp") throw new Error("source_asset_mime_unsupported");
+          const rasterMimeType = mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/webp";
+          if (!rasterMimeType && !(kind === "logo" && mimeType === "image/svg+xml")) throw new Error("source_asset_mime_unsupported");
           if (kind === "logo") {
             // Recognition can miss opaque CDN filenames. The author can select
             // retained pixels, but preparation and existing identity stay owned

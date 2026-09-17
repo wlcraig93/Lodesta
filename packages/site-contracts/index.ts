@@ -230,10 +230,11 @@ const assetProvenanceSchema = z.discriminatedUnion("origin", [
       recipeVersion: z.literal(1),
       sourceContentHash: contentHash,
       operations: z.array(z.enum([
+        "rasterize_svg",
         "trim_transparent_canvas",
         "trim_uniform_canvas",
         "remove_uniform_background"
-      ])).max(3),
+      ])).max(4),
       sourceWidth: z.number().int().positive(),
       sourceHeight: z.number().int().positive(),
       contentBounds: z.object({

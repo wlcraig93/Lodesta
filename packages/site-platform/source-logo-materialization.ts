@@ -1,5 +1,6 @@
 import { sha256, stableJson } from "@/packages/business-data";
 import { decodeRetainedSourceResource, type RetainedSourceResource } from "@/packages/business-data/source-mirror";
+import sharp from "sharp";
 import {
   assetRevisionRefSchema,
   assetRevisionSchema,
@@ -17,6 +18,18 @@ import {
 import { rankSourceAssetCandidates, type SourceAssetCandidate } from "./source-resource-ranking";
 
 type SourceLogoMimeType = "image/png" | "image/jpeg" | "image/webp";
+type SourceLogoInputMimeType = SourceLogoMimeType | "image/svg+xml";
+type UnsupportedSourceSvg = {
+  status: "unusable";
+  reason: "unsupported_svg";
+  message: string;
+};
+type SourceLogoUnusable = UnusableLogoPresentation | UnsupportedSourceSvg;
+
+const maximumSourceLogoPixels = 12_000_000;
+const maximumSourceSvgBytes = 32 * 1024 * 1024;
+const svgRasterDensity = 72;
+const svgCooperativeTimeoutSeconds = 2;
 
 export type SourceLogoMaterialization = {
   status: "prepared";
@@ -34,7 +47,7 @@ export type SourceLogoMaterialization = {
     recipe: "logo-presentation";
     recipeVersion: typeof logoPresentationRecipeVersion;
     sourceContentHash: `sha256:${string}`;
-    operations: PreparedLogoPresentation["operations"];
+    operations: Array<"rasterize_svg" | PreparedLogoPresentation["operations"][number]>;
     sourceWidth: number;
     sourceHeight: number;
     contentBounds: PreparedLogoPresentation["contentBounds"];
@@ -54,24 +67,30 @@ export type CanonicalSourceLogo = {
 export type CanonicalSourceLogoUnavailable = {
   status: "unavailable";
   reason: "no_logo_candidate" | "logo_candidates_unusable";
-  unusableCandidates: Array<{ resourceId: string; reason: UnusableLogoPresentation["reason"] }>;
+  unusableCandidates: Array<{ resourceId: string; reason: SourceLogoUnusable["reason"] }>;
 };
 
 export async function materializeSourceLogo(input: {
   bytes: Buffer;
-  mimeType: SourceLogoMimeType;
+  mimeType: SourceLogoInputMimeType;
   sourceRevisionId: string;
   sourceContentHash: `sha256:${string}`;
-}): Promise<SourceLogoMaterialization | UnusableLogoPresentation> {
-  const presentation = await prepareLogoPresentation({ bytes: input.bytes, mimeType: input.mimeType });
+}): Promise<SourceLogoMaterialization | SourceLogoUnusable> {
+  const rasterized = input.mimeType === "image/svg+xml"
+    ? await rasterizeSelfContainedSourceSvg(input.bytes)
+    : { status: "prepared" as const, bytes: input.bytes, mimeType: input.mimeType };
+  if (rasterized.status === "unusable") return rasterized;
+  const presentation = await prepareLogoPresentation({ bytes: rasterized.bytes, mimeType: rasterized.mimeType });
   if (presentation.status === "unusable") return presentation;
   const bytes = presentation.bytes;
+  const rasterizedSvg = input.mimeType === "image/svg+xml";
+  const materializedPresentation = rasterizedSvg ? { ...presentation, changed: true as const } : presentation;
   return {
     status: "prepared",
-    presentation,
+    presentation: materializedPresentation,
     bytes,
-    mimeType: presentation.mimeType,
-    contentHash: presentation.changed ? sha256(bytes) : input.sourceContentHash,
+    mimeType: materializedPresentation.mimeType,
+    contentHash: materializedPresentation.changed ? sha256(bytes) : input.sourceContentHash,
     revisionIdentity: {
       sourceRevisionId: input.sourceRevisionId,
       sourceContentHash: input.sourceContentHash,
@@ -82,7 +101,7 @@ export async function materializeSourceLogo(input: {
       recipe: "logo-presentation",
       recipeVersion: logoPresentationRecipeVersion,
       sourceContentHash: input.sourceContentHash,
-      operations: presentation.operations,
+      operations: rasterizedSvg ? ["rasterize_svg", ...presentation.operations] : presentation.operations,
       sourceWidth: presentation.sourceWidth,
       sourceHeight: presentation.sourceHeight,
       contentBounds: presentation.contentBounds,
@@ -132,7 +151,8 @@ export async function materializeCanonicalSourceLogo(input: {
 }): Promise<CanonicalSourceLogo | CanonicalSourceLogoUnavailable> {
   const candidates = rankSourceAssetCandidates({
     resources: input.resources.map(({ resource }) => resource),
-    pages: input.pages
+    pages: input.pages,
+    includeSvgLogoCandidates: true
   }).filter((candidate) => input.selectedResourceId
     ? candidate.resource.id === input.selectedResourceId
     : candidate.likelyKind === "logo");
@@ -146,7 +166,7 @@ export async function materializeCanonicalSourceLogo(input: {
     const retained = retainedById.get(candidate.resource.id);
     if (!retained?.bytes || !candidate.resource.rawContentHash) continue;
     const mimeType = candidate.resource.contentType?.split(";", 1)[0]?.trim().toLowerCase();
-    if (mimeType !== "image/png" && mimeType !== "image/jpeg" && mimeType !== "image/webp") continue;
+    if (mimeType !== "image/png" && mimeType !== "image/jpeg" && mimeType !== "image/webp" && mimeType !== "image/svg+xml") continue;
     let raw: Buffer;
     try {
       raw = decodeRetainedSourceResource(candidate.resource, retained.bytes);
@@ -188,6 +208,7 @@ export async function materializeCanonicalSourceLogo(input: {
         sourceUrl: candidate.resource.finalUrl ?? candidate.resource.requestedUrl,
         sourcePageUrl: candidate.sourcePageUrl,
         sourceSnapshotId: input.snapshot.id,
+        ...(mimeType === "image/svg+xml" ? { sourceResourceId: candidate.resource.id } : {}),
         alt: `${input.businessName} logo`,
         preparation: materialization.preparation
       },
@@ -211,6 +232,109 @@ export async function materializeCanonicalSourceLogo(input: {
   }
 
   return { status: "unavailable", reason: "logo_candidates_unusable", unusableCandidates };
+}
+
+/**
+ * Accepts only a deliberately small, self-contained SVG subset. This is a
+ * bounded rejection screen for source-logo fidelity, not an XML sanitizer or
+ * an exhaustive parser/security boundary.
+ */
+async function rasterizeSelfContainedSourceSvg(bytes: Buffer): Promise<
+  { status: "prepared"; bytes: Buffer; mimeType: "image/png" } | SourceLogoUnusable
+> {
+  const eligibility = inspectSelfContainedSourceSvg(bytes);
+  if (eligibility) return eligibility;
+  try {
+    const image = sharp(bytes, {
+      animated: false,
+      unlimited: false,
+      failOn: "warning",
+      limitInputPixels: 80_000_000,
+      density: svgRasterDensity
+    }).timeout({ seconds: svgCooperativeTimeoutSeconds });
+    const metadata = await image.metadata();
+    if (!metadata.width || !metadata.height) {
+      return { status: "unusable", reason: "dimensions_missing", message: "dimensions_missing" };
+    }
+    if (metadata.width * metadata.height > maximumSourceLogoPixels) {
+      return { status: "unusable", reason: "pixel_limit_exceeded", message: "pixel_limit_exceeded" };
+    }
+    const output = await image
+      .png({ compressionLevel: 9, adaptiveFiltering: true })
+      .toBuffer();
+    return { status: "prepared", bytes: output, mimeType: "image/png" };
+  } catch {
+    return {
+      status: "unusable",
+      reason: "decode_failed",
+      message: "decode_failed"
+    };
+  }
+}
+
+function inspectSelfContainedSourceSvg(bytes: Buffer): SourceLogoUnusable | undefined {
+  if (bytes.byteLength > maximumSourceSvgBytes) return unsupportedSvg("SVG input exceeds the retained source byte limit");
+  let source: string;
+  try {
+    source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return unsupportedSvg("unsupported SVG text encoding");
+  }
+  if (source.includes("\u0000")) return unsupportedSvg("unsupported SVG text encoding");
+  if (source.includes("\\")) return unsupportedSvg("CSS and XML escape syntax is outside the supported subset");
+  const declaredEncoding = source.match(/<\?xml\b[^>]*\bencoding\s*=\s*(["'])(.*?)\1[^>]*\?>/i)?.[2]?.trim().toLowerCase();
+  if (declaredEncoding && declaredEncoding !== "utf-8" && declaredEncoding !== "utf8") {
+    return unsupportedSvg("only UTF-8 SVG text is supported");
+  }
+  const opening = source.match(/<svg\b[^>]*>/i)?.[0];
+  if (!opening) return { status: "unusable", reason: "decode_failed", message: "decode_failed: missing svg root" };
+  if (!svgRootHasDimensions(opening)) {
+    return { status: "unusable", reason: "dimensions_missing", message: "dimensions_missing" };
+  }
+  if (/<!doctype\b|<!entity\b|<\?xml-stylesheet\b/i.test(source)) {
+    return unsupportedSvg("DTD, entity, or XML stylesheet declarations are outside the supported subset");
+  }
+  if (/<(?:[a-z][\w.-]*:)?(?:script|foreignObject|image|object|embed|iframe|include)\b/i.test(source)) {
+    return unsupportedSvg("script, embedded content, foreignObject, and include elements are outside the supported subset");
+  }
+  if (/\son[a-z][\w.-]*\s*=/i.test(source)) {
+    return unsupportedSvg("event-handler attributes are outside the supported subset");
+  }
+  if (/@import\b/i.test(source)) {
+    return unsupportedSvg("CSS imports are outside the supported subset");
+  }
+  for (const match of source.matchAll(/\b(?:href|xlink:href)\s*=\s*(["'])(.*?)\1/gis)) {
+    if (!match[2]?.trim().startsWith("#")) return unsupportedSvg("non-fragment references are outside the supported subset");
+  }
+  for (const match of source.matchAll(/url\(\s*(["']?)(.*?)\1\s*\)/gis)) {
+    if (!match[2]?.trim().startsWith("#")) return unsupportedSvg("non-fragment URL references are outside the supported subset");
+  }
+  if (/\b(?:data|file|https?):/i.test(source.replace(/xmlns(?::\w+)?\s*=\s*["'][^"']*["']/gi, ""))) {
+    return unsupportedSvg("embedded or external URI references are outside the supported subset");
+  }
+  const entityReferences = source.match(/&(?:#\d+|#x[a-f0-9]+|[a-z][\w.-]*);/gi) ?? [];
+  if (entityReferences.some((reference) => !/^&(amp|lt|gt|quot|apos|#\d+|#x[a-f0-9]+);$/i.test(reference))) {
+    return unsupportedSvg("custom entity references are outside the supported subset");
+  }
+  return undefined;
+}
+
+function svgRootHasDimensions(opening: string) {
+  const viewBox = opening.match(/\sviewBox\s*=\s*(["'])(.*?)\1/i)?.[2]?.trim().split(/[\s,]+/).map(Number);
+  if (viewBox?.length === 4 && viewBox.every(Number.isFinite) && viewBox[2]! > 0 && viewBox[3]! > 0) return true;
+  const width = opening.match(/\swidth\s*=\s*(["'])(.*?)\1/i)?.[2];
+  const height = opening.match(/\sheight\s*=\s*(["'])(.*?)\1/i)?.[2];
+  return svgAbsoluteDimensionIsPositive(width) && svgAbsoluteDimensionIsPositive(height);
+}
+
+function svgAbsoluteDimensionIsPositive(value: string | undefined) {
+  if (!value) return false;
+  const match = value.trim().match(/^\+?((?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?)(?:px|in|cm|mm|q|pt|pc)?$/i);
+  return Boolean(match && Number.isFinite(Number(match[1])) && Number(match[1]) > 0);
+}
+
+function unsupportedSvg(message: string): UnsupportedSourceSvg {
+  return { status: "unusable", reason: "unsupported_svg", message: `unsupported_svg: ${message}` };
 }
 
 function deterministicId(prefix: string, value: unknown) {

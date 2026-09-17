@@ -71,6 +71,13 @@ type GoogleAggregateRatingResponse = {
   identityEvidence: string;
 };
 
+type GoogleProfileUrlDisposition = "accepted" | "not_returned" | "rejected";
+
+type NormalizedGoogleProfileUrl = {
+  disposition: GoogleProfileUrlDisposition;
+  profileUrl?: string;
+};
+
 /**
  * Performs the one narrow third-party lookup needed by a blank website build.
  * This uses visible web-search evidence, never Google Places or Maps APIs. A
@@ -126,7 +133,8 @@ export async function researchGoogleAggregateRating(input: {
     }, input.signal ? { signal: input.signal } : undefined);
     if (response.status !== "completed" || !response.output_text.trim()) return undefined;
     const parsed = JSON.parse(response.output_text) as GoogleAggregateRatingResponse;
-    const observation = validatedGoogleAggregateRatingObservation(parsed, capturedAt);
+    const normalizedProfileUrl = normalizeGoogleProfileUrl(parsed.profileUrl);
+    const observation = validatedGoogleAggregateRatingObservation(parsed, capturedAt, normalizedProfileUrl);
     const sources = consultedUrls(response.output);
     const searchCalls = response.output.filter((item) => item.type === "web_search_call").length;
     const modelUsage = usageForModel(googleAggregateRatingResearchModel, response.usage, Date.now() - startedAt);
@@ -149,6 +157,7 @@ export async function researchGoogleAggregateRating(input: {
         observedAt: capturedAt,
         identityEvidence: parsed.identityEvidence.trim().slice(0, 1_000)
       },
+      profileUrlDisposition: normalizedProfileUrl.disposition,
       sources,
       provenance: {
         provider: "openai",
@@ -190,7 +199,7 @@ export function retainedProspectGoogleAggregateRatingSnapshot(input: {
     : undefined;
   const businessName = input.googleBusinessName?.trim() || input.businessName.trim();
   if (!businessName || Number.isNaN(Date.parse(input.observedAt))) return undefined;
-  const profileUrl = googleProfileUrl(input.profileUrl ?? null);
+  const normalizedProfileUrl = normalizeGoogleProfileUrl(input.profileUrl ?? null);
   return webResearchSnapshot(input.businessId, input.sourceUrl, input.observedAt, {
     kind: "google_aggregate_rating_research",
     observation: {
@@ -201,11 +210,12 @@ export function retainedProspectGoogleAggregateRatingSnapshot(input: {
       ...(input.locality?.trim() ? { locality: input.locality.trim() } : {}),
       rating: input.rating,
       ...(reviewCount !== undefined ? { reviewCount } : {}),
-      ...(profileUrl ? { profileUrl } : {}),
+      ...(normalizedProfileUrl.profileUrl ? { profileUrl: normalizedProfileUrl.profileUrl } : {}),
       observedAt: input.observedAt,
       identityEvidence: "Retained browser prospect observation matched to the exact first-party website."
     },
-    sources: [input.sourceUrl, ...(profileUrl ? [profileUrl] : [])],
+    profileUrlDisposition: normalizedProfileUrl.disposition,
+    sources: [input.sourceUrl, ...(normalizedProfileUrl.profileUrl ? [normalizedProfileUrl.profileUrl] : [])],
     provenance: {
       provider: "browser_prospect_research",
       tool: "visible_browser_observation",
@@ -319,7 +329,8 @@ export async function researchBusiness(input: {
 
 function validatedGoogleAggregateRatingObservation(
   value: GoogleAggregateRatingResponse,
-  observedAt: string
+  observedAt: string,
+  normalizedProfileUrl = normalizeGoogleProfileUrl(value.profileUrl)
 ): GoogleAggregateRatingObservation | undefined {
   if (
     value.status !== "matched"
@@ -336,7 +347,6 @@ function validatedGoogleAggregateRatingObservation(
     && value.reviewCount >= 0
     ? value.reviewCount
     : undefined;
-  const profileUrl = googleProfileUrl(value.profileUrl);
   return {
     kind: "google_aggregate_rating",
     status: "matched",
@@ -345,22 +355,22 @@ function validatedGoogleAggregateRatingObservation(
     ...(value.locality?.trim() ? { locality: value.locality.trim().slice(0, 200) } : {}),
     rating: value.rating,
     ...(reviewCount !== undefined ? { reviewCount } : {}),
-    ...(profileUrl ? { profileUrl } : {}),
+    ...(normalizedProfileUrl.profileUrl ? { profileUrl: normalizedProfileUrl.profileUrl } : {}),
     observedAt,
     identityEvidence: value.identityEvidence.trim().slice(0, 1_000)
   };
 }
 
-function googleProfileUrl(value: string | null) {
-  if (!value) return undefined;
+function normalizeGoogleProfileUrl(value: string | null): NormalizedGoogleProfileUrl {
+  if (value === null) return { disposition: "not_returned" };
   try {
     const url = new URL(value);
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
     return url.protocol === "https:" && (host === "google.com" || host.endsWith(".google.com") || host === "share.google")
-      ? url.href
-      : undefined;
+      ? { disposition: "accepted", profileUrl: url.href }
+      : { disposition: "rejected" };
   } catch {
-    return undefined;
+    return { disposition: "rejected" };
   }
 }
 

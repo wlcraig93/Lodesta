@@ -18,6 +18,8 @@ const adoptableImageTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
 export function rankSourceAssetCandidates(input: {
   resources: SourceSnapshotResource[];
   pages: SourceSnapshotPage[];
+  /** Only the canonical logo materializer may opt into retained SVG candidates. */
+  includeSvgLogoCandidates?: boolean;
 }) {
   const pagesByUrl = new Map<string, SourceSnapshotPage>();
   for (const page of input.pages) {
@@ -26,7 +28,8 @@ export function rankSourceAssetCandidates(input: {
   }
   const strongestByVisualIdentity = new Map<string, SourceAssetCandidate>();
   for (const resource of input.resources) {
-    if (!sourceResourceIsAdoptableImage(resource)) continue;
+    if (!sourceResourceIsAdoptableImage(resource)
+      && !(input.includeSvgLogoCandidates && sourceResourceIsPersistedSvg(resource))) continue;
     const sourcePage = resource.initiatorUrls
       .map((url) => pagesByUrl.get(url))
       .filter((page): page is SourceSnapshotPage => Boolean(page))
@@ -55,11 +58,18 @@ export function sourceResourceIsAdoptableImage(resource: SourceSnapshotResource)
     && adoptableImageTypes.has((resource.contentType ?? "").split(";", 1)[0]?.toLowerCase() ?? "");
 }
 
+function sourceResourceIsPersistedSvg(resource: SourceSnapshotResource) {
+  return resource.outcome === "fetched"
+    && Boolean(resource.storageKey && resource.blobContentHash && resource.rawContentHash)
+    && (resource.contentType ?? "").split(";", 1)[0]?.trim().toLowerCase() === "image/svg+xml";
+}
+
 function sourceAssetCandidate(resource: SourceSnapshotResource, page: SourceSnapshotPage): SourceAssetCandidate {
   const url = resource.finalUrl ?? resource.requestedUrl;
   const assetUrl = new URL(url);
-  const rawPath = decodeURIComponentSafe(assetUrl.pathname).toLowerCase();
-  const signal = normalizedSignal(rawPath);
+  const decodedPath = decodeURIComponentSafe(assetUrl.pathname);
+  const rawPath = decodedPath.toLowerCase();
+  const signal = normalizedSignal(decodedPath);
   const pageSignal = normalizedSignal(`${page.path} ${page.title ?? ""}`);
   const identityPage = page.path === "/" || /\b(?:about|team|company)\b/.test(pageSignal);
   const projectEvidencePage = /\b(?:gallery|portfolio|projects?|remodel|before after|case stud(?:y|ies)|our work)\b/.test(pageSignal);
@@ -217,5 +227,10 @@ function decodeURIComponentSafe(value: string) {
 }
 
 function normalizedSignal(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return value
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }

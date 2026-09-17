@@ -90,7 +90,7 @@
     "verify:site-sandbox-manifest": "node --import tsx scripts/verify-site-sandbox-manifest.ts",
     "verify:site-agent-manager": "node --import tsx scripts/verify-site-agent-manager.ts",
     "verify:site-authoring-canary": "node --import tsx scripts/verify-site-authoring-canary.ts",
-    "verify:media-authoring": "node --import tsx scripts/verify-logo-preparation.ts && node --import tsx scripts/verify-media-authoring.ts && node --import tsx scripts/verify-media-preview-dimensions.ts",
+    "verify:media-authoring": "node --import tsx scripts/verify-source-asset-ranking.ts && node --import tsx scripts/verify-logo-preparation.ts && node --import tsx scripts/verify-media-authoring.ts && node --import tsx scripts/verify-media-preview-dimensions.ts",
     "verify:site-intent-persistence": "node --import tsx scripts/verify-site-intent-persistence.ts",
     "verify:site-agent-workspace": "node --import tsx scripts/verify-site-agent-workspace.ts",
     "verify:site-agent-publish-dialog": "node --import tsx scripts/verify-site-agent-publish-dialog.ts",

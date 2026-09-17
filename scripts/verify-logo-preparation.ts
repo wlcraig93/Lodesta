@@ -111,6 +111,104 @@ assert.equal(oversizedPrepared.status, "unusable");
 if (oversizedPrepared.status !== "unusable") throw new Error("Oversized logo unexpectedly passed analysis.");
 assert.equal(oversizedPrepared.reason, "pixel_limit_exceeded");
 
+const sourceSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 330 77"><rect width="330" height="77" fill="#285649"/></svg>');
+const sourceSvgHash = sha256(sourceSvg);
+const svgMaterialization = await materializeSourceLogo({
+  bytes: sourceSvg,
+  mimeType: "image/svg+xml",
+  sourceRevisionId: "source_resource_svg_logo",
+  sourceContentHash: sourceSvgHash
+});
+assert.equal(svgMaterialization.status, "prepared");
+if (svgMaterialization.status !== "prepared") throw new Error("Self-contained source SVG did not materialize.");
+const expectedSvgPng = await sharp(sourceSvg, {
+  animated: false,
+  unlimited: false,
+  failOn: "warning",
+  limitInputPixels: 80_000_000,
+  density: 72
+}).timeout({ seconds: 2 }).png({ compressionLevel: 9, adaptiveFiltering: true }).toBuffer();
+assert.deepEqual(svgMaterialization.bytes, expectedSvgPng);
+assert.equal(svgMaterialization.mimeType, "image/png");
+assert.equal(svgMaterialization.contentHash, sha256(expectedSvgPng));
+assert.notEqual(svgMaterialization.contentHash, sourceSvgHash, "An SVG derivative reused the raw source hash.");
+assert.equal(svgMaterialization.presentation.changed, true);
+assert.deepEqual(svgMaterialization.preparation.operations, ["rasterize_svg"]);
+assert.equal(svgMaterialization.presentation.width, 330);
+assert.equal(svgMaterialization.presentation.height, 77);
+assert.deepEqual(svgMaterialization.revisionIdentity, {
+  sourceRevisionId: "source_resource_svg_logo",
+  sourceContentHash: sourceSvgHash,
+  logoPresentationRecipeVersion: 1
+});
+const repeatedSvgMaterialization = await materializeSourceLogo({
+  bytes: sourceSvg,
+  mimeType: "image/svg+xml",
+  sourceRevisionId: "source_resource_svg_logo",
+  sourceContentHash: sourceSvgHash
+});
+assert.equal(repeatedSvgMaterialization.status, "prepared");
+if (repeatedSvgMaterialization.status !== "prepared") throw new Error("Repeated source SVG materialization failed.");
+assert.deepEqual(repeatedSvgMaterialization.bytes, svgMaterialization.bytes);
+assert.deepEqual(repeatedSvgMaterialization.presentation, svgMaterialization.presentation);
+assert.deepEqual(repeatedSvgMaterialization.revisionIdentity, svgMaterialization.revisionIdentity);
+
+const percentageDimensionsWithViewBox = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 20 10"><rect width="20" height="10" fill="#285649"/></svg>'
+);
+const percentageWithViewBoxMaterialization = await materializeSourceLogo({
+  bytes: percentageDimensionsWithViewBox,
+  mimeType: "image/svg+xml",
+  sourceRevisionId: "source_resource_percentage_dimensions_with_viewbox",
+  sourceContentHash: sha256(percentageDimensionsWithViewBox)
+});
+assert.equal(percentageWithViewBoxMaterialization.status, "prepared",
+  "A positive intrinsic viewBox should remain valid when presentation dimensions are percentages.");
+
+const absoluteDimensionsWithoutViewBox = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="20px" height="10pt"><rect width="20" height="10" fill="#285649"/></svg>'
+);
+const absoluteDimensionsMaterialization = await materializeSourceLogo({
+  bytes: absoluteDimensionsWithoutViewBox,
+  mimeType: "image/svg+xml",
+  sourceRevisionId: "source_resource_absolute_dimensions",
+  sourceContentHash: sha256(absoluteDimensionsWithoutViewBox)
+});
+assert.equal(absoluteDimensionsMaterialization.status, "prepared",
+  "Positive absolute dimensions without a viewBox should remain supported.");
+
+const unusableSvgCases = [
+  ["missing dimensions", '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>', "dimensions_missing"],
+  ["percentage-only dimensions", '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><rect width="10" height="10"/></svg>', "dimensions_missing"],
+  ["zero dimensions", '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="10"><rect width="10" height="10"/></svg>', "dimensions_missing"],
+  ["negative dimensions", '<svg xmlns="http://www.w3.org/2000/svg" width="-10" height="10"><rect width="10" height="10"/></svg>', "dimensions_missing"],
+  ["empty dimensions", '<svg xmlns="http://www.w3.org/2000/svg" width="" height="10"><rect width="10" height="10"/></svg>', "dimensions_missing"],
+  ["dynamic dimensions", '<svg xmlns="http://www.w3.org/2000/svg" width="calc(100px)" height="10"><rect width="10" height="10"/></svg>', "dimensions_missing"],
+  ["excessive pixels", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4000 3001"><rect width="4000" height="3001"/></svg>', "pixel_limit_exceeded"],
+  ["malformed input", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path', "decode_failed"],
+  ["empty output", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>', "empty_content"],
+  ["embedded image", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><image href="data:image/png;base64,AA=="/></svg>', "unsupported_svg"],
+  ["external href", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><use href="https://assets.example/mark.svg#logo"/></svg>', "unsupported_svg"],
+  ["CSS import", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><style>@import url("https://assets.example/logo.css");</style></svg>', "unsupported_svg"],
+  ["external entity", '<!DOCTYPE svg SYSTEM "https://assets.example/logo.dtd"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"/>', "unsupported_svg"],
+  ["internal entity", '<!DOCTYPE svg [<!ENTITY mark "logo">]><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text>&mark;</text></svg>', "unsupported_svg"],
+  ["script", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><script>void 0</script></svg>', "unsupported_svg"],
+  ["foreignObject", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><foreignObject width="10" height="10"/></svg>', "unsupported_svg"],
+  ["CSS escape", '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><style>.mark{fill:url(\\68 ttps://assets.example/mark.svg)}</style></svg>', "unsupported_svg"],
+  ["unsupported encoding", '<?xml version="1.0" encoding="UTF-16"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"/>', "unsupported_svg"]
+] as const;
+for (const [label, source, reason] of unusableSvgCases) {
+  const result = await materializeSourceLogo({
+    bytes: Buffer.from(source),
+    mimeType: "image/svg+xml",
+    sourceRevisionId: `source_resource_${label.replaceAll(" ", "_")}`,
+    sourceContentHash: sha256(source)
+  });
+  assert.equal(result.status, "unusable", `${label} unexpectedly materialized.`);
+  if (result.status !== "unusable") throw new Error(`${label} unexpectedly materialized.`);
+  assert.equal(result.reason, reason, `${label} returned the wrong rejection reason.`);
+}
+
 const snapshot = sourceSnapshotSchema.parse({
   schemaVersion: 1,
   id: "source_canonical_logo_test",
@@ -146,7 +244,7 @@ const page = sourceSnapshotPageSchema.parse({
   inputHash: sha256("canonical-source-logo-test-input"),
   createdAt: snapshot.capturedAt
 });
-const sourceLogoEntry = (id: string, bytes: Buffer, path: string) => ({
+const sourceLogoEntry = (id: string, bytes: Buffer, path: string, contentType = "image/png") => ({
   resource: sourceSnapshotResourceSchema.parse({
     schemaVersion: 1,
     id,
@@ -157,7 +255,7 @@ const sourceLogoEntry = (id: string, bytes: Buffer, path: string) => ({
     finalUrl: `https://example.com/${path}`,
     outcome: "fetched",
     status: 200,
-    contentType: "image/png",
+    contentType,
     storedEncoding: "identity",
     rawContentHash: sha256(bytes),
     blobContentHash: sha256(bytes),
@@ -192,7 +290,60 @@ assert.equal(canonical.revision.id, canonicalSourceLogoRevisionId({
 }));
 assert.equal(canonical.revision.provenance.origin, "source_website");
 assert.equal(canonical.revision.provenance.sourceSnapshotId, snapshot.id);
-assert.equal(canonical.revision.provenance.sourceResourceId, undefined);
+assert.equal(canonical.revision.provenance.sourceResourceId, undefined,
+  "Existing raster provenance changed shape under the same deterministic revision identity.");
+
+const svgCanonical = await materializeCanonicalSourceLogo({
+  snapshot,
+  pages: [page],
+  resources: [
+    sourceLogoEntry("source_resource_raster_logo", cleanLogo, "brand-logo-300x100.png"),
+    sourceLogoEntry("source_resource_svg_logo", sourceSvg, "brand-logo.svg", "image/svg+xml")
+  ],
+  businessName: "Example"
+});
+assert.equal(svgCanonical.status, "canonical");
+if (svgCanonical.status !== "canonical") throw new Error("Canonical SVG source logo selection failed.");
+assert.equal(svgCanonical.candidate.resource.id, "source_resource_svg_logo");
+assert.equal(svgCanonical.ref.mimeType, "image/png");
+assert.equal(svgCanonical.revision.contentHash, sha256(svgCanonical.materialization.bytes));
+assert.equal(svgCanonical.revision.id, canonicalSourceLogoRevisionId({
+  sourceSnapshotId: snapshot.id,
+  sourceContentHash: sourceSvgHash
+}));
+assert.equal(svgCanonical.revision.provenance.origin, "source_website");
+assert.equal(svgCanonical.revision.provenance.sourceSnapshotId, snapshot.id);
+assert.equal(svgCanonical.revision.provenance.sourceResourceId, "source_resource_svg_logo");
+assert.equal(svgCanonical.revision.provenance.preparation?.sourceContentHash, sourceSvgHash);
+
+const malformedSvgEntry = sourceLogoEntry(
+  "source_resource_malformed_svg_logo",
+  Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 330 77"><path'),
+  "brand-logo.svg",
+  "image/svg+xml"
+);
+const fallbackCanonical = await materializeCanonicalSourceLogo({
+  snapshot,
+  pages: [page],
+  resources: [
+    sourceLogoEntry("source_resource_fallback_raster_logo", cleanLogo, "brand-logo-300x100.png"),
+    malformedSvgEntry
+  ],
+  businessName: "Example"
+});
+assert.equal(fallbackCanonical.status, "canonical");
+if (fallbackCanonical.status !== "canonical") throw new Error("Unusable SVG did not fall through to a raster logo.");
+assert.equal(fallbackCanonical.candidate.resource.id, "source_resource_fallback_raster_logo");
+
+const corruptRetainedSvg = await materializeCanonicalSourceLogo({
+  snapshot,
+  pages: [page],
+  resources: [{ ...sourceLogoEntry("source_resource_corrupt_svg_logo", sourceSvg, "corrupt-logo.svg", "image/svg+xml"), bytes: Buffer.from("changed") }],
+  businessName: "Example"
+});
+assert.equal(corruptRetainedSvg.status, "unavailable");
+if (corruptRetainedSvg.status !== "unavailable") throw new Error("Hash-mismatched retained SVG unexpectedly materialized.");
+assert.deepEqual(corruptRetainedSvg.unusableCandidates, [{ resourceId: "source_resource_corrupt_svg_logo", reason: "decode_failed" }]);
 
 const opaque = sourceLogoEntry("opaque_crest", whitePadded, "opaque-cdn-resource");
 const missed = await materializeCanonicalSourceLogo({ snapshot, pages: [page], resources: [opaque], businessName: "Example" });

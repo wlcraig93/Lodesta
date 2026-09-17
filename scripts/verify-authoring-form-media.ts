@@ -105,8 +105,7 @@ try {
     usage: { inputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0, outputTokens: 0, costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 0 }, startedAt: now });
   await repository.saveAgentRun(run);
   const mediaBytes = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#285649" } }).webp().toBuffer();
-  const logoBytes = await sharp({ create: { width: 160, height: 100, channels: 4, background: "transparent" } })
-    .composite([{ input: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="100"><rect x="40" y="20" width="80" height="60" fill="#183957"/></svg>') }]).png().toBuffer();
+  const logoBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><rect x="40" y="20" width="80" height="60" fill="#183957"/></svg>');
   // Exercise the production evidence builder with the full canonical cap. The
   // manager request test separately proves these references and their shared
   // contact-sheet pixels reach the provider input.
@@ -180,13 +179,13 @@ try {
     "The production asset-evidence builder returned mappings without decodable contact-sheet pixels.");
   const logoResource = sourceSnapshotResourceSchema.parse({
     schemaVersion: 1, id: "resource_opaque_crest", sourceSnapshotId: originalSnapshot.id,
-    captureKind: "http_response", role: "image", requestedUrl: "https://cdn.example/opaque123",
-    finalUrl: "https://cdn.example/opaque123", outcome: "fetched", status: 200, contentType: "image/png",
+    captureKind: "http_response", role: "image", requestedUrl: "https://cdn.example/PristineTXNewLogo.svg",
+    finalUrl: "https://cdn.example/PristineTXNewLogo.svg", outcome: "fetched", status: 200, contentType: "image/svg+xml",
     storedEncoding: "identity", rawContentHash: sha256(logoBytes), blobContentHash: sha256(logoBytes),
     storageKey: "fixture/opaque123", rawBytes: logoBytes.length, storedBytes: logoBytes.length,
     headers: {}, redirectChain: [], initiatorUrls: [homepage.requestedUrl], capturedAt: now, metadata: {}
   });
-  await store.putImmutable({ key: logoResource.storageKey!, bytes: logoBytes, contentType: "image/png", contentHash: sha256(logoBytes) });
+  await store.putImmutable({ key: logoResource.storageKey!, bytes: logoBytes, contentType: "image/svg+xml", contentHash: sha256(logoBytes) });
   await repository.saveSourceSnapshotResources([logoResource, { ...logoResource, id: "resource_other_crest", rawContentHash: sha256("different") }]);
   const mirroredWebsiteSource = canarySnapshots.find((snapshot) => snapshot.sourceType === "website")!;
   const inspectedPhoto = sourceSnapshotResourceSchema.parse({
@@ -301,12 +300,24 @@ try {
     const unassociated = await runtime.execute({ callId: "bad_logo_page", name: "adopt_source_asset",
       arguments: { ...logoArgs, sourcePageId: documentPage.id } });
     assert.equal(unassociated.diagnosticOutput.error, "source_logo_provenance_invalid");
+    for (const kind of ["photo", "icon", "other"] as const) {
+      const unsupported = await runtime.execute({ callId: `svg_as_${kind}`, name: "adopt_source_asset",
+        arguments: { ...logoArgs, kind } });
+      assert.equal(unsupported.diagnosticOutput.error, "source_asset_mime_unsupported",
+        `SVG source media was admitted as ${kind}.`);
+    }
     const logo = await runtime.execute({ callId: "source_logo", name: "adopt_source_asset", arguments: logoArgs });
     assert.equal(logo.diagnosticOutput.ok, true);
     const logoRef = logo.diagnosticOutput.asset as SitePublicBuildInput["business"]["assets"][number];
     assert.equal(logoRef.kind, "logo");
     assert.equal(logoRef.assetId, canonicalSourceLogoAssetId(input.businessId));
-    assert(logoRef.width! < 160, "Opaque source mark must receive canonical presentation preparation.");
+    assert.equal(logoRef.mimeType, "image/png");
+    const materializedLogoBlob = await store.get(logoRef.storageKey);
+    assert(materializedLogoBlob, "Canonical SVG logo derivative was not persisted.");
+    assert.equal(materializedLogoBlob.contentType, "image/png");
+    assert.equal(materializedLogoBlob.contentHash, sha256(materializedLogoBlob.bytes));
+    assert.equal((await sharp(materializedLogoBlob.bytes).metadata()).format, "png");
+    assert(logoRef.width! < 160, "Source mark must receive canonical presentation preparation.");
     const replay = await runtime.execute({ callId: "source_logo_again", name: "adopt_source_asset", arguments: logoArgs });
     assert.deepEqual(replay.diagnosticOutput.asset, logoRef, "Repeated adoption must reuse the same canonical revision.");
     const replacement = await runtime.execute({ callId: "replace_logo", name: "adopt_source_asset",

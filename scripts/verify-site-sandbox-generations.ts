@@ -59,6 +59,9 @@ await verifyOperationJournalReads();
 await verifySubmissionJournalReadSafety();
 await verifyQueuedJournalRace();
 await verifyPreparationObserver();
+await verifyAbandonedPreparationOwner();
+await verifyProcessStartJournalAmbiguity();
+await verifyExplicitJournalAbsenceAfterCompilation();
 await verifyCompletedOperationPoll();
 await verifyAmbiguousPromotionResponse();
 await verifyConcurrentFinalizationPoll();
@@ -100,7 +103,10 @@ process.stdout.write(`${JSON.stringify({
   ok: true,
   immutableGenerations: "pass",
   atomicPointerFaults: "pass",
-  boundedFreshSandboxReplay: "pass"
+  boundedFreshSandboxReplay: "pass",
+  abandonedPreparingOwner: "pass",
+  postProcessJournalAmbiguity: "pass",
+  explicitJournalAbsence: "pass"
 })}\n`);
 
 // Execute the actual Worker function against a deterministic filesystem/RPC
@@ -171,27 +177,39 @@ async function verifyOperationJournalReads() {
     operationsRoot: "/fixture/operations",
     SandboxOperationError: Conflict
   }) as (sandbox: {
-    exists(path: string): Promise<{ exists: boolean }>;
     readFile(path: string, options: { encoding: string }): Promise<{ content: string }>;
   }, operationId: string) => Promise<unknown>;
-  const adapter = (exists: () => Promise<{ exists: boolean }>, readFile: () => Promise<{ content: string }>) => ({ exists, readFile });
+  const adapter = (readFile: () => Promise<{ content: string }>) => ({ readFile });
+  const codedError = (code: string, message: string) => Object.assign(new Error(message), { code });
 
-  assert.equal(await read(adapter(async () => ({ exists: false }), async () => { throw new Error("unexpected read"); }), operationId), undefined,
-    "An explicitly absent journal did not remain the sole not-found case.");
-  const existsFailure = new TypeError("simulated exists RPC failure");
-  await assert.rejects(read(adapter(async () => { throw existsFailure; }, async () => ({ content: "" })), operationId), error => error === existsFailure,
-    "An exists RPC failure was misreported as a missing journal.");
-  const readFailure = new TypeError("simulated readFile RPC failure");
-  await assert.rejects(read(adapter(async () => ({ exists: true }), async () => { throw readFailure; }), operationId), error => error === readFailure,
-    "A readFile RPC failure was misreported as a missing journal.");
+  let directReads = 0;
+  const missing = codedError("FILE_NOT_FOUND", "simulated structured missing journal");
+  assert.equal(await read(adapter(async () => { directReads += 1; throw missing; }), operationId), undefined,
+    "A structured FILE_NOT_FOUND journal read did not remain the sole not-found case.");
+  assert.equal(directReads, 1, "Journal absence performed more than one filesystem read.");
+
+  const propagatedErrors = [
+    codedError("RPC_TRANSPORT_ERROR", "simulated read RPC interruption"),
+    codedError("FILESYSTEM_ERROR", "journal not found because the filesystem read failed"),
+    codedError("PERMISSION_DENIED", "simulated journal permission failure"),
+    codedError("ENOENT", "simulated raw system ENOENT"),
+    new TypeError("simulated readFile RPC failure")
+  ];
+  for (const readFailure of propagatedErrors) {
+    await assert.rejects(
+      read(adapter(async () => { throw readFailure; }), operationId),
+      error => error === readFailure,
+      `A ${"code" in readFailure ? readFailure.code : readFailure.name} journal read failure was misreported as missing.`
+    );
+  }
   for (const content of ["{not-json", "null", JSON.stringify({ ...journal, operationId: "wrong" }), JSON.stringify({ ...journal, schemaVersion: 2 })]) {
     await assert.rejects(
-      read(adapter(async () => ({ exists: true }), async () => ({ content })), operationId),
+      read(adapter(async () => ({ content })), operationId),
       error => error instanceof Conflict && error.status === 500 && error.payload.error === "operation_journal_invalid",
       "Malformed or mismatched retained journal bytes did not fail loudly."
     );
   }
-  assert.deepEqual(await read(adapter(async () => ({ exists: true }), async () => ({ content: JSON.stringify(journal) })), operationId), journal);
+  assert.deepEqual(await read(adapter(async () => ({ content: JSON.stringify(journal) })), operationId), journal);
 
   const status = productionWorkerFunction("operationStatus", {
     readOperationJournal: read,
@@ -207,16 +225,22 @@ async function verifyOperationJournalReads() {
     json: (body: unknown, responseStatus = 200) => Response.json(body, { status: responseStatus }),
     SandboxOperationError: Conflict
   });
-  const missingResponse = await fetchStatus(adapter(async () => ({ exists: false }), async () => ({ content: "" })))(
+  const missingResponse = await fetchStatus(adapter(async () => { throw missing; }))(
     new Request(`http://127.0.0.1/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
   assert.equal(missingResponse.status, 404);
   assert.deepEqual(await missingResponse.json(), { error: "operation_not_found", operationId });
-  const transportResponse = await fetchStatus(adapter(async () => { throw existsFailure; }, async () => ({ content: "" })))(
+  const transportFailure = propagatedErrors[0];
+  const transportResponse = await fetchStatus(adapter(async () => { throw transportFailure; }))(
     new Request(`http://127.0.0.1/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
   assert.equal(transportResponse.status, 500);
   assert.equal((await transportResponse.json() as { error?: string }).error, "sandbox_operation_failed",
     "The GET handler misreported a journal transport failure as operation_not_found.");
-  const malformedResponse = await fetchStatus(adapter(async () => ({ exists: true }), async () => ({ content: "null" })))(
+  const rawEnoentResponse = await fetchStatus(adapter(async () => { throw propagatedErrors[3]; }))(
+    new Request(`http://127.0.0.1/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
+  assert.equal(rawEnoentResponse.status, 500);
+  assert.equal((await rawEnoentResponse.json() as { error?: string }).error, "sandbox_operation_failed",
+    "A raw ENOENT was broadened into operation_not_found.");
+  const malformedResponse = await fetchStatus(adapter(async () => ({ content: "null" })))(
     new Request(`http://127.0.0.1/v1/sessions/session/operations/${operationId}`), {}, { waitUntil: () => undefined });
   assert.equal(malformedResponse.status, 500);
   assert.deepEqual(await malformedResponse.json(), { error: "operation_journal_invalid", operationId });
@@ -245,29 +269,29 @@ async function verifySubmissionJournalReadSafety() {
   });
   const writes: unknown[] = [];
   const commands: string[] = [];
-  const sandbox = (exists: () => Promise<{ exists: boolean }>, readFile: () => Promise<{ content: string }>) => ({
-    exists,
+  const sandbox = (readFile: () => Promise<{ content: string }>) => ({
     readFile,
     mkdir: async () => undefined,
     exec: async (command: string) => { commands.push(command); return { success: true }; },
     writeFile: async (path: string, content: string) => { writes.push({ kind: "file", path, content }); }
   });
+  const missing = () => Object.assign(new Error("simulated structured missing journal"), { code: "FILE_NOT_FOUND" });
 
   for (const fixture of [{
-    name: "exists RPC failure",
-    error: new TypeError("simulated retained journal exists RPC failure"),
-    adapter: () => sandbox(async () => { throw new TypeError("simulated retained journal exists RPC failure"); }, async () => ({ content: "" }))
-  }, {
     name: "readFile RPC failure",
     error: new TypeError("simulated retained journal readFile RPC failure"),
-    adapter: () => sandbox(async () => ({ exists: true }), async () => { throw new TypeError("simulated retained journal readFile RPC failure"); })
+    adapter: () => sandbox(async () => { throw new TypeError("simulated retained journal readFile RPC failure"); })
+  }, {
+    name: "filesystem failure containing not-found prose",
+    error: Object.assign(new Error("journal not found because its filesystem read failed"), { code: "FILESYSTEM_ERROR" }),
+    adapter: () => sandbox(async () => { throw Object.assign(new Error("journal not found because its filesystem read failed"), { code: "FILESYSTEM_ERROR" }); })
   }, {
     name: "malformed JSON",
     error: undefined,
-    adapter: () => sandbox(async () => ({ exists: true }), async () => ({ content: "{not-json" }))
+    adapter: () => sandbox(async () => ({ content: "{not-json" }))
   }]) {
     await assert.rejects(submit(fixture.adapter(), "session", input), error => fixture.error
-      ? error instanceof TypeError && error.message === fixture.error.message
+      ? error instanceof Error && error.message === fixture.error.message
       : error instanceof Conflict && error.payload.error === "operation_journal_invalid",
     `Submission continued after an initial ${fixture.name}.`);
     assert.deepEqual(commands, [], `Submission acquired a lock after an initial ${fixture.name}.`);
@@ -278,9 +302,9 @@ async function verifySubmissionJournalReadSafety() {
   const secondReadFailure = new TypeError("simulated second journal read RPC failure");
   await assert.rejects(submit(sandbox(async () => {
     readAttempts += 1;
-    if (readAttempts === 1) return { exists: false };
+    if (readAttempts === 1) throw missing();
     throw secondReadFailure;
-  }, async () => ({ content: "" })), "session", input), error => error === secondReadFailure,
+  }), "session", input), error => error === secondReadFailure,
   "Submission continued after the journal re-read under its acceptance lock failed.");
   assert.deepEqual(commands, [
     `mkdir /fixture/operations/${operationId}.accept.lock`,
@@ -289,7 +313,7 @@ async function verifySubmissionJournalReadSafety() {
   assert.deepEqual(writes, [], "Submission wrote bytes after its second journal read failed.");
 
   commands.length = 0;
-  const accepted = await submit(sandbox(async () => ({ exists: false }), async () => ({ content: "" })), "session", input) as { operationId?: string; status?: string };
+  const accepted = await submit(sandbox(async () => { throw missing(); }), "session", input) as { operationId?: string; status?: string };
   assert.equal(accepted.operationId, operationId);
   assert.equal(accepted.status, "queued", "A truly absent journal was not accepted as a new queued operation.");
   assert.equal(writes.length, 2, "A new operation did not write exactly one request and one journal.");
@@ -297,7 +321,7 @@ async function verifySubmissionJournalReadSafety() {
   writes.length = 0;
   commands.length = 0;
   const retained = { schemaVersion: 1, operationId, payloadHash, status: "running", phase: "validating" };
-  const replayed = await submit(sandbox(async () => ({ exists: true }), async () => ({ content: JSON.stringify(retained) })), "session", input) as { submissionReplayed?: boolean };
+  const replayed = await submit(sandbox(async () => ({ content: JSON.stringify(retained) })), "session", input) as { submissionReplayed?: boolean };
   assert.equal(replayed.submissionReplayed, true, "An existing journal was not replayed.");
   assert.deepEqual(commands, [], "Existing-journal replay acquired an acceptance lock.");
   assert.deepEqual(writes, [], "Existing-journal replay rewrote retained bytes.");
@@ -333,6 +357,269 @@ async function verifyPreparationObserver() {
   });
   const result = await status({}, "session", "https://sandbox.example", journal.operationId);
   assert.equal(result, journal, "A poll without proof of a completed preparation must not reset its journal or remove its lock.");
+}
+
+async function verifyAbandonedPreparationOwner() {
+  const operationId = "a".repeat(64);
+  const createdAt = "2026-09-17T00:35:59.742Z";
+  const queued = {
+    schemaVersion: 1,
+    operationId,
+    payloadHash: "payload",
+    status: "queued",
+    phase: "queued",
+    createdAt,
+    updatedAt: createdAt,
+    phaseStartedAt: createdAt,
+    timestamps: { queued: createdAt },
+    phaseTimings: {}
+  };
+  let retained: Record<string, unknown> = queued;
+  let lockOwned = false;
+  const preparationEntered = deferred<void>();
+  const neverCompletes = deferred<void>();
+  class Conflict extends Error {
+    constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
+  }
+  const transitionOperation = productionWorkerFunction("transitionOperation", {
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { retained = journal; }
+  });
+  const failOperation = productionWorkerFunction("failOperation", {
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { retained = journal; },
+    cleanupOperationProcess: async () => undefined,
+    mutationLock: "/fixture/mutation.lock",
+    SandboxOperationError: Conflict
+  });
+  const start = productionWorkerFunction("startQueuedOperation", {
+    readOperationJournal: async () => retained,
+    acquireMutationLock: async () => { assert.equal(lockOwned, false); lockOwned = true; },
+    mutationLock: "/fixture/mutation.lock",
+    transitionOperation,
+    operationRequestPath: () => "/fixture/request.json",
+    readJson: async () => ({ action: "apply", expectedRevision: oldRevision, files: [], publicInputJson: "{}" }),
+    readActiveGeneration: async () => ({ revision: oldRevision }),
+    reconcileGenerationCleanup: async () => {
+      preparationEntered.resolve();
+      await neverCompletes.promise;
+    },
+    digest: async () => newRevision,
+    generationPath: () => "/fixture/candidate",
+    scaffoldGenerationCommand: () => "prepare-candidate",
+    writeGenerationInput: async () => undefined,
+    writeGenerationSource: async () => undefined,
+    operationValidationMarker: () => "/fixture/validation-marker",
+    disposeRpc: () => undefined,
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { retained = journal; },
+    failOperation,
+    SandboxOperationError: Conflict
+  });
+  const sandbox = {
+    exec: async (command: string) => {
+      if (command === "rm -rf /fixture/mutation.lock") { lockOwned = false; return { success: true, stderr: "" }; }
+      return { success: true, stderr: "" };
+    },
+    writeFile: async () => undefined,
+    startProcess: async () => { throw new Error("Preparation should remain deferred before process start."); }
+  };
+  const owner = start(sandbox, "session", "https://sandbox.example", operationId) as Promise<unknown>;
+  let ownerSettled = false;
+  void owner.then(() => { ownerSettled = true; }, () => { ownerSettled = true; });
+  await fixtureEntered(preparationEntered.promise, "abandoned preparation boundary");
+  await fixtureCheckpoint();
+  assert.equal(ownerSettled, false, "The deferred preparation owner unexpectedly settled.");
+  assert.equal(retained.status, "running");
+  assert.equal(retained.phase, "preparing");
+  assert.equal(lockOwned, true);
+
+  const status = productionWorkerFunction("operationStatus", {
+    readOperationJournal: async () => retained,
+    publicOperationStatus: productionWorkerFunction("publicOperationStatus", {}),
+    startQueuedOperation: async () => { throw new Error("A preparing observer restarted the abandoned owner."); },
+    advanceRunningOperation: async () => { throw new Error("A preparing observer advanced the abandoned owner."); },
+    SandboxOperationError: Conflict
+  });
+  const observed = await status(sandbox, "session", "https://sandbox.example", operationId) as { status?: string; phase?: string };
+  assert.equal(observed.status, "running");
+  assert.equal(observed.phase, "preparing");
+  assert.equal(lockOwned, true, "A preparation observer released the owner's mutation lock.");
+
+  let rejectedRetained: Record<string, unknown> = queued;
+  let rejectedLockOwned = false;
+  let cleaned = 0;
+  const rejectedTransition = productionWorkerFunction("transitionOperation", {
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { rejectedRetained = journal; }
+  });
+  const rejectedFail = productionWorkerFunction("failOperation", {
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { rejectedRetained = journal; },
+    cleanupOperationProcess: async () => { cleaned += 1; },
+    mutationLock: "/fixture/mutation.lock",
+    SandboxOperationError: Conflict
+  });
+  const ordinaryFailure = new Error("ordinary preparation rejection");
+  const rejectedStart = productionWorkerFunction("startQueuedOperation", {
+    readOperationJournal: async () => rejectedRetained,
+    acquireMutationLock: async () => { rejectedLockOwned = true; },
+    mutationLock: "/fixture/mutation.lock",
+    transitionOperation: rejectedTransition,
+    operationRequestPath: () => "/fixture/request.json",
+    readJson: async () => ({ action: "apply", expectedRevision: oldRevision, files: [], publicInputJson: "{}" }),
+    readActiveGeneration: async () => ({ revision: oldRevision }),
+    reconcileGenerationCleanup: async () => { throw ordinaryFailure; },
+    digest: async () => newRevision,
+    generationPath: () => "/fixture/candidate",
+    scaffoldGenerationCommand: () => "prepare-candidate",
+    writeGenerationInput: async () => undefined,
+    writeGenerationSource: async () => undefined,
+    operationValidationMarker: () => "/fixture/validation-marker",
+    disposeRpc: () => undefined,
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { rejectedRetained = journal; },
+    failOperation: rejectedFail,
+    SandboxOperationError: Conflict
+  });
+  const rejectedSandbox = {
+    exec: async (command: string) => {
+      if (command === "rm -rf /fixture/mutation.lock") rejectedLockOwned = false;
+      return { success: true, stderr: "" };
+    }
+  };
+  const failed = await rejectedStart(rejectedSandbox, "session", "https://sandbox.example", operationId) as {
+    status?: string;
+    phase?: string;
+    failure?: { payload?: { error?: string; detail?: string } };
+  };
+  assert.equal(failed.status, "failed", "An ordinary preparation rejection did not become terminal.");
+  assert.equal(failed.phase, "complete");
+  assert.equal(failed.failure?.payload?.error, "sandbox_operation_failed");
+  assert.equal(failed.failure?.payload?.detail, ordinaryFailure.message);
+  assert.equal(rejectedLockOwned, false, "An ordinary preparation rejection retained the mutation lock.");
+  assert.equal(cleaned, 1, "An ordinary preparation rejection skipped process cleanup.");
+}
+
+async function verifyProcessStartJournalAmbiguity() {
+  const operationId = "b".repeat(64);
+  const createdAt = "2026-09-17T00:36:00.000Z";
+  const queued = {
+    schemaVersion: 1,
+    operationId,
+    payloadHash: "payload",
+    status: "queued",
+    phase: "queued",
+    createdAt,
+    updatedAt: createdAt,
+    phaseStartedAt: createdAt,
+    timestamps: { queued: createdAt },
+    phaseTimings: {}
+  };
+  let retained: Record<string, unknown> = queued;
+  let lockOwned = false;
+  let journalWrites = 0;
+  let processStarted = false;
+  let failed = 0;
+  const ambiguousWrite = new TypeError("simulated validating-journal RPC ambiguity");
+  const writeOperationJournal = async (_sandbox: unknown, journal: Record<string, unknown>) => {
+    journalWrites += 1;
+    if (journalWrites === 2) throw ambiguousWrite;
+    retained = journal;
+  };
+  const transitionOperation = productionWorkerFunction("transitionOperation", { writeOperationJournal });
+  class Conflict extends Error {
+    constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
+  }
+  const start = productionWorkerFunction("startQueuedOperation", {
+    readOperationJournal: async () => retained,
+    acquireMutationLock: async () => { lockOwned = true; },
+    mutationLock: "/fixture/mutation.lock",
+    transitionOperation,
+    operationRequestPath: () => "/fixture/request.json",
+    readJson: async () => ({ action: "apply", expectedRevision: oldRevision, files: [], publicInputJson: "{}" }),
+    readActiveGeneration: async () => ({ revision: oldRevision }),
+    reconcileGenerationCleanup: async () => undefined,
+    digest: async () => newRevision,
+    generationPath: () => "/fixture/candidate",
+    scaffoldGenerationCommand: () => "prepare-candidate",
+    writeGenerationInput: async () => undefined,
+    writeGenerationSource: async () => undefined,
+    operationValidationMarker: () => "/fixture/validation-marker",
+    disposeRpc: () => undefined,
+    writeOperationJournal,
+    failOperation: async () => { failed += 1; throw new Error("Ambiguous post-start write incorrectly failed the operation."); },
+    SandboxOperationError: Conflict
+  });
+  const processId = `lodesta-build-${operationId.slice(0, 24)}`;
+  const sandbox = {
+    exec: async () => ({ success: true, stderr: "" }),
+    writeFile: async () => undefined,
+    startProcess: async (_command: string, options: { processId: string }) => {
+      assert.equal(options.processId, processId);
+      processStarted = true;
+      return { id: processId };
+    }
+  };
+  await assert.rejects(
+    start(sandbox, "session", "https://sandbox.example", operationId),
+    error => error === ambiguousWrite,
+    "An ambiguous validating-journal write did not propagate after process start."
+  );
+  assert.equal(processStarted, true);
+  assert.equal(journalWrites, 2);
+  assert.equal(failed, 0, "Post-start ambiguity called destructive failure cleanup.");
+  assert.equal(retained.status, "running");
+  assert.equal(retained.phase, "preparing", "A failed validating-journal write changed retained phase.");
+  assert.equal(retained.processId, undefined, "The retained preparing journal invented an uncommitted process ID.");
+  assert.equal(lockOwned, true, "Post-start ambiguity released the mutation lock.");
+}
+
+async function verifyExplicitJournalAbsenceAfterCompilation() {
+  const operationId = "c".repeat(64);
+  const compiling = {
+    schemaVersion: 1,
+    operationId,
+    payloadHash: "payload",
+    status: "running",
+    phase: "compiling",
+    createdAt: "2026-09-17T00:28:47.842Z",
+    updatedAt: "2026-09-17T00:28:53.343Z",
+    phaseStartedAt: "2026-09-17T00:28:53.343Z",
+    timestamps: { queued: "2026-09-17T00:28:47.842Z", compiling: "2026-09-17T00:28:53.343Z" },
+    phaseTimings: {},
+    candidateRevision: newRevision,
+    processId: `lodesta-build-${operationId.slice(0, 24)}`
+  };
+  let visible = true;
+  const process = { id: compiling.processId, status: "completed" };
+  const readOperationJournal = productionWorkerFunction("readOperationJournal", {
+    operationsRoot: "/fixture/operations",
+    SandboxOperationError: class extends Error {
+      constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
+    }
+  });
+  const sandbox = {
+    readFile: async () => {
+      if (!visible) throw Object.assign(new Error("simulated structured missing journal"), { code: "FILE_NOT_FOUND" });
+      return { content: JSON.stringify(compiling) };
+    },
+    processes: [process]
+  };
+  assert.deepEqual(await readOperationJournal(sandbox, operationId), compiling, "The compiling journal was not initially readable.");
+  visible = false;
+  let advances = 0;
+  class Conflict extends Error {
+    constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
+  }
+  const status = productionWorkerFunction("operationStatus", {
+    readOperationJournal,
+    publicOperationStatus: productionWorkerFunction("publicOperationStatus", {}),
+    startQueuedOperation: async () => { throw new Error("Missing journal restarted the operation."); },
+    advanceRunningOperation: async () => { advances += 1; return compiling; },
+    SandboxOperationError: Conflict
+  });
+  await assert.rejects(
+    status(sandbox, "session", "https://sandbox.example", operationId),
+    error => error instanceof Conflict && error.status === 404 && error.payload.error === "operation_not_found",
+    "Structured post-compilation FILE_NOT_FOUND did not become operation_not_found."
+  );
+  assert.equal(advances, 0, "A missing journal still attempted to inspect or finalize its completed process.");
+  assert.equal(process.status, "completed", "Journal absence mutated the detached process fixture.");
 }
 
 function deferred<T>() {

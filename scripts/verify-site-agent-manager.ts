@@ -6,6 +6,7 @@ import {
   createSiteAuthoringContext,
   DeterministicManagerHistory,
   managerBuildContext,
+  managerReferenceContext,
   managerToolArguments,
   managerToolNameSchema,
   assertOpenAiStrictFunctionSchema,
@@ -172,7 +173,11 @@ assert.match(websiteManagerAuthoringSystemPrompt, /authored TSX and CSS readable
 assert.match(websiteManagerAuthoringSystemPrompt, /finished public-facing site, not a report/i);
 assert.match(websiteManagerAuthoringSystemPrompt, /Preserve the owner's requested voice and existing copy outside an edit's scope/i);
 assert.match(websiteManagerAuthoringSystemPrompt, /Use visually relevant assets within the skill's source-first media boundary/i);
-assert.match(taskSkillFor("initial_build").knowledge.join(" "), /attribution of customer quotations or third-party statements/i);
+const initialBuildKnowledge = taskSkillFor("initial_build").knowledge.join(" ");
+assert.match(initialBuildKnowledge, /Every direct quotation presented as attributed speech.*customer, founder, employee, or any other person.*exact contiguous excerpt of supplied source or exact owner-provided wording.*exact supported attribution/i);
+assert.match(initialBuildKnowledge, /present new marketing prose as attributed speech or customer testimony/i);
+assert.match(initialBuildKnowledge, /truthful ordinary prose without attribution or omit it/i);
+assert.match(initialBuildKnowledge, /Do not copy individual review text from Google, Yelp, Facebook/i);
 
 const taskSkills = {
   initial_build: taskSkillFor("initial_build"),
@@ -220,7 +225,7 @@ for (const contract of [
   /distinct truthful title and description.*never one global fallback/i,
   /substantive retained guide needs its explanatory arc/i,
   /copy.*sibling route or competitor.*mapped evidence/i,
-  /exact contiguous excerpts with their exact attribution.*Show any internal omission.*never silently join separated passages.*paraphrase quotations/i,
+  /direct quotation presented as attributed speech.*exact contiguous excerpt of supplied source or exact owner-provided wording.*exact supported attribution.*Show any internal omission.*never silently join separated passages.*paraphrase attributed speech/i,
   /Do not copy individual review text from Google, Yelp, Facebook/i,
   /provisionalObservations\.googleAggregateRating.*displayText exactly.*homepage/i,
   /Do not infer, round, refresh, or fabricate a rating/i,
@@ -1172,6 +1177,31 @@ assert.deepEqual(deliveredAssetEvidence.references.map((reference) => reference.
   assetEvidenceReferences.map((reference) => reference.assetId));
 assert.equal(assetEvidenceImage?.image_url, assetEvidenceReferences[0]?.dataUrl,
   "The mapping list was delivered without its paired contact-sheet pixels.");
+const deliveredAssetInstruction = deliveredAssetEvidence as typeof deliveredAssetEvidence & { instruction: string };
+assert.match(deliveredAssetInstruction.instruction, /Pixels identify visible subjects/i);
+assert.match(deliveredAssetInstruction.instruction, /Canonical adoption alone does not prove that attribution/i);
+assert.match(deliveredAssetInstruction.instruction, /neutral illustration.*not framed as business-specific proof/i);
+assert.match(deliveredAssetInstruction.instruction, /exact official logo as the sole identity mark/i);
+
+const sourceEvidenceContext = managerReferenceContext({
+  ...canonicalAuthoringProfile("initial_build"),
+  sourceEvidenceReferences: [{
+    resourceId: "source_resource_context_fixture",
+    sourceId: "source_context_fixture",
+    sourcePageId: "source_page_context_fixture",
+    mimeType: "image/webp",
+    contentHash: `sha256:${"d".repeat(64)}`,
+    dataUrl: "data:image/webp;base64,UklGRg=="
+  }]
+});
+const sourceEvidenceText = sourceEvidenceContext.find((block) => block.type === "input_text"
+  && block.text.includes("retained-first-party-visual-evidence"));
+assert(sourceEvidenceText?.text, "The source contact sheet omitted its evidence boundary.");
+const deliveredSourceEvidence = JSON.parse(sourceEvidenceText.text) as { instruction: string };
+assert.match(deliveredSourceEvidence.instruction, /Pixels identify visible subjects/i);
+assert.match(deliveredSourceEvidence.instruction, /retained page context or owner authority must support any claim/i);
+assert.match(deliveredSourceEvidence.instruction, /First-party hosting alone does not prove that attribution/i);
+assert.match(deliveredSourceEvidence.instruction, /neutral illustration.*not framed as business-specific proof/i);
 await assert.rejects(() => new WebsiteManagerAgent(client).run({
   buildInput, authoringContext: context, instruction: "Build a private candidate.",
   kind: "initial_build", route: { apiProvider: "openai", modelId: "gpt-6-astra" }, runtime

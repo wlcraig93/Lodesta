@@ -23,6 +23,7 @@ import {
   ingestWebsite,
   observedProof,
   retainedContactConsensus,
+  selectSupportingSourceBlock,
   selectObservedFirstPartyTestimonialBlocks,
   selectSourceContactAndLocation,
   selectBusinessCategories,
@@ -218,6 +219,23 @@ assert.deepEqual(retainedContacts, {
   phone: "+15125550198",
   email: "hello@fixture.example"
 });
+
+const contactCitationBlocks = [
+  { id: "empty", sourceUrl: `${origin}/`, displayText: "" },
+  { id: "zero_width", sourceUrl: `${origin}/`, displayText: "\u200d" },
+  { id: "punctuation", sourceUrl: `${origin}/`, displayText: "— · /" },
+  { id: "phone", sourceUrl: `${origin}/contact`, displayText: "Call (512) 555-0198" },
+  { id: "email", sourceUrl: `${origin}/contact`, displayText: "Email hello@fixture.example" },
+  { id: "address", sourceUrl: `${origin}/contact`, displayText: "Visit 2000 Windy Terrace, Suite 22A" }
+] as never[];
+assert.equal(selectSupportingSourceBlock(contactCitationBlocks, "(512) 555-0198")?.id, "phone",
+  "Empty, zero-width, or punctuation-only source text displaced real phone support.");
+assert.equal(selectSupportingSourceBlock(contactCitationBlocks, "hello@fixture.example")?.id, "email",
+  "Empty, zero-width, or punctuation-only source text displaced real email support.");
+assert.equal(selectSupportingSourceBlock(contactCitationBlocks, "2000 Windy Terrace Suite 22A")?.id, "address",
+  "Empty, zero-width, or punctuation-only source text displaced real address support.");
+assert.equal(selectSupportingSourceBlock(contactCitationBlocks.slice(0, 3), "(512) 555-0198"), undefined,
+  "Meaningless source text became a citation when no real supporting block existed.");
 assert.deepEqual(retainedContactConsensus([
   { url: `${origin}/one`, extractedText: "Call 512-555-0198" },
   { url: `${origin}/two`, extractedText: "Call 212-555-0134" }
@@ -456,6 +474,167 @@ assert.deepEqual(
   new Set(["Roaches", "Ants"]),
   "CMS presentation routes displaced explicit first-party service headings in normalized offering authority."
 );
+
+const mixedPlaceholderOrigin = "https://mixed-placeholder.example";
+const mixedPlaceholderImage = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
+const mixedPlaceholderCrawl = await crawlWebsiteForGeneration({
+  url: `${mixedPlaceholderOrigin}/`,
+  validateUrl: async (value) => value,
+  limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+  sleep: async () => undefined,
+  fetchImpl: async (input) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (url.pathname === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+    if (url.pathname === "/sitemap.xml") return response("missing", 404, "text/plain");
+    if (url.pathname === "/") return response(`<!doctype html><title>Pristine Auto Detailing</title><main>
+      <h1>Pristine Auto Detailing</h1><h2>Services</h2><h3>Auto Detailing</h3>
+      <a href="/services/paint-correction">Paint Correction</a>
+      <a href="/review-template">Review template</a>
+      <a href="/placeholder-customer">Placeholder customer page</a>
+    </main>`, 200);
+    if (url.pathname === "/services/paint-correction") return response(`<!doctype html>
+      <title>Paint Correction | Pristine Auto Detailing</title><main><h1>Paint Correction</h1>
+      <p>Our multi-stage paint correction service removes visible swirl marks and restores gloss after an in-person paint assessment.</p>
+      <section><h2>Select your vehicle size</h2><p>Lorem ipsum dolor sit amet.</p></section>
+      <img src="/media/paint-correction.png" alt="Paint correction work">
+      <blockquote>Contrary to popular belief, Lorem Ipsum is not simply random text.</blockquote>
+    </main>`, 200);
+    if (url.pathname === "/review-template") return response(`<!doctype html><title>Review</title><main>
+      <h1>Review</h1><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p></main>`, 200);
+    if (url.pathname === "/placeholder-customer") return response(`<!doctype html><title>Placeholder Consultation</title><main>
+      <h1>Placeholder Consultation</h1><blockquote>Lorem ipsum dolor sit amet.</blockquote></main>`, 200);
+    if (url.pathname === "/media/paint-correction.png") return response(mixedPlaceholderImage, 200, "image/png");
+    throw new Error(`unexpected_mixed_placeholder_fixture_url:${url.href}`);
+  }
+});
+const mixedPlaceholderServicePage = mixedPlaceholderCrawl.ingestion.pages.find(page =>
+  new URL(page.url).pathname === "/services/paint-correction");
+assert.equal(mixedPlaceholderServicePage?.evidenceClass, "first_party",
+  "An isolated placeholder component downgraded a specifically titled substantive service page.");
+assert.deepEqual(
+  new Set(selectSourceOfferingFacts(mixedPlaceholderCrawl.crawl, mixedPlaceholderCrawl.ingestion, []).map(offering => offering.name)),
+  new Set(["Paint Correction", "Auto Detailing"]),
+  "A specifically titled first-party service route or legitimate unrouted homepage service lost offering authority."
+);
+assert(mixedPlaceholderCrawl.captures.some(capture =>
+  capture.role === "image"
+  && capture.outcome === "fetched"
+  && new URL(capture.requestedUrl).pathname === "/media/paint-correction.png"),
+"Restored first-party service classification did not retain its dependent image resource.");
+const mixedPlaceholderServiceSummary = mixedPlaceholderCrawl.crawl.pageSummaries.find(page =>
+  new URL(page.url).pathname === "/services/paint-correction");
+assert(mixedPlaceholderServiceSummary);
+assert.deepEqual(selectObservedFirstPartyTestimonialBlocks(
+  [mixedPlaceholderServiceSummary], mixedPlaceholderOrigin
+), [], "Placeholder quotation text became first-party testimonial proof.");
+assert.equal(mixedPlaceholderCrawl.ingestion.pages.find(page =>
+  new URL(page.url).pathname === "/review-template")?.evidenceClass, "unknown",
+"A generic template title plus placeholder body became first-party authority.");
+const whollyPlaceholderPage = mixedPlaceholderCrawl.ingestion.pages.find(page =>
+  new URL(page.url).pathname === "/placeholder-customer");
+assert.equal(whollyPlaceholderPage?.evidenceClass, "first_party",
+  "The documented conservative boundary no longer retains a specifically titled ambiguous page.");
+const whollyPlaceholderSummary = mixedPlaceholderCrawl.crawl.pageSummaries.find(page =>
+  new URL(page.url).pathname === "/placeholder-customer");
+assert(whollyPlaceholderSummary);
+assert.deepEqual(selectObservedFirstPartyTestimonialBlocks([whollyPlaceholderSummary], mixedPlaceholderOrigin), [],
+  "A specifically titled but wholly placeholder page contributed testimonial proof.");
+assert.deepEqual(
+  new Set(selectSourceOfferingFacts(cmsCanonicalized.crawl, cmsCanonicalized.ingestion, []).map(offering => offering.name)),
+  new Set(["Roaches", "Ants"]),
+  "The customer-page correction discarded legitimate unrouted homepage service authority."
+);
+
+// Final-state boundary: a same-host, business-titled stale page is origin-eligible,
+// but its conflicting facts and placeholder copy must not displace current primary
+// authority. A substantive service page remains eligible despite an unfinished
+// component paragraph.
+const staleSpecialistOrigin = "https://current-finish.example";
+const staleSpecialistDocuments = new Map([
+  ["/", `<!doctype html><title>Current Finish Studio | Vehicle Care</title>
+    <meta property="og:site_name" content="Current Finish Studio"><main>
+    <h1>Current Finish Studio</h1>
+    <p>Current Finish Studio provides careful vehicle appearance services for Austin drivers, with clear consultations and service recommendations based on the condition of each vehicle.</p>
+    <p>Address: 100 Current Avenue, Austin, TX 78701</p>
+    <p>Phone: 512-555-0100</p><p>Email: hello@currentfinish.example</p>
+    <a href="/services/paint-correction">Paint Correction</a>
+    <a href="/specialist/legacy-reviews">Vehicle specialist information</a>
+  </main>`],
+  ["/services/paint-correction", `<!doctype html><title>Paint Correction | Current Finish Studio</title><main>
+    <h1>Paint Correction</h1>
+    <p>Our paint correction service reduces visible swirl marks and restores gloss after an in-person assessment. The process and recommendation depend on the paint condition and the owner's goals.</p>
+    <section><h2>Select your vehicle size</h2><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p></section>
+    <p>Call 512-555-0100 or email hello@currentfinish.example to discuss the vehicle.</p>
+  </main>`],
+  ["/specialist/legacy-reviews", `<!doctype html><title>Current Finish Studio TX</title><main>
+    <h1>Current Finish Studio TX</h1><p>Minneapolis &amp; St Paul</p><h2>Heading</h2>
+    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse varius enim in eros elementum tristique.</p>
+    <h2>Professional Paint Services</h2>
+    <p>A copied specialist template describes a different operator and market while remaining on this same-host legacy URL.</p>
+    <p>Address: 743 Snelling Avenue, North Saint Paul, MN 55104</p>
+    <p>Phone: 651-706-9895</p>
+    <blockquote>Contrary to popular belief, Lorem Ipsum is not simply random text.</blockquote>
+  </main>`]
+]);
+const staleSpecialistDns = mock.method(dns, "lookup", async (hostname: string) => {
+  assert.equal(hostname, new URL(staleSpecialistOrigin).hostname,
+    "Stale-specialist fixture attempted an unexpected DNS lookup.");
+  return [{ address: "93.184.216.34", family: 4 }];
+});
+syncBuiltinESMExports();
+const staleSpecialistFetch = mock.method(globalThis, "fetch", async (input: string | URL | Request) => {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  assert.equal(url.origin, staleSpecialistOrigin,
+    "Stale-specialist fixture attempted an unexpected network request.");
+  if (url.pathname === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+  if (url.pathname === "/sitemap.xml") return response("missing", 404, "text/plain");
+  const html = staleSpecialistDocuments.get(url.pathname);
+  return html === undefined ? response("missing", 404, "text/plain") : response(html, 200);
+});
+try {
+  const staleSpecialistIngestion = await ingestWebsite({
+    url: `${staleSpecialistOrigin}/`,
+    now: "2026-09-16T00:00:00.000Z"
+  });
+  const stalePage = staleSpecialistIngestion.generationIngestion.pages.find(page =>
+    new URL(page.url).pathname === "/specialist/legacy-reviews");
+  assert.equal(stalePage?.evidenceClass, "first_party",
+    "The conservative classifier no longer represented a business-titled same-host page as origin-eligible.");
+  assert.equal(staleSpecialistIngestion.generationIngestion.pages.find(page =>
+    new URL(page.url).pathname === "/services/paint-correction")?.evidenceClass, "first_party",
+    "A component placeholder downgraded a real service page during final-state ingestion.");
+  assert.equal(staleSpecialistIngestion.state.identity.name, "Current Finish Studio");
+  assert.equal(staleSpecialistIngestion.state.contacts.phone, "+15125550100");
+  assert.equal(staleSpecialistIngestion.state.contacts.email, "hello@currentfinish.example");
+  assert.deepEqual(staleSpecialistIngestion.state.locations.map(location => ({
+    street: location.street,
+    city: location.city,
+    region: location.region,
+    postalCode: location.postalCode
+  })), [{
+    street: "100 Current Avenue",
+    city: "Austin",
+    region: "TX",
+    postalCode: "78701"
+  }], "A stale same-host specialist page displaced the current primary business location.");
+  assert.deepEqual(staleSpecialistIngestion.state.offerings.map(offering => offering.name), ["Paint Correction"],
+    "A stale same-host specialist mention displaced the direct current service route.");
+  assert.deepEqual(staleSpecialistIngestion.state.serviceAreas, [],
+    "A stale same-host specialist market became a current service area.");
+  assert.deepEqual(staleSpecialistIngestion.state.proof, [],
+    "Placeholder copy from a stale same-host specialist page became publishable proof.");
+  assert.equal(staleSpecialistIngestion.state.facts.some(fact => fact.publicEligible
+    && (fact.value === "+16517069895"
+      || (typeof fact.value === "string" && /North Saint Paul|Professional Paint Services/i.test(fact.value)))), false,
+    "A stale same-host phone, address, or offering became a publish-eligible fact.");
+} finally {
+  staleSpecialistFetch.mock.restore();
+  staleSpecialistDns.mock.restore();
+  syncBuiltinESMExports();
+}
 const mixedOfferingOrigin = "https://mixed-offerings.example";
 const mixedOfferingHome = {
   ...summarizeCrawlHtml(`<!doctype html><title>Home</title><main><h1>Mixed Offerings</h1>

@@ -24,6 +24,8 @@ const crawl = {
   extractedFacts: { socialLinks: [], bookingLinks: [] },
   pageSummaries: [{
     url: "https://surgepest.com/",
+    sourceTextBlocks: [],
+    extractedFacts: { socialLinks: [], bookingLinks: [] },
     linkReferences: [{
       href: "https://surgepestcontrol.pestportals.com/landing/index",
       text: "Login",
@@ -106,10 +108,10 @@ const sourceFactIngestion = {
     summary: { url: page.url }
   }))
 } as unknown as WebsiteGenerationIngestion;
-assert.deepEqual(selectSourceOfferingFacts(sourceFactCrawl, sourceFactIngestion, ["Raleigh NC"]).map((item) => item.name), [
+assert.deepEqual(new Set(selectSourceOfferingFacts(sourceFactCrawl, sourceFactIngestion, ["Raleigh NC"]).map((item) => item.name)), new Set([
   "Ant Control",
   "Rodent Control"
-]);
+]));
 
 const repositorySource = await readFile(new URL("../packages/platform-data/repository.ts", import.meta.url), "utf8");
 assert.match(repositorySource, /blob_content_hash: value\.blobContentHash \?\? null/,

@@ -1373,6 +1373,7 @@ export function selectSupportingSourceBlock(
   if (target.length < 3) return undefined;
   const matches = blocks.filter((block) => {
     const text = normalizedText(block.displayText);
+    if (text.length < 3) return false;
     // Identity citations must contain the entire name, not e.g. Dev in device
     // or a shorter block that happens to be part of a longer business name.
     if (factKind === "business_name") return ` ${text} `.includes(` ${target} `);

@@ -90,9 +90,13 @@ export function isLikelyCmsTemplateOrSystemSourcePage(input: {
   }
   const title = input.title?.normalize("NFKC").replace(/\s+/g, " ").trim() ?? "";
   const text = input.text?.normalize("NFKC").replace(/\s+/g, " ").trim() ?? "";
-  if (templatePlaceholderPattern.test(`${title} ${text}`)) return true;
+  // A leftover placeholder component does not identify the whole page as a
+  // template. Require page-identity evidence; ambiguous customer pages remain
+  // available, while content-level proof filters still reject placeholder copy.
+  if (templatePlaceholderPattern.test(title)) return true;
   if (genericTemplateTitlePattern.test(title)
-    && (/^com_content$/i.test(option) || cmsPresentationOptionPattern.test(option) || path === "/index.php")) {
+    && (templatePlaceholderPattern.test(text)
+      || /^com_content$/i.test(option) || cmsPresentationOptionPattern.test(option) || path === "/index.php")) {
     return true;
   }
   return false;

@@ -662,6 +662,52 @@ async function verifyAbandonedPreparationOwner() {
   assert.equal(failed.failure?.payload?.detail, ordinaryFailure.message);
   assert.equal(rejectedLockOwned, false, "An ordinary preparation rejection retained the mutation lock.");
   assert.equal(cleaned, 1, "An ordinary preparation rejection skipped process cleanup.");
+
+  const preparing = await rejectedTransition({}, queued, "preparing") as Record<string, unknown>;
+  const terminalWriteResult = async (committedBeforeResponseLoss: boolean) => {
+    let retainedTerminal = preparing;
+    let terminalLockOwned = true;
+    let terminalCleanup = 0;
+    let terminalRelease = 0;
+    const terminalWriteError = new TypeError(committedBeforeResponseLoss
+      ? "simulated committed terminal-journal response loss"
+      : "simulated terminal-journal failure before commit");
+    const terminalFail = productionWorkerFunction("failOperation", {
+      writeOperationJournal: async (_sandbox: unknown, next: Record<string, unknown>) => {
+        if (committedBeforeResponseLoss) retainedTerminal = next;
+        throw terminalWriteError;
+      },
+      cleanupOperationProcess: async () => { terminalCleanup += 1; },
+      mutationLock: "/fixture/mutation.lock",
+      SandboxOperationError: Conflict
+    });
+    await assert.rejects(terminalFail({ exec: async () => {
+      terminalRelease += 1;
+      terminalLockOwned = false;
+      return { success: true };
+    } }, preparing, ordinaryFailure), error => error === terminalWriteError);
+    assert.equal(retainedTerminal.status, committedBeforeResponseLoss ? "failed" : "running");
+    assert.equal(retainedTerminal.phase, committedBeforeResponseLoss ? "complete" : "preparing");
+    let laterWork = 0;
+    const status = productionWorkerFunction("operationStatus", {
+      readOperationJournal: async () => retainedTerminal,
+      publicOperationStatus: (journal: unknown) => journal,
+      startQueuedOperation: async () => { laterWork += 1; return retainedTerminal; },
+      advanceRunningOperation: async () => { laterWork += 1; return retainedTerminal; }
+    });
+    assert.equal(await status({}, "session", "https://sandbox.example", operationId), retainedTerminal);
+    assert.equal(laterWork, 0, "A later poll recovered the terminal-write failure.");
+    return { terminalCleanup, terminalRelease, terminalLockOwned, status: retainedTerminal.status, phase: retainedTerminal.phase };
+  };
+  const failedBeforeCommit = await terminalWriteResult(false);
+  const committedResponseLoss = await terminalWriteResult(true);
+  // Known limitation: a future fix must make the pre-commit case terminally
+  // observable without leaving an owned lock; releasing the lock alone cannot
+  // advance a retained preparing journal.
+  assert.deepEqual({ failedBeforeCommit, committedResponseLoss }, {
+    failedBeforeCommit: { terminalCleanup: 0, terminalRelease: 0, terminalLockOwned: true, status: "running", phase: "preparing" },
+    committedResponseLoss: { terminalCleanup: 0, terminalRelease: 0, terminalLockOwned: true, status: "failed", phase: "complete" }
+  }, "Terminal-journal failure characterization changed; reevaluate pre-start recovery semantics before changing this fixture.");
 }
 
 async function verifyProcessStartJournalAmbiguity() {

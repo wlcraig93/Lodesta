@@ -6,7 +6,15 @@ Date: 2026-09-18
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current checkpoint: release succeeded; independent concurrency probe exposed an owned-lock cleanup gap
+### September 18 sandbox-only work block: interrupted connection handling
+
+Release `349ef110` passed coordinated deployment and its first release canary, but its independent fresh canary failed on the sixth concurrent pair with a retained `running/preparing` operation. Cloudflare recorded an inactive Durable Object connection at the same time; the precise preparation-owner failure remains unproven. The original separate inactive-blue orphan was recovered by the owner-approved Worker-only redeploy, without support contact or retained-data deletion. These are distinct outcomes.
+
+The current sandbox-only correction addresses a documented connection-lifetime mistake: failure recording, owned cleanup and ambiguous-promotion readback reused the same potentially broken Durable Object stub. It also protects a process-start request whose response is lost and propagates explicit execution failure out of polling into the existing controller recovery. Implementation, fault tests, TypeScript, all static/browser/sandbox preflight phases and isolated smoke pass. The first browser invocation was blocked by local Chromium launch permissions; the authorized browser/sandbox remainder passes, so this is complete phase coverage rather than one uninterrupted invocation. Deployment and independent hosted acceptance remain pending. No authoring guidance, models, route policy, data schema, retry count or deadline changes are included. See [the bounded lifecycle correction](site-sandbox-request-bound-operations.md).
+
+The completed two-call repair comparison is retained separately. Neither direct Sol nor Sol-critique-assisted Luna was accepted. The packet omitted retained Google-rating research, and both arms used whole-file replacements rather than normal editing tools, limiting production conclusions. Further quality experiments remain paused while the sandbox-only block is resolved.
+
+### Earlier checkpoint: release succeeded; independent concurrency probe exposed an owned-lock cleanup gap
 
 Release `66c33a5aedd07ceec59d1cfdb64413b09bdf1eb5` passed CI `35381132325` and coordinated release `35381757416`. Both Railway services report that SHA, green sandbox deployment `sandbox_deployment_5321fe97e6e3bde39cb622e1c1043204` is active, deep health has no errors, and maintenance is released. The workflow's first canary passed, including destroy/recreate/restore/edit. Independent identity readback also passed after correcting the local checker's restricted network invocation; that local invocation failure is not a production failure.
 

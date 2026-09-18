@@ -155,11 +155,13 @@ async function verifyFreshMutationLock() {
   };
   const acquire = new Function("sessionRoot", "mutationLock", "operationStaleAfterMs", "readJson", "SandboxOperationError", "disposeRpcAll",
     `${compiled}; return acquireMutationLock;`)("/fixture", "/fixture/mutation.lock", 240_000,
-    async () => metadata, Conflict, () => undefined) as (adapter: typeof sandbox, operationId: string) => Promise<void>;
-  const first = acquire(sandbox, "operation-first");
+    async () => metadata, Conflict, () => undefined) as (
+      adapter: typeof sandbox, operationId: string, freshSandbox: () => Promise<typeof sandbox>
+    ) => Promise<void>;
+  const first = acquire(sandbox, "operation-first", async () => sandbox);
   await entered;
   try {
-    await assert.rejects(acquire(sandbox, "operation-second"), error => error instanceof Conflict && error.status === 409,
+    await assert.rejects(acquire(sandbox, "operation-second", async () => sandbox), error => error instanceof Conflict && error.status === 409,
       "A concurrent request stole a fresh lock before its metadata was written.");
     assert.equal(writes, 1, "Only the exclusive mkdir winner may publish lock metadata.");
   } finally {
@@ -168,7 +170,7 @@ async function verifyFreshMutationLock() {
   }
   assert.equal(metadata?.operationId, "operation-first");
   metadata!.startedAt = "1970-01-01T00:00:00.000Z";
-  await assert.rejects(acquire(sandbox, "operation-third"), error => error instanceof Conflict && error.status === 409,
+  await assert.rejects(acquire(sandbox, "operation-third", async () => sandbox), error => error instanceof Conflict && error.status === 409,
     "Old metadata does not grant a different request permission to delete another execution's lock.");
   assert.equal(writes, 1);
 }
@@ -422,7 +424,7 @@ async function verifyQueuedJournalRace() {
     assert.equal(command, "rm -rf /fixture/mutation.lock");
     released++;
     return { success: true };
-  } }, "session", "https://sandbox.example", "same-operation");
+  } }, "session", "https://sandbox.example", "same-operation", async () => { throw new Error("Fresh sandbox was not needed."); });
   assert.equal(result, completed);
   assert.equal(reads, 2);
   assert.equal(released, 1);
@@ -464,13 +466,16 @@ async function verifyPreWorkLockOwnershipCleanup() {
     failOperation: async () => { failures++; return queued; },
     SandboxOperationError: Conflict
   });
-  await assert.rejects(start({ exec: async (command: string) => {
+  const poisonedOwner = { exec: async () => { throw new Error("The poisoned owner stub was reused for cleanup."); } };
+  const freshOwner = { exec: async (command: string) => {
     assert.equal(command, "rm -rf /fixture/mutation.lock");
     assert.equal(lockOwned, true, "A non-owner attempted to release the mutation lock.");
     lockOwned = false;
     releases++;
     throw new TypeError("simulated committed removal response loss");
-  } }, "session", "https://sandbox.example", operationId), error => error === readFailure);
+  } };
+  await assert.rejects(start(poisonedOwner, "session", "https://sandbox.example", operationId, async () => freshOwner),
+    error => error === readFailure);
   assert.equal(lockOwned, false, "A failed post-acquisition journal read stranded its owned lock.");
   assert.equal(releases, 1, "The pre-work owner did not release its lock exactly once.");
   assert.equal(transitions, 0, "A failed journal re-read entered preparation.");
@@ -484,7 +489,7 @@ async function verifyPreWorkLockOwnershipCleanup() {
     SandboxOperationError: Conflict
   });
   assert.equal(await competitor({ exec: async () => { competitorDeletes++; return { success: true }; } },
-    "session", "https://sandbox.example", operationId), queued);
+    "session", "https://sandbox.example", operationId, async () => { throw new Error("A competitor requested cleanup authority."); }), queued);
   assert.equal(competitorDeletes, 0, "A lock competitor deleted another invocation's lock.");
 
   const acquire = productionWorkerFunction("acquireMutationLock", {
@@ -496,22 +501,26 @@ async function verifyPreWorkLockOwnershipCleanup() {
   const metadataFailure = new TypeError("simulated lock metadata write failure");
   let metadataLockOwned = false;
   let metadataReleases = 0;
-  await assert.rejects(acquire({
+  const metadataOwner = {
     mkdir: async () => undefined,
     exec: async (command: string) => {
-      if (command === "mkdir /fixture/mutation.lock") {
-        assert.equal(metadataLockOwned, false);
-        metadataLockOwned = true;
-        return { success: true };
-      }
+      assert.equal(command, "mkdir /fixture/mutation.lock");
+      assert.equal(metadataLockOwned, false);
+      metadataLockOwned = true;
+      return { success: true };
+    },
+    writeFile: async () => { throw metadataFailure; }
+  };
+  const metadataFresh = {
+    exec: async (command: string) => {
       assert.equal(command, "rm -rf /fixture/mutation.lock");
       assert.equal(metadataLockOwned, true, "Metadata cleanup did not own the acquired lock.");
       metadataLockOwned = false;
       metadataReleases++;
       return { success: true };
-    },
-    writeFile: async () => { throw metadataFailure; }
-  }, operationId), error => error === metadataFailure);
+    }
+  };
+  await assert.rejects(acquire(metadataOwner, operationId, async () => metadataFresh), error => error === metadataFailure);
   assert.equal(metadataLockOwned, false, "A lock metadata write failure stranded its owned lock.");
   assert.equal(metadataReleases, 1, "A metadata write failure did not release its lock exactly once.");
 }
@@ -524,7 +533,7 @@ async function verifyPreparationObserver() {
     startQueuedOperation: async () => { throw new Error("A preparing observer restarted preparation."); },
     advanceRunningOperation: async () => { throw new Error("A preparing observer attempted destructive recovery."); }
   });
-  const result = await status({}, "session", "https://sandbox.example", journal.operationId);
+  const result = await status({}, "session", "https://sandbox.example", journal.operationId, async () => ({}));
   assert.equal(result, journal, "A poll without proof of a completed preparation must not reset its journal or remove its lock.");
 }
 
@@ -590,7 +599,7 @@ async function verifyAbandonedPreparationOwner() {
     writeFile: async () => undefined,
     startProcess: async () => { throw new Error("Preparation should remain deferred before process start."); }
   };
-  const owner = start(sandbox, "session", "https://sandbox.example", operationId) as Promise<unknown>;
+  const owner = start(sandbox, "session", "https://sandbox.example", operationId, async () => sandbox) as Promise<unknown>;
   let ownerSettled = false;
   void owner.then(() => { ownerSettled = true; }, () => { ownerSettled = true; });
   await fixtureEntered(preparationEntered.promise, "abandoned preparation boundary");
@@ -607,7 +616,7 @@ async function verifyAbandonedPreparationOwner() {
     advanceRunningOperation: async () => { throw new Error("A preparing observer advanced the abandoned owner."); },
     SandboxOperationError: Conflict
   });
-  const observed = await status(sandbox, "session", "https://sandbox.example", operationId) as { status?: string; phase?: string };
+  const observed = await status(sandbox, "session", "https://sandbox.example", operationId, async () => sandbox) as { status?: string; phase?: string };
   assert.equal(observed.status, "running");
   assert.equal(observed.phase, "preparing");
   assert.equal(lockOwned, true, "A preparation observer released the owner's mutation lock.");
@@ -615,12 +624,26 @@ async function verifyAbandonedPreparationOwner() {
   let rejectedRetained: Record<string, unknown> = queued;
   let rejectedLockOwned = false;
   let cleaned = 0;
+  let freshFinalizers = 0;
+  const freshFailureSandbox = {
+    exec: async (command: string) => {
+      assert.equal(command, "rm -rf /fixture/mutation.lock");
+      rejectedLockOwned = false;
+      return { success: true, stderr: "" };
+    }
+  };
   const rejectedTransition = productionWorkerFunction("transitionOperation", {
     writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { rejectedRetained = journal; }
   });
   const rejectedFail = productionWorkerFunction("failOperation", {
-    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { rejectedRetained = journal; },
-    cleanupOperationProcess: async () => { cleaned += 1; },
+    writeOperationJournal: async (target: unknown, journal: Record<string, unknown>) => {
+      assert.equal(target, freshFailureSandbox, "Failure journal reused the poisoned preparation stub.");
+      rejectedRetained = journal;
+    },
+    cleanupOperationProcess: async (target: unknown) => {
+      assert.equal(target, freshFailureSandbox, "Failure cleanup reused the poisoned preparation stub.");
+      cleaned += 1;
+    },
     mutationLock: "/fixture/mutation.lock",
     SandboxOperationError: Conflict
   });
@@ -646,12 +669,12 @@ async function verifyAbandonedPreparationOwner() {
     SandboxOperationError: Conflict
   });
   const rejectedSandbox = {
-    exec: async (command: string) => {
-      if (command === "rm -rf /fixture/mutation.lock") rejectedLockOwned = false;
-      return { success: true, stderr: "" };
-    }
+    exec: async () => { throw new Error("The poisoned preparation stub was reused for failure finalization."); }
   };
-  const failed = await rejectedStart(rejectedSandbox, "session", "https://sandbox.example", operationId) as {
+  const failed = await rejectedStart(rejectedSandbox, "session", "https://sandbox.example", operationId, async () => {
+    freshFinalizers += 1;
+    return freshFailureSandbox;
+  }) as {
     status?: string;
     phase?: string;
     failure?: { payload?: { error?: string; detail?: string } };
@@ -662,6 +685,7 @@ async function verifyAbandonedPreparationOwner() {
   assert.equal(failed.failure?.payload?.detail, ordinaryFailure.message);
   assert.equal(rejectedLockOwned, false, "An ordinary preparation rejection retained the mutation lock.");
   assert.equal(cleaned, 1, "An ordinary preparation rejection skipped process cleanup.");
+  assert.equal(freshFinalizers, 1, "A preparation rejection did not acquire exactly one fresh finalization stub.");
 
   const preparing = await rejectedTransition({}, queued, "preparing") as Record<string, unknown>;
   const terminalWriteResult = async (committedBeforeResponseLoss: boolean) => {
@@ -695,15 +719,16 @@ async function verifyAbandonedPreparationOwner() {
       startQueuedOperation: async () => { laterWork += 1; return retainedTerminal; },
       advanceRunningOperation: async () => { laterWork += 1; return retainedTerminal; }
     });
-    assert.equal(await status({}, "session", "https://sandbox.example", operationId), retainedTerminal);
+    assert.equal(await status({}, "session", "https://sandbox.example", operationId, async () => ({})), retainedTerminal);
     assert.equal(laterWork, 0, "A later poll recovered the terminal-write failure.");
     return { terminalCleanup, terminalRelease, terminalLockOwned, status: retainedTerminal.status, phase: retainedTerminal.phase };
   };
   const failedBeforeCommit = await terminalWriteResult(false);
   const committedResponseLoss = await terminalWriteResult(true);
-  // Known limitation: a future fix must make the pre-commit case terminally
-  // observable without leaving an owned lock; releasing the lock alone cannot
-  // advance a retained preparing journal.
+  // If the fresh terminal write is itself unavailable or ambiguous, leave the
+  // retained journal and owned lock untouched and propagate the request error.
+  // The client hands that explicit failure to the controller, which must
+  // confirm sandbox destruction/restoration before replaying the mutation.
   assert.deepEqual({ failedBeforeCommit, committedResponseLoss }, {
     failedBeforeCommit: { terminalCleanup: 0, terminalRelease: 0, terminalLockOwned: true, status: "running", phase: "preparing" },
     committedResponseLoss: { terminalCleanup: 0, terminalRelease: 0, terminalLockOwned: true, status: "failed", phase: "complete" }
@@ -771,7 +796,9 @@ async function verifyProcessStartJournalAmbiguity() {
     }
   };
   await assert.rejects(
-    start(sandbox, "session", "https://sandbox.example", operationId),
+    start(sandbox, "session", "https://sandbox.example", operationId, async () => {
+      throw new Error("Post-start journal ambiguity requested destructive finalization.");
+    }),
     error => error === ambiguousWrite,
     "An ambiguous validating-journal write did not propagate after process start."
   );
@@ -782,6 +809,46 @@ async function verifyProcessStartJournalAmbiguity() {
   assert.equal(retained.phase, "preparing", "A failed validating-journal write changed retained phase.");
   assert.equal(retained.processId, undefined, "The retained preparing journal invented an uncommitted process ID.");
   assert.equal(lockOwned, true, "Post-start ambiguity released the mutation lock.");
+
+  let responseLossRetained: Record<string, unknown> = queued;
+  let responseLossFailures = 0;
+  let responseLossFreshStubs = 0;
+  const startResponseLoss = new TypeError("simulated startProcess committed response loss");
+  const responseLossTransition = productionWorkerFunction("transitionOperation", {
+    writeOperationJournal: async (_sandbox: unknown, next: Record<string, unknown>) => { responseLossRetained = next; }
+  });
+  const responseLossStart = productionWorkerFunction("startQueuedOperation", {
+    readOperationJournal: async () => responseLossRetained,
+    acquireMutationLock: async () => undefined,
+    mutationLock: "/fixture/mutation.lock",
+    transitionOperation: responseLossTransition,
+    operationRequestPath: () => "/fixture/request.json",
+    readJson: async () => ({ action: "apply", expectedRevision: oldRevision, files: [], publicInputJson: "{}" }),
+    readActiveGeneration: async () => ({ revision: oldRevision }),
+    reconcileGenerationCleanup: async () => undefined,
+    digest: async () => newRevision,
+    generationPath: () => "/fixture/candidate",
+    scaffoldGenerationCommand: () => "prepare-candidate",
+    writeGenerationInput: async () => undefined,
+    writeGenerationSource: async () => undefined,
+    operationValidationMarker: () => "/fixture/validation-marker",
+    disposeRpc: () => undefined,
+    writeOperationJournal: async (_sandbox: unknown, next: Record<string, unknown>) => { responseLossRetained = next; },
+    failOperation: async () => { responseLossFailures += 1; throw new Error("Ambiguous process start was destructively failed."); },
+    SandboxOperationError: Conflict
+  });
+  await assert.rejects(responseLossStart({
+    exec: async () => ({ success: true, stderr: "" }),
+    writeFile: async () => undefined,
+    startProcess: async () => { throw startResponseLoss; }
+  }, "session", "https://sandbox.example", operationId, async () => {
+    responseLossFreshStubs += 1;
+    return {};
+  }), error => error === startResponseLoss);
+  assert.equal(responseLossFailures, 0, "A startProcess response loss called destructive failure cleanup.");
+  assert.equal(responseLossFreshStubs, 0, "A startProcess response loss attempted same-sandbox finalization.");
+  assert.equal(responseLossRetained.status, "running");
+  assert.equal(responseLossRetained.phase, "preparing");
 }
 
 async function verifyExplicitJournalAbsenceAfterCompilation() {
@@ -832,7 +899,7 @@ async function verifyExplicitJournalAbsenceAfterCompilation() {
     SandboxOperationError: Conflict
   });
   await assert.rejects(
-    status(sandbox, "session", "https://sandbox.example", operationId),
+    status(sandbox, "session", "https://sandbox.example", operationId, async () => sandbox),
     error => error instanceof Conflict && error.status === 404 && error.payload.error === "operation_not_found",
     "Structured post-compilation FILE_NOT_FOUND did not become operation_not_found."
   );
@@ -910,11 +977,11 @@ async function verifyConcurrentFinalizationPoll() {
       lockExists = false;
       return { success: true };
     } };
-    const first = advance(sandbox, "session", "https://sandbox.example", promoting) as Promise<unknown>;
+    const first = advance(sandbox, "session", "https://sandbox.example", promoting, async () => sandbox) as Promise<unknown>;
     const observed = first.then(value => ({ value, error: undefined }), error => ({ value: undefined, error }));
     try {
       await fixtureEntered(entered.promise, "finalizer");
-      assert.equal(await advance(sandbox, "session", "https://sandbox.example", promoting), promoting);
+      assert.equal(await advance(sandbox, "session", "https://sandbox.example", promoting, async () => sandbox), promoting);
       assert.equal(finalizers, 1, "A second poll duplicated a still-running finalizer.");
       assert.equal(removals, 0, "A losing poll removed the active finalization lock.");
       assert.equal(lockExists, true, "A second poll stole a live finalization lock.");
@@ -1012,7 +1079,7 @@ async function verifyDeferredStatus(phase: "queued" | "promoting", fails: boolea
   // after its removal it is ignored, and neither path may schedule background work.
   const pending = (viaFetch
     ? fetch(new Request(`http://127.0.0.1/v1/sessions/session/operations/${initial.operationId}`), {}, { waitUntil: schedule })
-    : status({}, "session", "https://sandbox.example", initial.operationId, schedule)) as Promise<unknown>;
+    : status({}, "session", "https://sandbox.example", initial.operationId, async () => ({}))) as Promise<unknown>;
   let settled = false;
   const observed = pending.then(value => { settled = true; return { value, error: undefined }; }, error => {
     settled = true; return { value: undefined, error };
@@ -1075,7 +1142,7 @@ async function verifyCompletedOperationPoll() {
     exists: async () => ({ exists: false }),
     getProcess: async () => null,
     getProcessLogs: async () => ({ stdout: "", stderr: "" })
-  }, "session", "https://sandbox.example", stale);
+  }, "session", "https://sandbox.example", stale, async () => { throw new Error("Fresh sandbox was not needed."); });
   assert.equal(result, completed, "A delayed poll treated a completed/cleaned build process as failure and attempted candidate cleanup.");
   assert.equal(failures, 0);
 }
@@ -1085,23 +1152,32 @@ async function verifyAmbiguousPromotionResponse() {
     createdAt: new Date().toISOString(), phaseTimings: {}, timestamps: {} };
   const result = { ok: true, revision: newRevision, phaseTimings: {} };
   let failures = 0;
+  let freshReadbacks = 0;
+  const primarySandbox = { getContainerPlacementId: async () => "placement", writeFile: async () => undefined,
+    exec: async () => ({ success: true }) };
+  const freshSandbox = { exec: async () => ({ success: true }) };
   const finalize = productionWorkerFunction("finalizeBuiltOperation", {
     generationPath: () => "/fixture/candidate", readOperationJournal: async () => journal,
     operationRequestPath: () => "/fixture/request.json", readJson: async () => ({ files: [], publicInputJson: "{}" }),
     writeGenerationMetadata: async () => undefined, digest: async () => "hash", canonicalJson: JSON.stringify,
     promoteGenerationTransaction: async () => { throw new Error("lost response after atomic pointer rename"); },
-    readActiveGeneration: async () => ({ operationId: journal.operationId, result }),
-    writeOperationJournal: async () => undefined,
-    cleanupOperationProcess: async () => undefined,
+    readActiveGeneration: async (target: unknown) => {
+      assert.equal(target, freshSandbox, "Promotion ambiguity reused the poisoned promotion stub for readback.");
+      return { operationId: journal.operationId, result };
+    },
+    writeOperationJournal: async (target: unknown) => { assert.equal(target, freshSandbox); },
+    cleanupOperationProcess: async (target: unknown) => { assert.equal(target, freshSandbox); },
     mutationLock: "/fixture/mutation.lock",
     failOperation: async () => { failures++; return { ...journal, status: "failed" }; }
   });
-  const completed = await finalize({ getContainerPlacementId: async () => "placement", writeFile: async () => undefined,
-    exec: async () => ({ success: true }) },
-    "session", "https://sandbox.example", journal);
+  const completed = await finalize(primarySandbox, "session", "https://sandbox.example", journal, async () => {
+    freshReadbacks += 1;
+    return freshSandbox;
+  });
   assert.equal(completed.status, "succeeded", "An ambiguous pointer-rename response must not delete the committed active generation.");
   assert.equal(completed.result, result);
   assert.equal(failures, 0);
+  assert.equal(freshReadbacks, 1, "Promotion ambiguity did not acquire exactly one fresh readback stub.");
 }
 
 async function writeGeneration(root: string, revision: string, marker: string, operationId: string) {

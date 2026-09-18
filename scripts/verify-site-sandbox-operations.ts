@@ -90,6 +90,7 @@ try {
   assert((recoveredSubmission.submissionPayloadBytes ?? 0) > 0);
 
   await verifyRequestBoundStatusBudget(client);
+  await verifyWorkerFailureLeavesPolling(client);
   await verifyFailureOnlyPollDiagnostic(client);
   await verifyConcurrentCanaryFailureCaptureBeforeDestroy(client);
   await verifyMalformedDiagnosticsDoesNotPreventDestroy(client);
@@ -102,12 +103,30 @@ try {
     duplicateSubmissionReplay: "pass",
     lostAcknowledgementRecovery: "pass",
     requestBoundStatusBudget: "pass",
+    workerFailureLeavesPolling: "pass",
     failureOnlyPollDiagnostic: "pass",
     concurrentCanaryFailureCaptureBeforeDestroy: "pass",
     malformedDiagnosticsStillDestroy: "pass"
   })}\n`);
 } finally {
   globalThis.fetch = originalFetch;
+}
+
+async function verifyWorkerFailureLeavesPolling(client: SiteSandboxClient) {
+  let statusCalls = 0;
+  globalThis.fetch = async (input) => {
+    if (String(input).endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+    statusCalls += 1;
+    return Response.json({ error: "sandbox_operation_failed", detail: "simulated poisoned Durable Object stub" }, { status: 500 });
+  };
+  await assert.rejects(
+    () => client.apply("operation_test", "revision-before", source),
+    (error) => error instanceof SiteSandboxRequestError
+      && error.status === 500
+      && error.providerCode === "sandbox_operation_failed",
+    "An unhandled operation GET failure stayed on the poisoned sandbox until the operation deadline."
+  );
+  assert.equal(statusCalls, 1, "The client polled again after the Worker exposed a failed operation request.");
 }
 
 async function verifyRequestBoundStatusBudget(client: SiteSandboxClient) {

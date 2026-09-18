@@ -1,5 +1,77 @@
 # Keep sandbox preparation and promotion inside the request
 
+## September 18: failure handling must not reuse a broken connection
+
+The request-bound correction below remains necessary, but it does not make an
+interrupted RPC connection usable. The independent canary on release `349ef110`
+left a journal in `running/preparing` with a mutation lock and no matching build
+process. Cloudflare logged an inactive Durable Object at the same time. This
+correlation does not identify the exact preparation-owner call or the originating
+provider cause.
+
+Cloudflare documents that exceptions can leave a Durable Object stub broken, and
+subsequent requests require a new stub. The pinned Sandbox SDK captures one stub
+per `getSandbox` call. Lodesta currently reuses that handle for failure recording,
+cleanup, and promotion readback. A local fault fixture separately proves that a
+failed terminal-journal write bypasses cleanup and leaves later polls observing
+the retained state. [Cloudflare error-handling contract](https://developers.cloudflare.com/durable-objects/best-practices/error-handling/)
+
+The scoped correction uses a fresh, lifecycle-configured
+handle only for owned failure finalization or ambiguous-promotion readback. It
+does not retry the failed business mutation. A process-start request is treated
+as potentially committed before its response arrives, so response loss cannot
+trigger destructive candidate cleanup. If finalization is itself unavailable,
+the client propagates the explicit `sandbox_operation_failed` response to the
+existing controller replacement boundary instead of polling a stranded journal.
+
+No new queue, journal state, stale-lock threshold, retry count, deadline, or
+model orchestration is introduced. Only the lock owner may attempt its cleanup;
+an ambiguous cleanup response never licenses another removal. The controller's
+existing single destroy/restore/replay remains responsible for infrastructure
+recovery. A silently canceled owner whose HTTP error never arrives is still
+bounded by the existing 210-second operation deadline; no observer guesses that
+a live owner has died. Retained artifacts and current published sites are not
+rewritten by this correction.
+
+Acceptance requires poisoned-handle, terminal-write, process-start ambiguity and
+promotion-readback fixtures; client-to-controller recovery; full preflight; a
+coordinated deployment; independent cold/warm and restart tests; and an ordinary
+private retained-source edit. Local tests alone are not hosted acceptance.
+
+Local verification passes: TypeScript, the full static preflight, browser and
+sandbox suites, and isolated launch-flow smoke. The initial browser attempt was
+blocked by the local execution environment's Chromium launch permission; the
+authorized browser/sandbox rerun passes. This is complete phase coverage, not
+one uninterrupted preflight invocation. Hosted deployment and independent
+acceptance remain pending.
+
+### Architecture assessment and limit of this correction
+
+Isolation, a last-known-good generation, immutable checkpoints and exclusive
+mutation ownership protect actual product requirements. The complexity under
+review is execution ownership: status requests currently prepare and promote
+work, compilation outlives those requests, and locks and journals must bridge
+their interruption boundaries. This is not a model-quality problem, and it is
+not evidence that every observed failure originates in Railway or Cloudflare.
+
+The fresh-handle correction fixes an SDK-contract violation; it does not prove
+the cause of the provider interruption. An explicit `sandbox_operation_failed`
+response can also originate from an observing request, not just the preparation
+owner. Fail-fast recovery therefore does not assert that the owner has stopped:
+the existing controller must confirm sandbox destruction before restoring the
+retained checkpoint and replaying the pending mutation. Failed destruction must
+remain fenced, never overlap a replacement execution.
+
+A possible simpler successor would give one executor ownership of preparation,
+build and activation, leaving status polling read-only. That design is not part
+of this patch and has not been validated. If the scoped correction merely moves
+the stranded-operation failure to another phase, retain that evidence and
+reassess the execution boundary rather than declaring reliability or layering
+on additional retries, lock stealing or timers. A successful canary followed by
+a failing independent test is a failed acceptance, not a pass with caveats.
+
+## September 9: request-bound execution correction
+
 September 9, 2026. Focused infrastructure correction passes full local preflight
 and standalone smoke; coordinated deployment and live validation remain pending.
 This is not evidence of a successful new site generation.

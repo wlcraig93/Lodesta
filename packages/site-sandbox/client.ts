@@ -287,6 +287,11 @@ export class SiteSandboxClient {
           transportErrors += 1;
           lastPollError = { kind: "transport", name: sanitizedTransportErrorName(error) };
         }
+        // The operation GET maps an unhandled Worker/DO failure to this exact
+        // code. Hand the explicit infrastructure error to the controller's
+        // confirmed destroy/restore boundary instead of masking it until the
+        // operation deadline; the error alone does not prove the owner stopped.
+        if (error instanceof SiteSandboxRequestError && error.providerCode === "sandbox_operation_failed") throw error;
         if (error instanceof SiteSandboxRequestError && error.status < 500 && error.status !== 404) throw error;
         if (Date.now() >= deadline) break;
       }

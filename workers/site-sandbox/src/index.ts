@@ -157,7 +157,8 @@ export default {
           sandbox,
           sessionId,
           url.origin,
-          operationMatch[2]
+          operationMatch[2],
+          () => sandboxFor(env, sessionId)
         );
         return json(status);
       } catch (error) {
@@ -533,7 +534,8 @@ async function operationStatus(
   sandbox: ReturnType<typeof getSandbox>,
   sessionId: string,
   origin: string,
-  operationId: string
+  operationId: string,
+  freshSandbox: () => Promise<ReturnType<typeof getSandbox>>
 ) {
   let journal = await readOperationJournal(sandbox, operationId);
   if (!journal) throw new SandboxOperationError(404, { error: "operation_not_found", operationId });
@@ -541,9 +543,9 @@ async function operationStatus(
   // waitUntil work can be canceled after 30 seconds, stranding filesystem locks.
   // Compilation itself remains an asynchronous container process.
   if (journal.status === "queued") {
-    journal = await startQueuedOperation(sandbox, sessionId, origin, operationId);
+    journal = await startQueuedOperation(sandbox, sessionId, origin, operationId, freshSandbox);
   } else if (journal.status === "running" && ["validating", "compiling", "promoting"].includes(journal.phase)) {
-    journal = await advanceRunningOperation(sandbox, sessionId, origin, journal);
+    journal = await advanceRunningOperation(sandbox, sessionId, origin, journal, freshSandbox);
   }
   return publicOperationStatus(journal);
 }
@@ -552,13 +554,14 @@ async function startQueuedOperation(
   sandbox: ReturnType<typeof getSandbox>,
   sessionId: string,
   origin: string,
-  operationId: string
+  operationId: string,
+  freshSandbox: () => Promise<ReturnType<typeof getSandbox>>
 ): Promise<OperationJournal> {
   let journal = await readOperationJournal(sandbox, operationId);
   if (!journal) throw new SandboxOperationError(404, { error: "operation_not_found", operationId });
   if (journal.status !== "queued") return journal;
   try {
-    await acquireMutationLock(sandbox, operationId);
+    await acquireMutationLock(sandbox, operationId, freshSandbox);
   } catch (error) {
     if (error instanceof SandboxOperationError && error.payload.error === "operation_in_progress") return journal;
     throw error;
@@ -573,7 +576,7 @@ async function startQueuedOperation(
     // This invocation is the sole mkdir winner and no work has started yet.
     // Make one removal attempt only; an ambiguous response must not be retried
     // because a later poll may already own a replacement lock.
-    await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
+    await freshSandbox().then((reconnected) => reconnected.exec(`rm -rf ${mutationLock}`)).catch(() => undefined);
     throw error;
   }
   if (!retained || retained.status !== "queued") {
@@ -583,6 +586,7 @@ async function startQueuedOperation(
   }
   journal = retained;
   let candidateRoot: string | undefined;
+  let processStartRequested = false;
   try {
     journal = await transitionOperation(sandbox, journal, "preparing");
     const input = await readJson<GenerationRequest>(sandbox, operationRequestPath(operationId));
@@ -609,6 +613,7 @@ async function startQueuedOperation(
       runtimeSeriesId: typeof runtimeSeriesId === "string" ? runtimeSeriesId : undefined
     }));
     const validationCompleteCommand = `node -e 'require("fs").writeFileSync("${validationMarker}", String(Date.now()))'`;
+    processStartRequested = true;
     const process = await sandbox.startProcess(
       `npm run validate-source -- ${sourcePolicyInput} && ${validationCompleteCommand} && npm run build`,
       {
@@ -641,10 +646,10 @@ async function startQueuedOperation(
   } catch (error) {
     // Once the process has started, an ambiguous journal-write response must
     // not race a status poll into failing or deleting a successful candidate.
-    // Poll the retained journal; if it never advances, the existing controller
-    // deadline and single fresh-sandbox recovery handle the abandoned attempt.
-    if (journal.processId) throw error;
-    return failOperation(sandbox, journal, error, candidateRoot);
+    // Propagate the ambiguous execution failure to the controller's confirmed
+    // destroy/restore boundary; never infer that a lost response stopped work.
+    if (journal.processId || processStartRequested) throw error;
+    return failOperation(await freshSandbox(), journal, error, candidateRoot);
   }
 }
 
@@ -652,7 +657,8 @@ async function advanceRunningOperation(
   sandbox: ReturnType<typeof getSandbox>,
   sessionId: string,
   origin: string,
-  journal: OperationJournal
+  journal: OperationJournal,
+  freshSandbox: () => Promise<ReturnType<typeof getSandbox>>
 ): Promise<OperationJournal> {
   // Serialize process-status interpretation with promotion and cleanup, using
   // the existing finalization lock. A delayed poll must re-read the journal
@@ -663,9 +669,9 @@ async function advanceRunningOperation(
   try {
     const current = await readOperationJournal(sandbox, journal.operationId);
     if (!current || current.status !== "running") return current ?? journal;
-    if (current.phase === "promoting") return await finalizeBuiltOperation(sandbox, sessionId, origin, current);
+    if (current.phase === "promoting") return await finalizeBuiltOperation(sandbox, sessionId, origin, current, freshSandbox);
     if (current.phase === "validating" || current.phase === "compiling") {
-      return await advanceBuildProcess(sandbox, sessionId, origin, current);
+      return await advanceBuildProcess(sandbox, sessionId, origin, current, freshSandbox);
     }
     return current;
   } finally {
@@ -677,7 +683,8 @@ async function advanceBuildProcess(
   sandbox: ReturnType<typeof getSandbox>,
   sessionId: string,
   origin: string,
-  journal: OperationJournal
+  journal: OperationJournal,
+  freshSandbox: () => Promise<ReturnType<typeof getSandbox>>
 ): Promise<OperationJournal> {
   if (!journal.processId || !journal.candidateRevision) {
     return failOperation(sandbox, journal, new SandboxOperationError(500, { error: "build_process_missing" }));
@@ -740,7 +747,7 @@ async function advanceBuildProcess(
       }
     };
     await writeOperationJournal(sandbox, journal);
-    return finalizeBuiltOperation(sandbox, sessionId, origin, journal);
+    return finalizeBuiltOperation(sandbox, sessionId, origin, journal, freshSandbox);
   } finally {
     disposeRpc(process);
   }
@@ -750,7 +757,8 @@ async function finalizeBuiltOperation(
   sandbox: ReturnType<typeof getSandbox>,
   sessionId: string,
   origin: string,
-  journal: OperationJournal
+  journal: OperationJournal,
+  freshSandbox: () => Promise<ReturnType<typeof getSandbox>>
 ): Promise<OperationJournal> {
   if (!journal.candidateRevision) {
     return failOperation(sandbox, journal, new SandboxOperationError(500, { error: "candidate_revision_missing" }));
@@ -863,7 +871,8 @@ async function finalizeBuiltOperation(
     // A rename can commit even when its RPC response is lost, before our local
     // `promoted` flag changes. Read the active pointer before any failure
     // cleanup. If that read is unavailable, leave the candidate untouched.
-    const active = await readActiveGeneration(sandbox);
+    const reconnected = await freshSandbox();
+    const active = await readActiveGeneration(reconnected);
     if (active.operationId === journal.operationId && active.result) {
       const now = new Date().toISOString();
       const recovered: OperationJournal = {
@@ -877,12 +886,12 @@ async function finalizeBuiltOperation(
         result: active.result,
         completedAt: now
       };
-      await writeOperationJournal(sandbox, recovered);
-      await cleanupOperationProcess(sandbox, journal);
-      await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
+      await writeOperationJournal(reconnected, recovered);
+      await cleanupOperationProcess(reconnected, journal);
+      await reconnected.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
       return recovered;
     }
-    return failOperation(sandbox, journal, error, candidateRoot);
+    return failOperation(reconnected, journal, error, candidateRoot);
   }
 }
 
@@ -981,7 +990,11 @@ function candidatePromotionFailed(stderr: string, fallback: string) {
   });
 }
 
-async function acquireMutationLock(sandbox: ReturnType<typeof getSandbox>, operationId: string) {
+async function acquireMutationLock(
+  sandbox: ReturnType<typeof getSandbox>,
+  operationId: string,
+  freshSandbox: () => Promise<ReturnType<typeof getSandbox>>
+) {
   await sandbox.mkdir(sessionRoot, { recursive: true });
   const acquired = await sandbox.exec(`mkdir ${mutationLock}`);
   if (acquired.success) {
@@ -991,7 +1004,7 @@ async function acquireMutationLock(sandbox: ReturnType<typeof getSandbox>, opera
       // mkdir proves this invocation owns the fresh lock. Make one removal
       // attempt before exposing the metadata failure; never retry an ambiguous
       // removal and risk deleting a later owner's lock.
-      await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
+      await freshSandbox().then((reconnected) => reconnected.exec(`rm -rf ${mutationLock}`)).catch(() => undefined);
       throw error;
     }
     return;

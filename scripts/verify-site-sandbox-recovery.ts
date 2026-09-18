@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { SiteSandboxRequestError } from "../packages/site-sandbox";
+import { SiteSandboxClient, SiteSandboxRequestError } from "../packages/site-sandbox";
 import { executeWithFreshSandboxRecovery } from "../packages/site-platform/sandbox-recovery";
 
 const files = [{ path: "src/site.tsx", content: "export const siteDefinition = { routes: [] };" }];
@@ -80,13 +80,70 @@ await assert.rejects(
 assert.equal(repairableAttempts, 1);
 assert.equal(repairableRecycles, 0);
 
+await verifyInterruptedPollUsesControllerRecovery();
+
 process.stdout.write(`${JSON.stringify({
   ok: true,
   freshSandboxReplay: "pass",
   byteIdenticalPayload: "pass",
+  interruptedPollUsesControllerRecovery: "pass",
   maxAttempts: 2,
   interveningModelRequests: modelRequestCount
 })}\n`);
+
+async function verifyInterruptedPollUsesControllerRecovery() {
+  const originalFetch = globalThis.fetch;
+  const operationId = "a".repeat(64);
+  const candidateFiles = [
+    { path: "src/site.tsx", content: "export const siteDefinition = { routes: [{ path: '/', element: <main>Retained edit</main> }] };" },
+    { path: "src/styles.css", content: "main{display:block}" }
+  ];
+  const client = new SiteSandboxClient("http://127.0.0.1", "fixture-only");
+  const events: string[] = [];
+  const bodies: string[] = [];
+  let currentSession = "interrupted_sandbox";
+  let firstPolls = 0;
+  let recycled = false;
+  try {
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/apply")) {
+        events.push(`apply:${currentSession}`);
+        bodies.push(String(init?.body));
+        if (currentSession === "recovered_sandbox") {
+          assert(recycled, "The candidate was replayed before disposal and checkpoint restoration.");
+          return Response.json({ ok: true, revision: "revision-after", operationId, activeGenerationRevision: "revision-after" });
+        }
+        return Response.json({ ok: true, operationId, status: "running", phase: "preparing" }, { status: 202 });
+      }
+      assert(url.endsWith(`/operations/${operationId}`));
+      events.push("interrupted-poll");
+      // Bound a broken implementation's test rather than waiting 210 seconds.
+      if (++firstPolls > 1) throw new SiteSandboxRequestError("poll", currentSession, 400, "fixture_unexpected_second_poll", "The client kept polling after an explicit execution failure.");
+      return Response.json({ error: "sandbox_operation_failed", detail: "fixture connection interrupted" }, { status: 500 });
+    };
+    const actual = await executeWithFreshSandboxRecovery({
+      attempt: () => client.apply(currentSession, "retained-revision", candidateFiles),
+      recycle: async reason => {
+        assert.equal(reason, "sandbox_operation_failed");
+        events.push("destroy-and-restore-checkpoint");
+        recycled = true;
+        currentSession = "recovered_sandbox";
+      },
+      isRepairable,
+      isInfrastructureFailure: isInfrastructure,
+      recoveryReason: error => error instanceof SiteSandboxRequestError ? error.providerCode! : "unexpected",
+      terminalError: error => error
+    });
+    assert.equal(actual.revision, "revision-after");
+    assert.equal(firstPolls, 1);
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0], bodies[1], "Controller recovery changed the retained revision or pending edit bytes.");
+    assert.deepEqual(events, ["apply:interrupted_sandbox", "interrupted-poll", "destroy-and-restore-checkpoint", "apply:recovered_sandbox"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
 
 function infrastructureFailure() {
   return new SiteSandboxRequestError("apply", "sandbox-first", 504, "build_timeout", "provider deadline");

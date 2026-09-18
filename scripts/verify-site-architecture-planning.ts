@@ -414,6 +414,66 @@ assert.match(readableIndexedPullPreviewEvidence[1].content, /"approvedLinkPath":
 assert.match(readableIndexedPullPreviewEvidence[1].content, /"evidencePreviews": \[/);
 assert.match(readableIndexedPullPreviewEvidence[1].content, /"evidencePreviews": \[[\s\S]*"approvedLinkPath": "\/ant-control"/);
 assert(readableIndexedPullPreviewEvidence[1].content.length > indexedPullPreviewEvidence[1].content.length);
+// This fixture verifies only the deterministic handoff after an architect has
+// selected targets. It does not claim that prompt wording forces model output.
+const serviceEvidencePages = [
+  page("page_services", "/services", "Services", "Compare the available care paths and choose the service that fits the vehicle."),
+  page("page_surface_care", "/services/surface-care", "Surface Care", "Surface care helps customers compare preparation and protection choices."),
+  page("page_package_one", "/packages/one", "Package One", "Package One includes preparation, finish refinement, and a focused protection choice."),
+  page("page_package_two", "/packages/two", "Package Two", "Package Two includes preparation, deeper finish refinement, and broader protection choices for the same service."),
+  page("page_package_three", "/packages/three", "Package Three", "Package Three includes preparation, complete finish refinement, and the broadest protection choice for the same service."),
+  page("page_cross_service", "/packages/cross-service", "Cross-service Plan", "This plan combines several distinct services and belongs in the general comparison hub.")
+];
+const serviceEvidencePlan = siteArchitecturePlanSchema.parse({
+  strategy: "Keep one service detail and consolidate its packages into that decision while retaining a cross-service comparison in the hub.",
+  primaryNavigation: [{ label: "Services", path: "/services" }],
+  routes: [{
+    path: "/services", label: "Services", purpose: "Help customers compare the confirmed services and choose the right route.",
+    pageType: "service hub", parentPath: null, navigation: "primary",
+    sourcePaths: ["/services", "/packages/cross-service"]
+  }, {
+    path: "/services/surface-care", label: "Surface Care", purpose: "Help customers compare the available surface-care packages.",
+    pageType: "service detail", parentPath: "/services", navigation: "contextual",
+    sourcePaths: ["/services/surface-care", "/packages/one", "/packages/two", "/packages/three"]
+  }],
+  sourceDispositions: [
+    { sourcePath: "/services", disposition: "preserved", targetPath: "/services" },
+    { sourcePath: "/services/surface-care", disposition: "preserved", targetPath: "/services/surface-care" },
+    { sourcePath: "/packages/one", disposition: "redirected", targetPath: "/services/surface-care" },
+    { sourcePath: "/packages/two", disposition: "redirected", targetPath: "/services/surface-care" },
+    { sourcePath: "/packages/three", disposition: "redirected", targetPath: "/services/surface-care" },
+    { sourcePath: "/packages/cross-service", disposition: "redirected", targetPath: "/services" }
+  ],
+  authoringGuidance: []
+});
+const serviceEvidenceModule = createArchitectureEvidenceFiles(serviceEvidencePages, serviceEvidencePlan, {
+  retainedContentMode: "indexed-pull-preview-readable"
+})[1]!.content;
+const serviceEvidenceIndex = JSON.parse(serviceEvidenceModule.slice(
+  "export const approvedSourceIndex = ".length,
+  -" as const;\n".length
+));
+const surfaceCareFiles = serviceEvidenceIndex.routeSourceFiles.find((route: { routePath: string }) =>
+  route.routePath === "/services/surface-care");
+assert.deepEqual(surfaceCareFiles.files, [
+  "source-site/source_test/pages/page_surface_care.md",
+  "source-site/source_test/pages/page_package_one.md",
+  "source-site/source_test/pages/page_package_two.md",
+  "source-site/source_test/pages/page_package_three.md"
+]);
+const surfaceCareIndex = serviceEvidenceIndex.routes.find((route: { routePath: string }) =>
+  route.routePath === "/services/surface-care");
+assert.deepEqual(surfaceCareIndex.sources.map((source: { sourcePath: string }) => source.sourcePath),
+  ["/services/surface-care", "/packages/one", "/packages/two", "/packages/three"]);
+assert(surfaceCareIndex.sources.every((source: { approvedLinkPath: string }) =>
+  source.approvedLinkPath === "/services/surface-care"));
+assert.equal(surfaceCareIndex.evidencePreviews.length, 2,
+  "A route with more than two sources escaped the bounded preview sample.");
+assert.equal(new Set(surfaceCareIndex.evidencePreviews.map((preview: { sourcePath: string }) => preview.sourcePath)).size, 2);
+const servicesIndex = serviceEvidenceIndex.routes.find((route: { routePath: string }) => route.routePath === "/services");
+assert.deepEqual(servicesIndex.sources.map((source: { sourcePath: string }) => source.sourcePath),
+  ["/services", "/packages/cross-service"]);
+assert(servicesIndex.sources.every((source: { approvedLinkPath: string }) => source.approvedLinkPath === "/services"));
 const deepEvidenceText = [
   "Begin with the visible condition and explain why it matters to the property owner before discussing the service.",
   "Describe the first decision in concrete language so a reader can understand what information will help the estimate.",
@@ -913,6 +973,10 @@ assert.equal((request as unknown as Record<string, unknown> | undefined)?.instru
 assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /Owner authority/);
 assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /Austin metro/);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /positively established services, not an exhaustive exclusion list/);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /prefer the most appropriate existing live service route that owns that customer decision/);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /general services hub when the evidence spans multiple services or no more specific live route fits/);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /confirmed offering is consolidated.*explicit content responsibility.*purpose of its consolidation target/);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /Transactional source pages remain evidence for the relevant service overview or detail route/);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /Do not override explicit owner restrictions, extend the geographic scope/);
 
 assert.doesNotThrow(() => siteAgentArchitectureSchema.parse({

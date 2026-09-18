@@ -6,6 +6,7 @@ import {
   createSiteAuthoringContext,
   DeterministicManagerHistory,
   managerBuildContext,
+  managerAuthoringProfileIdentity,
   managerReferenceContext,
   managerToolArguments,
   managerToolNameSchema,
@@ -222,7 +223,7 @@ for (const contract of [
   /provisions, numerals, durations, and meaning exact/i,
   /semantic headers.*keyboard-reachable scroll wrapper/i,
   /Never obscure customer-visible text to evade verification/i,
-  /distinct truthful title and description.*never one global fallback/i,
+  /distinct, truthful title and description.*never one global fallback/i,
   /substantive retained guide needs its explanatory arc/i,
   /copy.*sibling route or competitor.*mapped evidence/i,
   /direct quotation presented as attributed speech.*exact contiguous excerpt of supplied source or exact owner-provided wording.*exact supported attribution.*Show any internal omission.*never silently join separated passages.*paraphrase attributed speech/i,
@@ -1120,17 +1121,30 @@ const managerResult = await new WebsiteManagerAgent(client).run({
 assert.equal(requests.length, 2);
 assert.equal(requests[0]?.text?.verbosity, "medium", "Initial authoring must not request a minimal whole-site implementation.");
 assert.equal(requests[1]?.text?.verbosity, "medium");
-const assetEvidenceReferences = Array.from({ length: 8 }, (_, index) => ({
-  assetId: `asset_evidence_${index + 1}`,
-  revisionId: `asset_revision_evidence_${index + 1}`,
-  kind: index === 0 ? "logo" as const : "photo" as const,
-  alt: "Retained visual candidate; inspect the pixels.",
-  mimeType: "image/webp" as const,
-  contentHash: sha256(`asset-evidence-${index + 1}`),
-  // The workflow supplies a single curated contact sheet paired with all eight
-  // mappings. The manager must keep both the sheet and the full mapping list.
-  dataUrl: "data:image/webp;base64,YXNzZXQtZXZpZGVuY2Utc2hlZXQ="
-}));
+const assetEvidenceReferences = Array.from({ length: 8 }, (_, index) => {
+  const origin = index === 0
+    ? "source_website" as const
+    : index === 1
+      ? "owner_upload" as const
+      : "platform_generated" as const;
+  return {
+    assetId: `asset_evidence_${index + 1}`,
+    revisionId: `asset_revision_evidence_${index + 1}`,
+    kind: index === 0 ? "logo" as const : "photo" as const,
+    origin,
+    ...(origin === "source_website" ? {
+      sourceSnapshotId: "source_evidence_fixture",
+      sourceResourceId: "resource_evidence_fixture",
+      sourcePageUrl: "https://example.com/about"
+    } : {}),
+    alt: "Retained visual candidate; inspect the pixels.",
+    mimeType: "image/webp" as const,
+    contentHash: sha256(`asset-evidence-${index + 1}`),
+    // The workflow supplies a single curated contact sheet paired with all eight
+    // mappings. The manager must keep both the sheet and the full mapping list.
+    dataUrl: "data:image/webp;base64,YXNzZXQtZXZpZGVuY2Utc2hlZXQ="
+  };
+});
 const assetEvidenceRequests: Parameters<ManagerResponsesClient["create"]>[0][] = [];
 await new WebsiteManagerAgent({ create: async (params) => {
   assetEvidenceRequests.push(params);
@@ -1169,19 +1183,58 @@ const assetEvidenceText = assetEvidenceBlocks.find((block) => block.type === "in
 const assetEvidenceImage = assetEvidenceBlocks.find((block) => block.type === "input_image");
 assert(assetEvidenceText, "The initial manager request omitted canonical asset mappings.");
 const deliveredAssetEvidence = JSON.parse(assetEvidenceText.text!) as {
-  references: Array<{ assetId: string; revisionId: string }>;
+  references: Array<{
+    assetId: string;
+    revisionId: string;
+    origin: "source_website" | "owner_upload" | "platform_generated";
+    sourceSnapshotId?: string;
+    sourceResourceId?: string;
+    sourcePageUrl?: string;
+  }>;
 };
 assert.equal(deliveredAssetEvidence.references.length, 8,
   "The initial manager request clipped curated asset mappings at the former two-item limit.");
 assert.deepEqual(deliveredAssetEvidence.references.map((reference) => reference.assetId),
   assetEvidenceReferences.map((reference) => reference.assetId));
+assert.deepEqual(deliveredAssetEvidence.references[0], {
+  assetId: "asset_evidence_1",
+  revisionId: "asset_revision_evidence_1",
+  kind: "logo",
+  origin: "source_website",
+  sourceSnapshotId: "source_evidence_fixture",
+  sourceResourceId: "resource_evidence_fixture",
+  sourcePageUrl: "https://example.com/about",
+  alt: "Retained visual candidate; inspect the pixels.",
+  mimeType: "image/webp",
+  contentHash: sha256("asset-evidence-1")
+});
+for (const reference of deliveredAssetEvidence.references.slice(1)) {
+  assert(!("sourceSnapshotId" in reference) && !("sourceResourceId" in reference)
+    && !("sourcePageUrl" in reference),
+  `${reference.origin} evidence fabricated source provenance.`);
+}
 assert.equal(assetEvidenceImage?.image_url, assetEvidenceReferences[0]?.dataUrl,
   "The mapping list was delivered without its paired contact-sheet pixels.");
 const deliveredAssetInstruction = deliveredAssetEvidence as typeof deliveredAssetEvidence & { instruction: string };
 assert.match(deliveredAssetInstruction.instruction, /Pixels identify visible subjects/i);
 assert.match(deliveredAssetInstruction.instruction, /Canonical adoption alone does not prove that attribution/i);
+assert.match(deliveredAssetInstruction.instruction, /untrusted provenance.*not visible-subject identification.*particular job/i);
 assert.match(deliveredAssetInstruction.instruction, /neutral illustration.*not framed as business-specific proof/i);
 assert.match(deliveredAssetInstruction.instruction, /exact official logo as the sole identity mark/i);
+const assetProfile = {
+  ...canonicalAuthoringProfile("initial_build"),
+  assetEvidenceReferences
+};
+assert.notEqual(
+  managerAuthoringProfileIdentity(assetProfile),
+  managerAuthoringProfileIdentity({
+    ...assetProfile,
+    assetEvidenceReferences: assetEvidenceReferences.map((reference, index) => index === 0
+      ? { ...reference, sourcePageUrl: "https://example.com/different-retained-page" }
+      : reference)
+  }),
+  "Adjacent managed-asset provenance did not participate in the authoring-profile identity."
+);
 
 const sourceEvidenceContext = managerReferenceContext({
   ...canonicalAuthoringProfile("initial_build"),
@@ -1189,6 +1242,8 @@ const sourceEvidenceContext = managerReferenceContext({
     resourceId: "source_resource_context_fixture",
     sourceId: "source_context_fixture",
     sourcePageId: "source_page_context_fixture",
+    sourcePageUrl: "https://example.com/projects/retained-project",
+    sourcePageTitle: "Retained project page",
     mimeType: "image/webp",
     contentHash: `sha256:${"d".repeat(64)}`,
     dataUrl: "data:image/webp;base64,UklGRg=="
@@ -1197,11 +1252,59 @@ const sourceEvidenceContext = managerReferenceContext({
 const sourceEvidenceText = sourceEvidenceContext.find((block) => block.type === "input_text"
   && block.text.includes("retained-first-party-visual-evidence"));
 assert(sourceEvidenceText?.text, "The source contact sheet omitted its evidence boundary.");
-const deliveredSourceEvidence = JSON.parse(sourceEvidenceText.text) as { instruction: string };
+const deliveredSourceEvidence = JSON.parse(sourceEvidenceText.text) as {
+  instruction: string;
+  references: Array<{ resourceId: string; sourcePageUrl: string; sourcePageTitle?: string }>;
+};
+assert.deepEqual(deliveredSourceEvidence.references[0], {
+  resourceId: "source_resource_context_fixture",
+  sourceId: "source_context_fixture",
+  sourcePageId: "source_page_context_fixture",
+  sourcePageUrl: "https://example.com/projects/retained-project",
+  sourcePageTitle: "Retained project page",
+  mimeType: "image/webp",
+  contentHash: `sha256:${"d".repeat(64)}`
+});
 assert.match(deliveredSourceEvidence.instruction, /Pixels identify visible subjects/i);
 assert.match(deliveredSourceEvidence.instruction, /retained page context or owner authority must support any claim/i);
+assert.match(deliveredSourceEvidence.instruction, /untrusted page association.*not visible-subject identification.*particular job/i);
 assert.match(deliveredSourceEvidence.instruction, /First-party hosting alone does not prove that attribution/i);
 assert.match(deliveredSourceEvidence.instruction, /neutral illustration.*not framed as business-specific proof/i);
+const sourceProfile = {
+  ...canonicalAuthoringProfile("initial_build"),
+  sourceEvidenceReferences: [{
+    resourceId: "source_resource_context_fixture",
+    sourceId: "source_context_fixture",
+    sourcePageId: "source_page_context_fixture",
+    sourcePageUrl: "https://example.com/projects/retained-project",
+    sourcePageTitle: "Retained project page",
+    mimeType: "image/webp" as const,
+    contentHash: `sha256:${"d".repeat(64)}` as const,
+    dataUrl: "data:image/webp;base64,UklGRg=="
+  }]
+};
+assert.notEqual(
+  managerAuthoringProfileIdentity(sourceProfile),
+  managerAuthoringProfileIdentity({
+    ...sourceProfile,
+    sourceEvidenceReferences: sourceProfile.sourceEvidenceReferences.map((reference) => ({
+      ...reference,
+      sourcePageUrl: "https://example.com/projects/different-retained-project"
+    }))
+  }),
+  "Adjacent retained provenance did not participate in the authoring-profile identity."
+);
+assert.notEqual(
+  managerAuthoringProfileIdentity(sourceProfile),
+  managerAuthoringProfileIdentity({
+    ...sourceProfile,
+    sourceEvidenceReferences: sourceProfile.sourceEvidenceReferences.map((reference) => ({
+      ...reference,
+      sourcePageTitle: "Different retained page title"
+    }))
+  }),
+  "Retained source-page title did not participate in the authoring-profile identity."
+);
 await assert.rejects(() => new WebsiteManagerAgent(client).run({
   buildInput, authoringContext: context, instruction: "Build a private candidate.",
   kind: "initial_build", route: { apiProvider: "openai", modelId: "gpt-6-astra" }, runtime

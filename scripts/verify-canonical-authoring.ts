@@ -130,7 +130,7 @@ assert.match(skills, /approvedSourceIndex\.liveRoutePaths as the exact internal-
 assert.match(skills, /Historical sourcePath values are evidence, not destinations/i);
 assert.match(skills, /readable focused route, content, legal, and shared-shell modules from the first write/i);
 assert.match(skills, /Never obscure customer-visible text to evade verification/i);
-assert.match(skills, /distinct truthful title and description for every route, never one global fallback description/i);
+assert.match(skills, /distinct, truthful title and description for every route, never one global fallback description/i);
 assert.match(skills, /Never apply blank-build design defaults/);
 assert.match(skills, /websiteAuthoringSkillIdentityFor\(kind/);
 assert.match(workflow, /Older authoring format—full rebuild required/);

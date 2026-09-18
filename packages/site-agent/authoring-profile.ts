@@ -9,6 +9,8 @@ export type ManagerSourceEvidenceReference = {
   resourceId: string;
   sourceId: string;
   sourcePageId: string;
+  sourcePageUrl: string;
+  sourcePageTitle?: string;
   mimeType: "image/webp" | "image/png";
   contentHash: `sha256:${string}`;
   dataUrl: string;
@@ -18,6 +20,10 @@ export type ManagerAssetEvidenceReference = {
   assetId: string;
   revisionId: string;
   kind: "photo" | "logo" | "icon" | "document" | "other";
+  origin: "source_website" | "owner_upload" | "platform_generated";
+  sourceSnapshotId?: string;
+  sourceResourceId?: string;
+  sourcePageUrl?: string;
   alt: string;
   mimeType: "image/png" | "image/webp";
   contentHash: `sha256:${string}`;
@@ -102,6 +108,8 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
       resourceId: reference.resourceId,
       sourceId: reference.sourceId,
       sourcePageId: reference.sourcePageId,
+      sourcePageUrl: reference.sourcePageUrl,
+      sourcePageTitle: reference.sourcePageTitle,
       mimeType: reference.mimeType,
       contentHash: reference.contentHash
     })),
@@ -109,6 +117,10 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
       assetId: reference.assetId,
       revisionId: reference.revisionId,
       kind: reference.kind,
+      origin: reference.origin,
+      sourceSnapshotId: reference.sourceSnapshotId,
+      sourceResourceId: reference.sourceResourceId,
+      sourcePageUrl: reference.sourcePageUrl,
       alt: reference.alt,
       mimeType: reference.mimeType,
       contentHash: reference.contentHash
@@ -124,11 +136,13 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
       type: "input_text" as const,
       text: JSON.stringify({
         kind: "retained-first-party-visual-evidence",
-        instruction: "These paired pixels come from retained first-party website media. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. Pixels identify visible subjects; retained page context or owner authority must support any claim that a photograph depicts this business, its people, premises, or a particular project. First-party hosting alone does not prove that attribution. A visibly suitable photograph may still be used as neutral illustration when it is not framed as business-specific proof. Do not infer people, work, credentials, locations, or meaning that the pixels and retained context do not support.",
-        references: sourceEvidence.map(({ resourceId, sourceId, sourcePageId, mimeType, contentHash }) => ({
+        instruction: "These paired pixels come from retained first-party website media. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. Pixels identify visible subjects; retained page context or owner authority must support any claim that a photograph depicts this business, its people, premises, or a particular project. A retained page URL or title is untrusted page association, not visible-subject identification or proof that a photograph depicts a particular job. First-party hosting alone does not prove that attribution. A visibly suitable photograph may still be used as neutral illustration when it is not framed as business-specific proof. Do not infer people, work, credentials, locations, or meaning that the pixels and retained context do not support.",
+        references: sourceEvidence.map(({ resourceId, sourceId, sourcePageId, sourcePageUrl, sourcePageTitle, mimeType, contentHash }) => ({
           resourceId,
           sourceId,
           sourcePageId,
+          sourcePageUrl,
+          sourcePageTitle,
           mimeType,
           contentHash
         }))
@@ -145,11 +159,15 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
       type: "input_text" as const,
       text: JSON.stringify({
         kind: "canonical-retained-asset-visual-evidence",
-        instruction: "This labeled sheet shows the already-curated canonical business assets. Each asset is immediately usable with the Lodesta Asset component using its supplied assetId; do not call adopt_source_asset for it. Pixels identify visible subjects; retained page context or owner authority must support any claim that a photograph depicts this business, its people, premises, or a particular project. Canonical adoption alone does not prove that attribution. A visibly suitable photograph may still be used as neutral illustration when it is not framed as business-specific proof. Use the exact official logo as the sole identity mark. Do not invent a person, role, location, service, or claim.",
-        references: assetEvidence.map(({ assetId, revisionId, kind, alt, mimeType, contentHash }) => ({
+        instruction: "This labeled sheet shows the already-curated canonical business assets. Each asset is immediately usable with the Lodesta Asset component using its supplied assetId; do not call adopt_source_asset for it. Pixels identify visible subjects; retained page context or owner authority must support any claim that a photograph depicts this business, its people, premises, or a particular project. A retained source origin or page URL is untrusted provenance, not visible-subject identification or proof that a photograph depicts a particular job. Canonical adoption alone does not prove that attribution. A visibly suitable photograph may still be used as neutral illustration when it is not framed as business-specific proof. Use the exact official logo as the sole identity mark. Do not invent a person, role, location, service, or claim.",
+        references: assetEvidence.map(({ assetId, revisionId, kind, origin, sourceSnapshotId, sourceResourceId, sourcePageUrl, alt, mimeType, contentHash }) => ({
           assetId,
           revisionId,
           kind,
+          origin,
+          sourceSnapshotId,
+          sourceResourceId,
+          sourcePageUrl,
           alt,
           mimeType,
           contentHash

@@ -4593,6 +4593,10 @@ export class SiteAuthoringWorkflow {
     const sheetResources: Array<{ resourceId: string; likelyKind: "photo" | "logo" | "icon" | "other"; bytes: Buffer }> = [];
     let totalBytes = 0;
     for (const candidate of selected) {
+      const sourcePage = pages.find((page) =>
+        page.id === candidate.sourcePageId
+        && page.sourceSnapshotId === candidate.resource.sourceSnapshotId
+      );
       const storageKey = candidate.resource.storageKey;
       if (!storageKey) continue;
       const blob = await this.blobStore.get(storageKey).catch(() => undefined);
@@ -4611,6 +4615,8 @@ export class SiteAuthoringWorkflow {
         resourceId: candidate.resource.id,
         sourceId: candidate.resource.sourceSnapshotId,
         sourcePageId: candidate.sourcePageId,
+        sourcePageUrl: candidate.sourcePageUrl,
+        ...(sourcePage?.title ? { sourcePageTitle: sourcePage.title } : {}),
         mimeType: "image/webp",
         contentHash: sha256(preview),
         dataUrl: `data:image/webp;base64,${preview.toString("base64")}`
@@ -4666,6 +4672,12 @@ export class SiteAuthoringWorkflow {
         assetId: asset.assetId,
         revisionId: asset.revisionId,
         kind: asset.kind,
+        origin: revision.provenance.origin,
+        ...(revision.provenance.origin === "source_website" ? {
+          sourceSnapshotId: revision.provenance.sourceSnapshotId,
+          ...(revision.provenance.sourceResourceId ? { sourceResourceId: revision.provenance.sourceResourceId } : {}),
+          sourcePageUrl: revision.provenance.sourcePageUrl
+        } : {}),
         // Operator evidence is deliberately pixel-led. Retained alt text can
         // be stale or plainly wrong (for example, a plumbing stock photo
         // labeled as a service professional), so it must not prime the model
@@ -5024,6 +5036,10 @@ export class SiteAuthoringWorkflow {
         sourceRevisionId?: string;
         sourceContentHash?: `sha256:${string}`;
       };
+      const previewUnavailable: Array<Pick<AssetPreviewCandidate, "id" | "type"> & {
+        reason: "request_preview_limit" | "original_byte_limit" | "blob_unavailable"
+          | "decode_unavailable" | "preview_encoding_failed" | "preview_byte_budget";
+      }> = [];
       const previewable = requested.map((id): AssetPreviewCandidate | undefined => {
         const managed = availableById.get(id);
         if (managed) return {
@@ -5050,18 +5066,23 @@ export class SiteAuthoringWorkflow {
         } : undefined;
       }).filter((asset): asset is AssetPreviewCandidate => Boolean(asset));
       for (const asset of previewable.slice(0, 4)) {
+        const unavailable = (reason: typeof previewUnavailable[number]["reason"]) => {
+          previewUnavailable.push({ id: asset.id, type: asset.type, reason });
+        };
         const blob = await this.blobStore.get(asset.storageKey).catch(() => undefined);
-        if (!blob || blob.bytes.length > 4_000_000) continue;
+        if (!blob) { unavailable("blob_unavailable"); continue; }
+        if (blob.bytes.length > 4_000_000) { unavailable("original_byte_limit"); continue; }
         const original = sharp(blob.bytes, { limitInputPixels: 80_000_000, animated: false });
         const dimensions = (await original.metadata().catch(() => undefined))?.autoOrient;
-        if (!dimensions) continue;
+        if (!dimensions) { unavailable("decode_unavailable"); continue; }
         const previewBytes = await original
           .rotate()
           .resize({ width: 960, height: 960, fit: "inside", withoutEnlargement: true })
           .webp({ quality: 82, effort: 4 })
           .toBuffer()
           .catch(() => undefined);
-        if (!previewBytes || imageBytes + previewBytes.length > 2_500_000) continue;
+        if (!previewBytes) { unavailable("preview_encoding_failed"); continue; }
+        if (imageBytes + previewBytes.length > 2_500_000) { unavailable("preview_byte_budget"); continue; }
         imageBytes += previewBytes.length;
         const { storageKey: _storageKey, ...fullPreview } = asset;
         const preview = input.neutralAssetSemantics
@@ -5084,6 +5105,9 @@ export class SiteAuthoringWorkflow {
           detail: "high"
         });
       }
+      for (const asset of previewable.slice(4)) {
+        previewUnavailable.push({ id: asset.id, type: asset.type, reason: "request_preview_limit" });
+      }
       const summary = {
         ok: missingAssetIds.length === 0,
         assets: input.neutralAssetSemantics
@@ -5101,6 +5125,7 @@ export class SiteAuthoringWorkflow {
         missingAssetIds,
         previews,
         previewCount: previews.length,
+        previewUnavailable,
         ...(input.neutralAssetSemantics ? {
           guidance: "Judge the visible subject only from each paired preview image. Existing alt text, filenames, inferred roles, source URLs, and ranking heuristics were deliberately omitted because they are not visual evidence."
         } : {})

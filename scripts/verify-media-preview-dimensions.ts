@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import sharp from "sharp";
+import sharp, { type SharpOptions, type ResizeOptions, type WebpOptions } from "sharp";
 import ts from "typescript";
 
 // Execute the real sheet implementation with a transparent Sharp observer so
@@ -60,7 +60,8 @@ const declaration = file.statements.find(node => ts.isClassDeclaration(node) && 
 const method = declaration.members.find(node => ts.isMethodDeclaration(node) && node.name.getText(file) === "executeAuthoringSourceTool");
 assert(method);
 const code = ts.transpileModule(`class Extracted { ${method.getText(file)} }; return new Extracted();`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
-const workflow = new Function("sharp", "sourceResourceIsAdoptableImage", "rankSourceAssetCandidates", "asContentHash", code)(sharp, () => true, ({ resources }: any) => [{ resource: resources[0], sourcePageId: "page_fixture", sourcePageUrl: "https://private.invalid/context", likelyKind: "photo", relevanceScore: 1, relevanceReasons: [] }], (hash: string) => hash);
+const createWorkflow = (sharpImplementation: typeof sharp = sharp) => new Function("sharp", "sourceResourceIsAdoptableImage", "rankSourceAssetCandidates", "asContentHash", code)(sharpImplementation, () => true, ({ resources }: any) => [{ resource: resources[0], sourcePageId: "page_fixture", sourcePageUrl: "https://private.invalid/context", likelyKind: "photo", relevanceScore: 1, relevanceReasons: [] }], (hash: string) => hash);
+const workflow = createWorkflow();
 const blobs: Record<string, Buffer> = { managed: rotated, source: large, small };
 workflow.blobStore = { get: async (key: string) => ({ bytes: blobs[key] }) };
 workflow.repository = {
@@ -83,4 +84,92 @@ const previewSizes = await Promise.all(images.map(async (item: any) => {
 }));
 assert.deepEqual(previewSizes, [[20, 60], [960, 480], [20, 60]], "Preview rotation, no-enlargement or existing 960px bound changed.");
 assert.deepEqual([managed.width, managed.height], [999, 888], "Inspection mutated retained metadata.");
-console.log("Media preview dimensions verified: oriented originals, no sheet upscaling, correct labels, neutral semantics, unchanged preview size bound.");
+assert.deepEqual(result.diagnosticOutput.previewUnavailable, []);
+
+// Exercise the actual selective-preview method, including its model-visible
+// summary. Oversized input never reaches a decoder; missing IDs remain distinct.
+const oversized = Buffer.alloc(4_000_001);
+const fetched: string[] = [];
+const fixtureBlobs: Record<string, Buffer> = {
+  good: small, oversized, corrupt: Buffer.from("not an image"),
+  encoding: small, budget_a: small, budget_b: small
+};
+function configureInspection(target: any) {
+  target.blobStore = { get: async (key: string) => {
+    fetched.push(key);
+    if (key === "missing") throw new Error("DO_NOT_EXPOSE_STORAGE_ERROR");
+    return fixtureBlobs[key] ? { bytes: fixtureBlobs[key] } : undefined;
+  } };
+  target.repository = {
+    getSourceSnapshotResource: async (id: string, sourceId: string) => id === "unknown" ? undefined : ({
+      id, sourceSnapshotId: sourceId, storageKey: id === "source_large" ? "oversized" : "good",
+      contentType: "image/png", rawContentHash: `sha256:${"1".repeat(64)}`,
+      requestedUrl: "https://private.invalid/image.png"
+    }),
+    listSourceSnapshotPages: async () => []
+  };
+}
+const managedFixture = (id: string, key: string) => ({ ...managed, assetId: id, storageKey: key });
+async function inspect(target: any, ids: string[], assets: ReturnType<typeof managedFixture>[]) {
+  const output = await target.executeAuthoringSourceTool({
+    call: { name: "inspect_assets", arguments: { assetIds: ids } },
+    sourceCatalog: new Map([["source_fixture", {}]]), neutralAssetSemantics: true,
+    getBuildInput: () => ({ business: { assets } })
+  });
+  const summary = JSON.parse(typeof output.modelOutput === "string" ? output.modelOutput : output.modelOutput[0].text);
+  assert.deepEqual(summary, JSON.parse(JSON.stringify(output.diagnosticOutput)), "Model and diagnostic preview summaries disagree.");
+  for (const item of summary.previewUnavailable) assert.deepEqual(Object.keys(item).sort(), ["id", "reason", "type"]);
+  assert.doesNotMatch(JSON.stringify(summary), /DO_NOT_EXPOSE|private\.invalid|storageKey/);
+  return { summary, output };
+}
+const unavailableWorkflow = createWorkflow();
+configureInspection(unavailableWorkflow);
+const mixed = await inspect(unavailableWorkflow, ["large_managed", "good_managed", "source_large", "missing_managed", "source_fifth"], [
+  managedFixture("large_managed", "oversized"), managedFixture("good_managed", "good"), managedFixture("missing_managed", "missing")
+]);
+assert.equal(mixed.summary.ok, true, "Preview failure changed ID-resolution success semantics.");
+assert.deepEqual(mixed.summary.missingAssetIds, []);
+assert.deepEqual(mixed.summary.previewUnavailable, [
+  { id: "large_managed", type: "managed_asset", reason: "original_byte_limit" },
+  { id: "source_large", type: "source_resource", reason: "original_byte_limit" },
+  { id: "missing_managed", type: "managed_asset", reason: "blob_unavailable" },
+  { id: "source_fifth", type: "source_resource", reason: "request_preview_limit" }
+]);
+assert.deepEqual(fetched, ["oversized", "good", "oversized", "missing"], "Skipped previews changed the first-four attempt limit or order.");
+assert.equal(mixed.summary.previewCount, 1);
+assert.equal(mixed.summary.previews[0].id, "good_managed");
+assert.equal(mixed.output.modelOutput[1].text, `Asset preview 1: ${JSON.stringify(mixed.summary.previews[0])}`);
+assert.equal(mixed.output.modelOutput[2].type, "input_image");
+const corrupt = await inspect(unavailableWorkflow, ["bad", "unknown"], [managedFixture("bad", "corrupt")]);
+assert.equal(corrupt.summary.ok, false);
+assert.deepEqual(corrupt.summary.missingAssetIds, ["unknown"]);
+assert.deepEqual(corrupt.summary.previewUnavailable, [{ id: "bad", type: "managed_asset", reason: "decode_unavailable" }]);
+assert.equal(typeof corrupt.output.modelOutput, "string");
+
+// Control encoder outcomes without allocating huge decoded fixtures. The real
+// method still owns the aggregate budget, outcome labels and image pairing.
+let encoded = 0;
+const controlledSharp = ((_bytes: Buffer, options: SharpOptions) => {
+  assert.deepEqual(options, { limitInputPixels: 80_000_000, animated: false });
+  const instance = {
+    metadata: async () => ({ autoOrient: { width: 40, height: 20 } }),
+    rotate: () => instance,
+    resize: (options: ResizeOptions) => { assert.deepEqual(options, { width: 960, height: 960, fit: "inside", withoutEnlargement: true }); return instance; },
+    webp: (options: WebpOptions) => { assert.deepEqual(options, { quality: 82, effort: 4 }); return instance; },
+    toBuffer: async () => { if (++encoded === 1) throw new Error("DO_NOT_EXPOSE_ENCODER_ERROR"); return Buffer.alloc(1_300_000); }
+  };
+  return instance;
+}) as unknown as typeof sharp;
+const controlledWorkflow = createWorkflow(controlledSharp);
+configureInspection(controlledWorkflow);
+const controlled = await inspect(controlledWorkflow, ["encoding", "budget_a", "budget_b"], [
+  managedFixture("encoding", "encoding"), managedFixture("budget_a", "budget_a"), managedFixture("budget_b", "budget_b")
+]);
+assert.equal(controlled.summary.ok, true);
+assert.deepEqual(controlled.summary.previewUnavailable, [
+  { id: "encoding", type: "managed_asset", reason: "preview_encoding_failed" },
+  { id: "budget_b", type: "managed_asset", reason: "preview_byte_budget" }
+]);
+assert.equal(controlled.summary.previewCount, 1);
+assert.equal(controlled.summary.previews[0].id, "budget_a");
+console.log("Media previews verified: oriented originals, no enlargement, neutral semantics, unchanged bounds, explicit selective unavailability and identical model/diagnostic summaries.");

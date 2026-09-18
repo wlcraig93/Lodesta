@@ -114,6 +114,11 @@ try {
   const assetEvidenceRefs: AssetRevisionRef[] = [];
   for (const [index, color] of ["#183957", "#285649", "#8a5a3b", "#ad8a52", "#5a6f48", "#3e6d82", "#9b4c44", "#66567b"].entries()) {
     const bytes = await sharp({ create: { width: 24 + index, height: 16 + index, channels: 3, background: color } }).webp().toBuffer();
+    const origin = index === 6
+      ? "owner_upload" as const
+      : index === 7
+        ? "platform_generated" as const
+        : "source_website" as const;
     const revision = assetRevisionSchema.parse({
       schemaVersion: 1,
       id: `asset_revision_evidence_${index + 1}`,
@@ -125,13 +130,25 @@ try {
       bytes: bytes.length,
       width: 24 + index,
       height: 16 + index,
-      origin: "source_website",
-      provenance: {
-        origin: "source_website",
+      origin,
+      provenance: origin === "source_website" ? {
+        origin,
         sourceUrl: `https://northstar.example/assets/evidence-${index + 1}.webp`,
         sourcePageUrl: "https://northstar.example/",
         sourceSnapshotId: originalSnapshot.id,
         sourceResourceId: `resource_asset_evidence_${index + 1}`
+      } : origin === "owner_upload" ? {
+        origin,
+        uploadedBy: owner,
+        originalFileName: "DO_NOT_EXPOSE_OWNER_FILENAME.webp"
+      } : {
+        origin,
+        provider: "openai",
+        model: "gpt-image-2",
+        action: "generate",
+        purpose: "section",
+        prompt: "Generic non-business-specific supporting texture.",
+        sourceAssetRevisionIds: []
       },
       createdAt: now
     });
@@ -167,11 +184,40 @@ try {
     assetEvidenceInput,
     canonicalProfile.assetEvidenceLimit,
     canonicalProfile.assetEvidencePresentation
-  ) as Array<{ assetId: string; revisionId: string; dataUrl: string; contentHash: string }>;
+  ) as Array<{
+    assetId: string;
+    revisionId: string;
+    origin: "source_website" | "owner_upload" | "platform_generated";
+    sourceSnapshotId?: string;
+    sourceResourceId?: string;
+    sourcePageUrl?: string;
+    dataUrl: string;
+    contentHash: string;
+  }>;
   assert.equal(assetEvidence.length, 8,
     "The production asset-evidence builder did not deliver all eight curated mappings.");
   assert.deepEqual(assetEvidence.map((asset) => asset.assetId), assetEvidenceRefs.map((asset) => asset.assetId));
   assert.deepEqual(assetEvidence.map((asset) => asset.revisionId), assetEvidenceRefs.map((asset) => asset.revisionId));
+  assert.deepEqual(assetEvidence[0], {
+    assetId: "asset_evidence_1",
+    revisionId: "asset_revision_evidence_1",
+    kind: "logo",
+    origin: "source_website",
+    sourceSnapshotId: originalSnapshot.id,
+    sourceResourceId: "resource_asset_evidence_1",
+    sourcePageUrl: "https://northstar.example/",
+    alt: "Retained logo candidate; inspect the pixels.",
+    mimeType: "image/webp",
+    contentHash: assetEvidence[0]!.contentHash,
+    dataUrl: assetEvidence[0]!.dataUrl
+  });
+  assert.deepEqual(assetEvidence.slice(6).map((asset) => asset.origin), ["owner_upload", "platform_generated"]);
+  for (const asset of assetEvidence.slice(6)) {
+    assert(!("sourceSnapshotId" in asset) && !("sourceResourceId" in asset)
+      && !("sourcePageUrl" in asset),
+    `${asset.origin} evidence fabricated source provenance.`);
+  }
+  assert.doesNotMatch(JSON.stringify(assetEvidence), /DO_NOT_EXPOSE_OWNER_FILENAME/);
   assert(assetEvidence.every((asset) => asset.dataUrl === assetEvidence[0]?.dataUrl),
     "Curated mappings must remain paired with one shared contact-sheet image.");
   const sheetBytes = Buffer.from(assetEvidence[0]!.dataUrl.split(",")[1]!, "base64");
@@ -179,6 +225,116 @@ try {
   assert.equal(sheetMetadata.format, "webp");
   assert(sheetMetadata.width && sheetMetadata.height,
     "The production asset-evidence builder returned mappings without decodable contact-sheet pixels.");
+  const visualSnapshot = sourceSnapshotSchema.parse({
+    schemaVersion: 1,
+    id: "source_visual_evidence_fixture",
+    businessId: canary.buildInput.businessId,
+    sourceType: "website",
+    sourceUrl: "https://visual-evidence.example/",
+    contentHash: sha256("visual-evidence-fixture"),
+    capturedAt: now,
+    payload: {
+      schemaVersion: 1,
+      kind: "website-mirror",
+      sourceUrl: "https://visual-evidence.example/",
+      coverage: "complete",
+      completionReason: "queue_exhausted",
+      manifestHash: sha256("visual-evidence-manifest"),
+      counts: {
+        documentsDiscovered: 2, documentsEligible: 2, documentsFetched: 2, documentsExcluded: 0,
+        documentsFailed: 0, documentsUnfinished: 0, resourcesDiscovered: 2, resourcesFetched: 2,
+        resourcesExcluded: 0, resourcesFailed: 0, resourcesUnfinished: 0, browserRendered: 0,
+        uniqueBlobs: 2, rawBytes: largeSourcePhotoBytes.length + mediaBytes.length,
+        storedBytes: largeSourcePhotoBytes.length + mediaBytes.length
+      },
+      stages: {
+        discoveryMs: 0, documentFetchMs: 0, dependencyFetchMs: 0, browserFallbackMs: 0,
+        blobPersistenceMs: 0, pageIndexMs: 0, factExtractionMs: 0, finalizationMs: 0
+      },
+      startedAt: now,
+      completedAt: now,
+      elapsedMs: 0
+    }
+  });
+  const titledVisualPage = sourceSnapshotPageSchema.parse({
+    ...homepage,
+    id: "page_visual_evidence_titled",
+    sourceSnapshotId: visualSnapshot.id,
+    resourceId: "resource_visual_evidence_titled",
+    requestedUrl: "https://visual-evidence.example/projects/showcase",
+    finalUrl: "https://visual-evidence.example/projects/showcase",
+    path: "/projects/showcase",
+    title: "Retained project showcase",
+    extractedText: "Retained project showcase content.",
+    textContentHash: sha256("Retained project showcase content.")
+  });
+  const untitledVisualPage = sourceSnapshotPageSchema.parse({
+    ...homepage,
+    id: "page_visual_evidence_untitled",
+    sourceSnapshotId: visualSnapshot.id,
+    resourceId: "resource_visual_evidence_untitled",
+    requestedUrl: "https://visual-evidence.example/services",
+    finalUrl: "https://visual-evidence.example/services",
+    path: "/services",
+    title: undefined,
+    extractedText: "Retained services content.",
+    textContentHash: sha256("Retained services content.")
+  });
+  const titledVisualResource = sourceSnapshotResourceSchema.parse({
+    schemaVersion: 1, id: "resource_visual_evidence_titled", sourceSnapshotId: visualSnapshot.id,
+    captureKind: "http_response", role: "image", requestedUrl: "https://visual-evidence.example/media/service-photo.jpg",
+    finalUrl: "https://visual-evidence.example/media/service-photo.jpg", outcome: "fetched", status: 200, contentType: "image/jpeg",
+    storedEncoding: "identity", rawContentHash: sha256(largeSourcePhotoBytes), blobContentHash: sha256(largeSourcePhotoBytes),
+    storageKey: "fixture/visual-evidence-titled", rawBytes: largeSourcePhotoBytes.length, storedBytes: largeSourcePhotoBytes.length,
+    headers: {}, redirectChain: [], initiatorUrls: [titledVisualPage.requestedUrl], capturedAt: now, metadata: {}
+  });
+  const untitledVisualResource = sourceSnapshotResourceSchema.parse({
+    schemaVersion: 1, id: "resource_visual_evidence_untitled", sourceSnapshotId: visualSnapshot.id,
+    captureKind: "http_response", role: "image", requestedUrl: "https://visual-evidence.example/media/office-photo.webp",
+    finalUrl: "https://visual-evidence.example/media/office-photo.webp", outcome: "fetched", status: 200, contentType: "image/webp",
+    storedEncoding: "identity", rawContentHash: sha256(mediaBytes), blobContentHash: sha256(mediaBytes),
+    storageKey: "fixture/visual-evidence-untitled", rawBytes: mediaBytes.length, storedBytes: mediaBytes.length,
+    headers: {}, redirectChain: [], initiatorUrls: [untitledVisualPage.requestedUrl], capturedAt: now, metadata: {}
+  });
+  await repository.saveSourceSnapshot(visualSnapshot);
+  await repository.saveSourceSnapshotResources([titledVisualResource, untitledVisualResource]);
+  await repository.saveSourceSnapshotPages([titledVisualPage, untitledVisualPage]);
+  await store.putImmutable({ key: titledVisualResource.storageKey!, bytes: largeSourcePhotoBytes,
+    contentType: "image/jpeg", contentHash: sha256(largeSourcePhotoBytes) });
+  await store.putImmutable({ key: untitledVisualResource.storageKey!, bytes: mediaBytes,
+    contentType: "image/webp", contentHash: sha256(mediaBytes) });
+  const sourceEvidence = await Reflect.get(canaryWorkflow, "createOperatorVisualEvidence").call(
+    canaryWorkflow,
+    [visualSnapshot],
+    [titledVisualPage, untitledVisualPage],
+    canonicalProfile.sourceEvidenceLimit,
+    canonicalProfile.sourceEvidencePresentation
+  ) as Array<{
+    resourceId: string;
+    sourceId: string;
+    sourcePageId: string;
+    sourcePageUrl: string;
+    sourcePageTitle?: string;
+  }>;
+  const titledSourceEvidence = sourceEvidence.find((reference) => reference.resourceId === titledVisualResource.id);
+  assert.deepEqual({
+    resourceId: titledSourceEvidence?.resourceId,
+    sourceId: titledSourceEvidence?.sourceId,
+    sourcePageId: titledSourceEvidence?.sourcePageId,
+    sourcePageUrl: titledSourceEvidence?.sourcePageUrl,
+    sourcePageTitle: titledSourceEvidence?.sourcePageTitle
+  }, {
+    resourceId: titledVisualResource.id,
+    sourceId: visualSnapshot.id,
+    sourcePageId: titledVisualPage.id,
+    sourcePageUrl: titledVisualPage.finalUrl,
+    sourcePageTitle: titledVisualPage.title
+  });
+  const untitledSourceEvidence = sourceEvidence.find((reference) => reference.resourceId === untitledVisualResource.id)!;
+  assert.equal(untitledSourceEvidence.sourcePageId, untitledVisualPage.id);
+  assert.equal(untitledSourceEvidence.sourcePageUrl, untitledVisualPage.finalUrl);
+  assert.equal("sourcePageTitle" in untitledSourceEvidence, false,
+    "Source evidence fabricated a title for an untitled retained page.");
   const logoResource = sourceSnapshotResourceSchema.parse({
     schemaVersion: 1, id: "resource_opaque_crest", sourceSnapshotId: originalSnapshot.id,
     captureKind: "http_response", role: "image", requestedUrl: "https://cdn.example/PristineTXNewLogo.svg",

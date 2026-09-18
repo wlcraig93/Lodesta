@@ -37,7 +37,11 @@ assert(workflowSource.match(/executeWithFreshSandboxRecovery/g)?.length === 3, "
 assert(workerSource.includes("promoteGenerationTransaction"), "The worker does not use the fault-injectable production promotion transaction.");
 assert(workerSource.includes("const lockPath = `${sessionRoot}/preview-start.lock`"), "Preview coordination is still coupled to an active generation.");
 assert(!workerSource.includes("stopPreviewProcesses"), "Hot generation promotion still stops the preview server.");
-assert(!workerSource.includes("await sandbox.killAllProcesses();"), "Hot generation promotion still uses kill-all process shutdown.");
+assert.equal(
+  workerSource.match(/await sandbox\.killAllProcesses\(\);/g)?.length,
+  1,
+  "Only workspace bootstrap may use kill-all process shutdown."
+);
 assert(packageSource.includes('"preview": "node platform/preview-server.mjs"'), "The sandbox does not use the stable preview server.");
 assert(previewServerSource.includes('const defaultRoot = "/workspace/site/active/dist"'), "The preview server is not bound to the atomic active-generation pointer.");
 assert(workerSource.includes("node /opt/lodesta-site-scaffold/platform/preview-server.mjs"), "The deployed preview does not execute the immutable stable server directly.");
@@ -55,6 +59,7 @@ assert.match(
 );
 
 await verifyFreshMutationLock();
+await verifyBootstrapStartFailureShortCircuit();
 await verifyOperationJournalReads();
 await verifySubmissionJournalReadSafety();
 await verifyQueuedJournalRace();
@@ -165,6 +170,56 @@ async function verifyFreshMutationLock() {
   await assert.rejects(acquire(sandbox, "operation-third"), error => error instanceof Conflict && error.status === 409,
     "Old metadata does not grant a different request permission to delete another execution's lock.");
   assert.equal(writes, 1);
+}
+
+async function verifyBootstrapStartFailureShortCircuit() {
+  const startFailure = Object.assign(
+    new Error("Container failed to start: simulated bootstrap failure"),
+    { code: "INTERNAL_ERROR" }
+  );
+  let workspaceMutationCalls = 0;
+  const bootstrap = productionWorkerFunction("bootstrapWorkspace", {}) as (
+    sandbox: {
+      killAllProcesses(): Promise<void>;
+      mkdir(): Promise<void>;
+      exec(): Promise<{ success: boolean }>;
+      writeFile(): Promise<void>;
+    },
+    sessionId: string,
+    publicBuildInput: unknown
+  ) => Promise<string>;
+  const sandbox = {
+    killAllProcesses: async () => { throw startFailure; },
+    mkdir: async () => { workspaceMutationCalls += 1; },
+    exec: async () => { workspaceMutationCalls += 1; return { success: true }; },
+    writeFile: async () => { workspaceMutationCalls += 1; }
+  };
+
+  await assert.rejects(
+    bootstrap(sandbox, "session-bootstrap-start-failure", {}),
+    error => error === startFailure,
+    "Bootstrap hid the first container-start failure."
+  );
+  assert.equal(workspaceMutationCalls, 0, "Bootstrap mutated the workspace after container startup failed.");
+
+  const fetch = productionWorkerFetch({
+    authorized: () => true,
+    sandboxFor: async () => sandbox,
+    bootstrapWorkspace: bootstrap,
+    json: (body: unknown, status = 200) => Response.json(body, { status }),
+    SandboxOperationError: class extends Error {}
+  });
+  const response = await fetch(new Request("http://127.0.0.1/v1/sessions/session/bootstrap", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ publicBuildInput: {} })
+  }), {}, { waitUntil: () => undefined });
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), {
+    error: "INTERNAL_ERROR",
+    detail: startFailure.message
+  }, "The Worker did not preserve the installed SDK startup code for controller retry classification.");
+  assert.equal(workspaceMutationCalls, 0, "The routed bootstrap mutated the workspace after container startup failed.");
 }
 
 async function verifyOperationJournalReads() {

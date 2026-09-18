@@ -1046,7 +1046,7 @@ export class SiteAuthoringWorkflow {
               reason: `restore_recovery:${sandboxRecoveryReason(error)}`,
               currentWorkspaceRevisionId: sandboxState.session.currentWorkspaceRevisionId
             });
-            if (!destroyed.destroyed) throw platformTerminalError(new Error("sandbox_destroy_retry_required"));
+            if (!destroyed.destroyed) throw sandboxCleanupPendingError();
             sandboxState = await this.ensureSandbox(run, destroyed.session, buildInput);
             sandboxRevision = sandboxState.revision;
             try {
@@ -1339,7 +1339,8 @@ export class SiteAuthoringWorkflow {
           error = checkpointError;
         }
       }
-      if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+      const cleanupPending = isSandboxCleanupPendingError(error);
+      if (!cleanupPending && deadlineAt !== undefined && Date.now() >= deadlineAt) {
         error = new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, "workflow_deadline_exhausted");
       }
       let failure = classifySiteAuthoringFailure(error);
@@ -1348,13 +1349,13 @@ export class SiteAuthoringWorkflow {
       const preserveTerminalWorkspace = failure.retryableByOwner
         || failure.code === "cost_limit_exhausted"
         || failure.code === "deadline_exhausted";
-      if (preserveTerminalWorkspace) {
+      if (preserveTerminalWorkspace && !cleanupPending) {
         latest = await this.checkpointRetryableFailure(latest).catch(() => latest);
         if (latest.resumeCheckpointId && !latest.authoringProfileId && !failure.retryableByOwner) {
           failure = { ...failure, retryableByOwner: true };
         }
       }
-      await this.destroySandboxAfterRunFailure(latest).catch(() => undefined);
+      if (!cleanupPending) await this.destroySandboxAfterRunFailure(latest).catch(() => undefined);
       await this.queueTerminalRunFailure(latest, failure).catch(() => undefined);
       const failed = await this.updateRun(latest, {
         status: "failed",
@@ -2216,7 +2217,7 @@ export class SiteAuthoringWorkflow {
             reason: `build_recovery:${reason}`,
             currentWorkspaceRevisionId: site?.currentWorkspaceRevisionId
           });
-          if (!destroyed.destroyed) throw new Error("sandbox_destroy_retry_required");
+          if (!destroyed.destroyed) throw sandboxCleanupPendingError();
           activeSession = destroyed.session;
         }
         activeSandboxRevision = "deferred";
@@ -3244,7 +3245,7 @@ export class SiteAuthoringWorkflow {
             reason: `deterministic_rebase_recovery:${reason}`,
             currentWorkspaceRevisionId: activeSession.currentWorkspaceRevisionId
           });
-          if (!destroyed.destroyed) throw platformTerminalError(new Error("sandbox_destroy_retry_required"));
+          if (!destroyed.destroyed) throw sandboxCleanupPendingError();
           const recovered = await this.ensureSandbox(run, destroyed.session, input.buildInput);
           activeSession = recovered.session;
           activeSandboxRevision = recovered.revision;
@@ -3354,12 +3355,13 @@ export class SiteAuthoringWorkflow {
       await this.destroySessionSandbox(session, { reason: "terminal_rebase_success", currentWorkspaceRevisionId: revision.id });
       return run;
     } catch (error) {
-      const cause = input.signal.aborted
+      const cleanupPending = isSandboxCleanupPendingError(error);
+      const cause = input.signal.aborted && !cleanupPending
         ? new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, "workflow_deadline_exhausted")
         : error;
       const failure = classifySiteAuthoringFailure(cause);
       await this.repository.failOpenAgentRunEvents(run.id, new Date().toISOString(), failure.code).catch(() => undefined);
-      await this.destroySandboxAfterRunFailure(run).catch(() => undefined);
+      if (!cleanupPending) await this.destroySandboxAfterRunFailure(run).catch(() => undefined);
       await this.queueTerminalRunFailure(run, failure).catch(() => undefined);
       return this.updateRun(run, {
         status: "failed",
@@ -4259,7 +4261,7 @@ export class SiteAuthoringWorkflow {
         reason: sessionMatchesRun ? "expired_before_sandbox_start" : "sandbox_run_scope_changed",
         currentWorkspaceRevisionId: site?.currentWorkspaceRevisionId
       });
-      if (!result.destroyed) throw new Error("sandbox_destroy_retry_required");
+      if (!result.destroyed) throw sandboxCleanupPendingError();
       current = result.session;
     }
     if (current.sandboxId) {
@@ -4361,7 +4363,7 @@ export class SiteAuthoringWorkflow {
           reason: `sandbox_start_recovery:${sandboxRecoveryReason(error)}`,
           currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
         });
-        if (!destroyed.destroyed) throw new Error("sandbox_destroy_retry_required");
+        if (!destroyed.destroyed) throw sandboxCleanupPendingError();
         const restartedAt = new Date().toISOString();
         starting = siteAgentSessionSchema.parse({
           ...destroyed.session,
@@ -4378,10 +4380,12 @@ export class SiteAuthoringWorkflow {
         revision = await bootstrapAndRestore(starting);
       }
     } catch (error) {
-      await this.destroySessionSandbox(starting, {
-        reason: "sandbox_start_failed",
-        currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
-      });
+      if (!isSandboxCleanupPendingError(error)) {
+        await this.destroySessionSandbox(starting, {
+          reason: "sandbox_start_failed",
+          currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
+        });
+      }
       if (isSiteAuthoringTerminalError(error)) throw error;
       const retryable = isSandboxInfrastructureFailure(error);
       throw new SiteAuthoringTerminalError(
@@ -6066,6 +6070,23 @@ function sandboxRecoveryReason(error: unknown) {
   if (error instanceof SiteSandboxRequestError) return error.providerCode ?? `http_${error.status}`;
   if (error instanceof Error && error.name === "TimeoutError") return "transport_timeout";
   return "transport_failure";
+}
+
+function sandboxCleanupPendingError() {
+  return new SiteAuthoringTerminalError(
+    "sandbox_unavailable",
+    "platform",
+    true,
+    "sandbox_destroy_retry_required"
+  );
+}
+
+function isSandboxCleanupPendingError(error: unknown) {
+  return isSiteAuthoringTerminalError(error)
+    && error.code === "sandbox_unavailable"
+    && error.category === "platform"
+    && error.retryableByOwner
+    && error.message === "sandbox_destroy_retry_required";
 }
 
 function sandboxFailureEventSummary(error: unknown) {

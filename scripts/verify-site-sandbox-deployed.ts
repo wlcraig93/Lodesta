@@ -133,6 +133,12 @@ try {
     concurrentRevision = concurrentReplay.revision;
   }
   const backup = await sandbox.backup(sessionId);
+  const sourceBeforeDestroy = await sandbox.getSource(sessionId);
+  // Completed runs release their container. An owner edit must recreate that
+  // same sandbox identity and restore the retained workspace, not merely
+  // re-bootstrap a container that is still running.
+  await sandbox.destroy(sessionId);
+  const editRestartStartedAt = Date.now();
   const rebootstrapped = await sandbox.bootstrap(sessionId, buildInput);
   const restored = await sandbox.restore(
     sessionId,
@@ -147,8 +153,11 @@ try {
     "Restored workspace did not retain the current container manifest."
   );
   const restoredSource = await sandbox.getSource(sessionId);
+  assert.deepEqual(restoredSource.files, sourceBeforeDestroy.files,
+    "Editing after container destruction did not restore the exact authored source.");
   assert(restoredSource.files.some((file) => file.path === "src/site.tsx"), "Restored workspace lost authored source.");
   const rebuilt = await sandbox.apply(sessionId, restored.revision, restoredSource.files);
+  const editRestartDurationMs = Date.now() - editRestartStartedAt;
   const artifact = await sandbox.getArtifact(sessionId);
   assert.deepEqual(artifact.compilerManifest, expectedManifest, "Deployed compiler artifact reported a different manifest.");
   assert.equal(artifact.routes[0]?.path, "/", "Deployed compiler canary did not emit the homepage.");
@@ -159,6 +168,8 @@ try {
     manifest: diagnostics.sandboxManifest,
     buildDurationMs: rebuilt.buildDurationMs,
     restoreContract: "immutable_generation",
+    destroyedSandboxEditRestore: "pass",
+    editRestartDurationMs,
     transactionFailureIsolation: "pass",
     operationReplay: "pass",
     concurrentOperationDeduplication: "pass",

@@ -12,8 +12,11 @@ import {
   expectedSiteSandboxManifest,
   siteAgentRunSchema,
   siteAgentSessionSchema,
+  siteBuildArtifactSchema,
   siteSandboxControlSchema,
   siteSandboxDeploymentSchema,
+  siteVersionSchema,
+  siteWorkspaceRevisionSchema,
   sourceSnapshotPageSchema,
   sourceSnapshotResourceSchema,
   sourceSnapshotSchema,
@@ -22,6 +25,7 @@ import {
 import { sandboxImageDigest } from "../packages/site-contracts/platform-manifest";
 import { sha256, stableJson } from "../packages/business-data";
 import { SiteAuthoringWorkflow } from "../packages/site-platform/workflow";
+import { SiteSandboxRequestError } from "../packages/site-sandbox";
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 
 // This stays entirely local: the real workflow, local repository, and blob
@@ -472,7 +476,179 @@ try {
   assert.equal(persistenceManagerCalls, 1);
   assert.equal(imageCreatorCalls, 2, "Media persistence failure retried image generation.");
   assert.equal(persistencePaused.provisionalMedia, undefined, "Failed image persistence exposed an asset in recovery metadata.");
-  console.log("Interrupted media recovery preserves source references and form authority; stale scope, missing/corrupt bytes, and storage failure fail closed before unsafe resume.");
+
+  const retainedParentSession = siteAgentSessionSchema.parse({
+    ...session,
+    id: "session_retained_parent",
+    publicBuildInputId: canonicalInput.id
+  });
+  const retainedParentRun = fixtureRun({
+    id: "run_retained_parent",
+    sessionId: retainedParentSession.id,
+    siteId: input.siteId,
+    publicBuildInputId: canonicalInput.id,
+    owner,
+    deploymentId: deployment.id
+  });
+  const retainedParentRunning = siteAgentRunSchema.parse({ ...retainedParentRun, status: "running", stage: "authoring" });
+  await repository.saveAgentSession(retainedParentSession);
+  await repository.saveAgentRun(retainedParentRunning);
+  const retainedParentSource = fixtureWorkspaceFiles()[0]!.content;
+  const retainedParent = siteWorkspaceRevisionSchema.parse({
+    schemaVersion: 1,
+    id: "workspace_retained_cleanup_parent",
+    siteId: input.siteId,
+    publicBuildInputId: canonicalInput.id,
+    ownerOperationalRevision: canonicalInput.ownerOperationalRevision,
+    ownerIntentRevision: canonicalInput.ownerIntentRevision,
+    revisionNumber: 1,
+    sourceHash: sha256(retainedParentSource),
+    sourceArchiveKey: `workspace-backups/${"c".repeat(64)}.tar.gz`,
+    files: [{ path: "src/site.tsx", contentHash: sha256(retainedParentSource), bytes: Buffer.byteLength(retainedParentSource) }],
+    createdAt: now,
+    createdBy: { kind: "agent", id: retainedParentRun.id }
+  });
+  const retainedArtifact = siteBuildArtifactSchema.parse({
+    schemaVersion: 1,
+    id: "artifact_retained_cleanup_parent",
+    siteId: input.siteId,
+    workspaceRevisionId: retainedParent.id,
+    publicBuildInputId: canonicalInput.id,
+    ownerOperationalRevision: canonicalInput.ownerOperationalRevision,
+    ownerIntentRevision: canonicalInput.ownerIntentRevision,
+    createdAt: now,
+    artifactHash: sha256("retained-cleanup-parent-artifact"),
+    storagePrefix: "site-artifacts/retained-cleanup-parent",
+    files: [{ path: "index.html", contentType: "text/html", contentHash: sha256("<main>Northstar</main>"), bytes: 22,
+      storageKey: "site-artifacts/retained-cleanup-parent/index.html" }],
+    routes: [{ path: "/", htmlFile: "index.html", title: "Northstar", description: "Retained cleanup parent" }],
+    factBindings: [], capabilityBindings: [],
+    runtimeSeriesId: canonicalInput.capabilityConfiguration.trustedRuntimeSeries,
+    runtimePatchAtFinalization: "runtime_patch_retained_cleanup_parent",
+    toolchainVersion: "fixture",
+    sandboxImageDigest: sha256("fixture-sandbox"),
+    qa: { hardGate: "passed", checkedAt: now, routesChecked: 1, linksChecked: 0, findings: [], screenshotKeys: [] }
+  });
+  const retainedVersion = siteVersionSchema.parse({
+    schemaVersion: 1,
+    id: "version_retained_cleanup_parent",
+    siteId: input.siteId,
+    number: 1,
+    status: "candidate",
+    artifactId: retainedArtifact.id,
+    artifactHash: retainedArtifact.artifactHash,
+    workspaceRevisionId: retainedParent.id,
+    publicBuildInputId: canonicalInput.id,
+    ownerOperationalRevision: canonicalInput.ownerOperationalRevision,
+    ownerIntentRevision: canonicalInput.ownerIntentRevision,
+    formDefinitionIds: canonicalInput.forms.map(form => form.id),
+    sourceSnapshotIds: canonicalInput.sourceSnapshotIds,
+    assetRevisionIds: canonicalInput.assetRevisionIds,
+    createdAt: now,
+    createdBy: { kind: "agent", id: retainedParentRun.id }
+  });
+  await repository.finalizeVerifiedAuthoring({
+    finalizationKey: sha256("retained-cleanup-parent-finalization"),
+    revision: retainedParent,
+    artifact: retainedArtifact,
+    version: retainedVersion,
+    run: siteAgentRunSchema.parse({ ...retainedParentRunning, status: "succeeded", stage: "candidate_ready", completedAt: now }),
+    session: siteAgentSessionSchema.parse({ ...retainedParentSession, status: "closed",
+      currentWorkspaceRevisionId: retainedParent.id, updatedAt: now })
+  });
+  assert.equal((await repository.getSite(input.siteId))!.currentWorkspaceRevisionId, retainedParent.id);
+
+  const cleanupSession = siteAgentSessionSchema.parse({
+    ...session,
+    id: "session_sandbox_cleanup_pending",
+    publicBuildInputId: canonicalInput.id,
+    currentWorkspaceRevisionId: retainedParent.id,
+    sandboxDestroyAttempts: 0
+  });
+  const cleanupRun = fixtureRun({
+    id: "run_sandbox_cleanup_pending",
+    sessionId: cleanupSession.id,
+    siteId: input.siteId,
+    publicBuildInputId: canonicalInput.id,
+    owner,
+    deploymentId: deployment.id,
+    kind: "edit",
+    exactParentRevisionId: retainedParent.id
+  });
+  await repository.saveAgentSession(cleanupSession);
+  await repository.saveAgentRun(cleanupRun);
+  let cleanupManagerCalls = 0;
+  let cleanupBootstrapCalls = 0;
+  let cleanupDestroyCalls = 0;
+  let cleanupCheckpointCalls = 0;
+  let allowCleanup = false;
+  const cleanupSandbox = {
+    bootstrap: async (sandboxId: string) => {
+      cleanupBootstrapCalls += 1;
+      throw new SiteSandboxRequestError(
+        "bootstrap",
+        sandboxId,
+        500,
+        "INTERNAL_ERROR",
+        "Container failed to start: simulated installed-SDK startup failure"
+      );
+    },
+    destroy: async () => {
+      cleanupDestroyCalls += 1;
+      if (!allowCleanup) throw Object.assign(new Error("simulated destroy timeout"), { name: "TimeoutError" });
+      return { ok: true as const };
+    },
+    backup: async () => {
+      cleanupCheckpointCalls += 1;
+      throw new Error("cleanup-pending workspace must not be checkpointed");
+    }
+  };
+  const cleanupWorkflow = new SiteAuthoringWorkflow(
+    repository,
+    store,
+    cleanupSandbox as never,
+    { run: async () => { cleanupManagerCalls += 1; } } as never,
+    undefined,
+    undefined,
+    deployment
+  );
+  const cleanupFailed = await cleanupWorkflow.executeRun(cleanupRun.id);
+  assert.equal(cleanupFailed.status, "failed");
+  assert.equal(cleanupFailed.failureCode, "sandbox_unavailable");
+  assert.equal(cleanupFailed.failureCategory, "platform");
+  assert.equal(cleanupFailed.retryableByOwner, true);
+  assert.equal(cleanupFailed.failureReason, "sandbox_destroy_retry_required");
+  assert.equal(cleanupFailed.publicBuildInputId, cleanupRun.publicBuildInputId, "Cleanup failure changed the retained input binding.");
+  assert.equal(cleanupFailed.exactParentRevisionId, cleanupRun.exactParentRevisionId, "Cleanup failure changed the exact parent binding.");
+  assert.equal(cleanupFailed.resumeCheckpointId, undefined, "Cleanup-pending failure attached a workspace checkpoint.");
+  assert.equal(cleanupManagerCalls, 0, "Container startup failure reached the manager.");
+  assert.equal(cleanupBootstrapCalls, 1, "Container startup failure was replayed before cleanup completed.");
+  assert.equal(cleanupDestroyCalls, 1, "Cleanup-pending failure repeated inline sandbox destruction.");
+  assert.equal(cleanupCheckpointCalls, 0, "Cleanup-pending failure called the sandbox checkpoint RPC.");
+  const rotatingCleanupSession = (await repository.getAgentSession(cleanupSession.id))!;
+  assert.equal(rotatingCleanupSession.status, "rotating");
+  assert(rotatingCleanupSession.sandboxId, "Cleanup-pending failure cleared an unconfirmed sandbox binding.");
+  assert.equal(rotatingCleanupSession.currentWorkspaceRevisionId, cleanupRun.exactParentRevisionId);
+  assert.equal(rotatingCleanupSession.publicBuildInputId, cleanupRun.publicBuildInputId);
+  assert.equal((await repository.getSite(input.siteId))!.currentWorkspaceRevisionId, retainedParent.id,
+    "Cleanup-pending edit changed the site's retained parent.");
+
+  allowCleanup = true;
+  const reaped = await cleanupWorkflow.reapExpiredSessions({
+    now: new Date(Date.now() + 60_000).toISOString(),
+    limit: 100
+  });
+  assert(reaped.includes(cleanupSession.id), "The ordinary expired-session reaper did not finish pending cleanup.");
+  assert.equal(cleanupDestroyCalls, 2, "Reaper cleanup did not make exactly one later destroy attempt.");
+  const reapedCleanupSession = (await repository.getAgentSession(cleanupSession.id))!;
+  assert.equal(reapedCleanupSession.status, "checkpointed");
+  assert.equal(reapedCleanupSession.sandboxId, undefined, "Successful reaper cleanup retained the live sandbox binding.");
+  assert.equal(reapedCleanupSession.sandboxDeploymentId, undefined, "Successful reaper cleanup retained deployment affinity.");
+  assert.equal(reapedCleanupSession.currentWorkspaceRevisionId, cleanupRun.exactParentRevisionId);
+  assert.equal(reapedCleanupSession.publicBuildInputId, cleanupRun.publicBuildInputId);
+  assert.equal((await repository.getSite(input.siteId))!.currentWorkspaceRevisionId, retainedParent.id,
+    "Reaper cleanup changed the site's retained parent.");
+  console.log("Interrupted media recovery preserves source references and form authority; cleanup-pending edits retain their exact parent/input and defer teardown to the reaper; stale scope, missing/corrupt bytes, and storage failure fail closed before unsafe resume.");
 } finally {
   await rm(directory, { recursive: true, force: true });
 }
@@ -637,8 +813,11 @@ function fixtureRun(input: {
   publicBuildInputId: string;
   owner: string;
   deploymentId: string;
+  kind?: "initial_build" | "edit";
+  exactParentRevisionId?: string;
 }) {
   const now = new Date().toISOString();
+  const kind = input.kind ?? "initial_build";
   return siteAgentRunSchema.parse({
     schemaVersion: "site-agent-run",
     id: input.id,
@@ -648,7 +827,8 @@ function fixtureRun(input: {
     request: { kind: "owner_instruction", messageIds: [`message_${input.id}`] },
     origin: "owner_request",
     requestedBy: input.owner,
-    kind: "initial_build",
+    kind,
+    exactParentRevisionId: input.exactParentRevisionId,
     status: "queued",
     stage: "architecting",
     executionNumber: 1,
@@ -656,7 +836,7 @@ function fixtureRun(input: {
     apiProvider: "openai",
     modelId: "gpt-5.6-sol",
     skillVersions: {},
-    guardrails: siteAgentRunGuardrailsForKind("initial_build", now),
+    guardrails: siteAgentRunGuardrailsForKind(kind, now),
     usage: {
       inputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0, outputTokens: 0,
       costUsd: 0, costSource: "unavailable", upstreamInferenceCostUsd: 0, durationMs: 0

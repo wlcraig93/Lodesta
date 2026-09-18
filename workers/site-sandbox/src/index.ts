@@ -330,7 +330,7 @@ async function bootstrapWorkspace(
   sessionId: string,
   publicBuildInput: unknown
 ) {
-  await sandbox.killAllProcesses().catch(() => undefined);
+  await sandbox.killAllProcesses();
   const parsedPublicBuildInput = sitePublicBuildInputSchema.parse(publicBuildInput);
   const publicInputJson = canonicalJson(parsedPublicBuildInput);
   const revision = await digest(`${sessionId}:bootstrap:${sandboxToolchainIdentity}:${publicInputJson}`);

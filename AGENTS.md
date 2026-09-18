@@ -57,6 +57,14 @@ Lodesta is an AI-first managed website and local-presence platform for US small 
 - Use `.env.example` for documented placeholder configuration only.
 - Do not use production customer data in tests, fixtures, screenshots, or docs.
 
+## Standing Owner Authorization
+
+- Within the owner-approved product-improvement work, proceed without repeated approval requests for routine internal diagnostics, synthetic inquiries with external notifications disabled, private generation/editing tests, and bounded experiments using approved models and spend limits.
+- The owner authorizes sending retained prospect research, public business facts and photographs, provenance, generated source/helpers, site screenshots, form schemas, internal artifact IDs/hashes, and final reviewer findings to `api.openai.com` for these experiments. Exclude secrets, hidden reasoning, and production customer data. Do not use Astra for production authoring or these API experiments.
+- Scoped restarts/recovery of test or authoring sandboxes are authorized after verifying the exact target and active-work impact, provided retained data and artifacts are preserved. Verified commits and deployments within the already requested coordinated release workflow are also authorized.
+- Ask before contacting support or sending other external communications, publishing a customer site, deleting retained data, introducing a new data destination, or materially expanding scope or spend. Do not ask again for an exact action the owner has already approved.
+- Standing authorization does not bypass execution-policy controls, immutable-data protections, maintenance fences, or the canonical GitHub Actions deployment authority. The inactive-blue Worker-only redeploy approved on September 18, 2026 was a one-time exception, not a standing direct-deployment path.
+
 ## Prospect Research
 
 - Prospect enrichment is browser-only. Do not call the Google Places API, Google Maps Platform APIs, `places.googleapis.com`, or any paid Google business-data endpoint.

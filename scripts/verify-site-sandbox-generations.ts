@@ -63,6 +63,7 @@ await verifyBootstrapStartFailureShortCircuit();
 await verifyOperationJournalReads();
 await verifySubmissionJournalReadSafety();
 await verifyQueuedJournalRace();
+await verifyPreWorkLockOwnershipCleanup();
 await verifyPreparationObserver();
 await verifyAbandonedPreparationOwner();
 await verifyProcessStartJournalAmbiguity();
@@ -425,6 +426,94 @@ async function verifyQueuedJournalRace() {
   assert.equal(result, completed);
   assert.equal(reads, 2);
   assert.equal(released, 1);
+}
+
+async function verifyPreWorkLockOwnershipCleanup() {
+  class Conflict extends Error {
+    constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
+  }
+
+  const operationId = "e".repeat(64);
+  const queued = {
+    schemaVersion: 1,
+    operationId,
+    payloadHash: "payload",
+    status: "queued",
+    phase: "queued",
+    createdAt: "2026-09-18T18:58:23.718Z",
+    updatedAt: "2026-09-18T18:58:23.718Z",
+    phaseStartedAt: "2026-09-18T18:58:23.718Z",
+    timestamps: { queued: "2026-09-18T18:58:23.718Z" },
+    phaseTimings: {}
+  };
+
+  const readFailure = new TypeError("simulated post-acquisition journal read failure");
+  let reads = 0;
+  let lockOwned = false;
+  let releases = 0;
+  let transitions = 0;
+  let failures = 0;
+  const start = productionWorkerFunction("startQueuedOperation", {
+    readOperationJournal: async () => {
+      if (++reads === 1) return queued;
+      throw readFailure;
+    },
+    acquireMutationLock: async () => { lockOwned = true; },
+    mutationLock: "/fixture/mutation.lock",
+    transitionOperation: async () => { transitions++; return queued; },
+    failOperation: async () => { failures++; return queued; },
+    SandboxOperationError: Conflict
+  });
+  await assert.rejects(start({ exec: async (command: string) => {
+    assert.equal(command, "rm -rf /fixture/mutation.lock");
+    assert.equal(lockOwned, true, "A non-owner attempted to release the mutation lock.");
+    lockOwned = false;
+    releases++;
+    throw new TypeError("simulated committed removal response loss");
+  } }, "session", "https://sandbox.example", operationId), error => error === readFailure);
+  assert.equal(lockOwned, false, "A failed post-acquisition journal read stranded its owned lock.");
+  assert.equal(releases, 1, "The pre-work owner did not release its lock exactly once.");
+  assert.equal(transitions, 0, "A failed journal re-read entered preparation.");
+  assert.equal(failures, 0, "A read failure marked the retained queued journal failed.");
+
+  let competitorDeletes = 0;
+  const competitor = productionWorkerFunction("startQueuedOperation", {
+    readOperationJournal: async () => queued,
+    acquireMutationLock: async () => { throw new Conflict(409, { error: "operation_in_progress" }); },
+    mutationLock: "/fixture/mutation.lock",
+    SandboxOperationError: Conflict
+  });
+  assert.equal(await competitor({ exec: async () => { competitorDeletes++; return { success: true }; } },
+    "session", "https://sandbox.example", operationId), queued);
+  assert.equal(competitorDeletes, 0, "A lock competitor deleted another invocation's lock.");
+
+  const acquire = productionWorkerFunction("acquireMutationLock", {
+    sessionRoot: "/fixture",
+    mutationLock: "/fixture/mutation.lock",
+    readJson: async () => undefined,
+    SandboxOperationError: Conflict
+  });
+  const metadataFailure = new TypeError("simulated lock metadata write failure");
+  let metadataLockOwned = false;
+  let metadataReleases = 0;
+  await assert.rejects(acquire({
+    mkdir: async () => undefined,
+    exec: async (command: string) => {
+      if (command === "mkdir /fixture/mutation.lock") {
+        assert.equal(metadataLockOwned, false);
+        metadataLockOwned = true;
+        return { success: true };
+      }
+      assert.equal(command, "rm -rf /fixture/mutation.lock");
+      assert.equal(metadataLockOwned, true, "Metadata cleanup did not own the acquired lock.");
+      metadataLockOwned = false;
+      metadataReleases++;
+      return { success: true };
+    },
+    writeFile: async () => { throw metadataFailure; }
+  }, operationId), error => error === metadataFailure);
+  assert.equal(metadataLockOwned, false, "A lock metadata write failure stranded its owned lock.");
+  assert.equal(metadataReleases, 1, "A metadata write failure did not release its lock exactly once.");
 }
 
 async function verifyPreparationObserver() {

@@ -6,7 +6,17 @@ Date: 2026-09-18
 
 The generator is not yet accepted for customer launch. Earlier readiness statements below describe individual experiments, not demonstrated repeatability. The active standard and fixed evaluation sequence are in `docs/canonical-generator-quality-acceptance.md`.
 
-### Current checkpoint: editing startup failure isolated; inexpensive reviewers detect concrete defects
+### Current checkpoint: release succeeded; independent concurrency probe exposed an owned-lock cleanup gap
+
+Release `66c33a5aedd07ceec59d1cfdb64413b09bdf1eb5` passed CI `35381132325` and coordinated release `35381757416`. Both Railway services report that SHA, green sandbox deployment `sandbox_deployment_5321fe97e6e3bde39cb622e1c1043204` is active, deep health has no errors, and maintenance is released. The workflow's first canary passed, including destroy/recreate/restore/edit. Independent identity readback also passed after correcting the local checker's restricted network invocation; that local invocation failure is not a production failure.
+
+The separate fresh ten-pair concurrency probe then failed on zero-based pair 9: both identical applies timed out while their operation remained `queued` with its mutation lock held. It never reached its later destroy/restore test. The harness's final destroy call resolved; the real paid edit remains unqueued. This does not validate editing reliability, nor resolve the original blue instance still fenced in cleanup. Private evidence is under `.design/v4-production-readiness-2026-09-04/release-66c33a5a/`.
+
+A deterministic fixture reproduces one concrete cause of the observed state: a journal-read error after successful lock acquisition bypassed cleanup and left the lock held. The local correction adds only a single owner-only release attempt around that unguarded read and the lock-metadata write. It does not steal stale locks, retry cleanup, add a recovery layer, or change post-process ambiguous-write handling. The regression includes loss of the cleanup response and proves no second removal can delete a later owner's lock. Focused sandbox suites, typecheck, and the complete static/browser/sandbox preflight pass; deployment of this correction remains pending. The exact historical RPC failure is not proven by this reproduction.
+
+Parallel reviewer preparation remains separate: Sol/Terra defect detection is complete, direct Sol versus critique-assisted Luna repair is not yet established, and no accepted cost-per-repair result exists. The independent real edit packet has fresh before captures at 375/390/768/1280 but remains gated on verified infrastructure. No production critic, model-default change, retained-artifact rewrite, or customer publication is introduced.
+
+### Earlier checkpoint: editing startup failure isolated; inexpensive reviewers detect concrete defects
 
 Copy/context release `d4a7ab1040f11b166125b336ead10c54f7e2d4b8` completed the coordinated deployment and independent service/sandbox identity checks. Fresh Luna candidate `version_b840225ef6f54f73769bd2d5dc6ad081` cost $0.21602657 and passed its hard gate, but delivery review rejected false project-image associations, clipped mobile typography and remaining content/composition weaknesses. The matched fresh Sol run exhausted its cost fuse at $5.18598706 without an accepted candidate. These are catalog estimates, not invoice reconciliation; no production model selection follows from them.
 

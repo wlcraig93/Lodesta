@@ -566,7 +566,16 @@ async function startQueuedOperation(
   // A queued poll can wait behind the original execution until it completes.
   // Re-read under our exclusive lock; its earlier queued snapshot grants no
   // permission to overwrite a completed journal or rebuild an old revision.
-  const retained = await readOperationJournal(sandbox, operationId);
+  let retained: OperationJournal | undefined;
+  try {
+    retained = await readOperationJournal(sandbox, operationId);
+  } catch (error) {
+    // This invocation is the sole mkdir winner and no work has started yet.
+    // Make one removal attempt only; an ambiguous response must not be retried
+    // because a later poll may already own a replacement lock.
+    await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
+    throw error;
+  }
   if (!retained || retained.status !== "queued") {
     await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
     if (!retained) throw new SandboxOperationError(404, { error: "operation_not_found", operationId });
@@ -976,7 +985,15 @@ async function acquireMutationLock(sandbox: ReturnType<typeof getSandbox>, opera
   await sandbox.mkdir(sessionRoot, { recursive: true });
   const acquired = await sandbox.exec(`mkdir ${mutationLock}`);
   if (acquired.success) {
-    await sandbox.writeFile(`${mutationLock}/lock.json`, JSON.stringify({ operationId, startedAt: new Date().toISOString() }));
+    try {
+      await sandbox.writeFile(`${mutationLock}/lock.json`, JSON.stringify({ operationId, startedAt: new Date().toISOString() }));
+    } catch (error) {
+      // mkdir proves this invocation owns the fresh lock. Make one removal
+      // attempt before exposing the metadata failure; never retry an ambiguous
+      // removal and risk deleting a later owner's lock.
+      await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
+      throw error;
+    }
     return;
   }
   const lock = await readJson<{ operationId?: string; startedAt?: string }>(sandbox, `${mutationLock}/lock.json`).catch(() => undefined);

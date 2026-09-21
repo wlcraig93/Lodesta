@@ -291,11 +291,11 @@ export default {
       }
 
       if (request.method === "GET" && action === "diagnostics") {
-        const versions = await sandbox.exec("node --version && npm --version && npm exec --offline tsx -- --version && npm exec --offline vite -- --version", { cwd: workspaceRoot });
+        const versions = await sandbox.exec("node --version && npm --version && npm exec --offline tsx -- --version && npm exec --offline vite -- --version", { cwd: "/opt/lodesta-site-scaffold" });
         const manifestFile = await sandbox.readFile("/opt/lodesta-site-scaffold/lodesta-manifest.json", { encoding: "utf8" });
         const sandboxManifest = JSON.parse(manifestFile.content);
-        const generation = await readActiveGeneration(sandbox);
         const pointer = await sandbox.exec(`readlink ${activeLink}`);
+        const generation = pointer.success ? await readActiveGeneration(sandbox) : undefined;
         const lock = await readJson<{ operationId?: string; startedAt?: string }>(sandbox, `${mutationLock}/lock.json`).catch(() => undefined);
         const activeOperation = lock?.operationId && /^[a-f0-9]{64}$/.test(lock.operationId)
           ? await readOperationJournal(sandbox, lock.operationId).catch(() => undefined)
@@ -304,7 +304,7 @@ export default {
         try {
           return json({
             ok: versions.success,
-            revision: generation.revision,
+            revision: generation?.revision ?? "uninitialized",
             activeGeneration: generation,
             activeGenerationTarget: pointer.success ? pointer.stdout.trim() : undefined,
             mutationLock: lock,

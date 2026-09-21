@@ -247,19 +247,27 @@ export class SiteSandboxClient {
     if ("revision" in submitted) return { ...submitted, ...submissionTelemetry };
     const submissionReplayed = submissionAttempts === 2 || Boolean(submitted.submissionReplayed);
     const deadline = Date.now() + sandboxBuildRequestTimeoutMs;
-    const executed = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
-      sessionId,
-      `operations/${submitted.operationId}/execute`,
-      "POST",
-      undefined,
-      Math.max(1, deadline - Date.now())
-    );
-    if ("revision" in executed) {
-      return submissionReplayed
-        ? { ...executed, replayed: true, ...submissionTelemetry }
-        : { ...executed, ...submissionTelemetry };
+    let lastStatus: SandboxOperationStatus = submitted;
+    try {
+      const executed = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
+        sessionId,
+        `operations/${submitted.operationId}/execute`,
+        "POST",
+        undefined,
+        Math.max(1, deadline - Date.now())
+      );
+      if ("revision" in executed) {
+        return submissionReplayed
+          ? { ...executed, replayed: true, ...submissionTelemetry }
+          : { ...executed, ...submissionTelemetry };
+      }
+      lastStatus = executed;
+    } catch (error) {
+      // The execute request is the sole mutation owner and is never retried.
+      // A lost/5xx acknowledgement does not prove that owner stopped, so
+      // reconnect only through the read-only deterministic journal.
+      if (!isRetryableOperationSubmission(error)) throw error;
     }
-    let lastStatus = executed;
     let pollAttempts = 0;
     let journalResponses = 0;
     let transportErrors = 0;

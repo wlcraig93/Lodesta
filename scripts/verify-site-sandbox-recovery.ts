@@ -116,11 +116,14 @@ async function verifyInterruptedExecutorUsesControllerRecovery() {
         }
         return Response.json({ ok: true, operationId, status: "running", phase: "preparing" }, { status: 202 });
       }
-      assert(url.endsWith(`/operations/${operationId}/execute`));
-      events.push("interrupted-execute");
-      // Bound a broken implementation's test rather than waiting 210 seconds.
-      if (++firstExecutions > 1) throw new SiteSandboxRequestError("execute", currentSession, 400, "fixture_unexpected_second_execute", "The client retried after an explicit execution failure.");
-      return Response.json({ error: "sandbox_operation_failed", detail: "fixture connection interrupted" }, { status: 500 });
+      if (url.endsWith(`/operations/${operationId}/execute`)) {
+        events.push("interrupted-execute");
+        if (++firstExecutions > 1) throw new SiteSandboxRequestError("execute", currentSession, 400, "fixture_unexpected_second_execute", "The client retried after an explicit execution failure.");
+        return Response.json({ error: "sandbox_operation_failed", detail: "fixture execution acknowledgement interrupted" }, { status: 500 });
+      }
+      assert(url.endsWith(`/operations/${operationId}`));
+      events.push("interrupted-status");
+      return Response.json({ error: "sandbox_operation_failed", detail: "fixture controller confirms the interrupted sandbox is unusable" }, { status: 500 });
     };
     const actual = await executeWithFreshSandboxRecovery({
       attempt: () => client.apply(currentSession, "retained-revision", candidateFiles),
@@ -139,7 +142,7 @@ async function verifyInterruptedExecutorUsesControllerRecovery() {
     assert.equal(firstExecutions, 1);
     assert.equal(bodies.length, 2);
     assert.equal(bodies[0], bodies[1], "Controller recovery changed the retained revision or pending edit bytes.");
-    assert.deepEqual(events, ["apply:interrupted_sandbox", "interrupted-execute", "destroy-and-restore-checkpoint", "apply:recovered_sandbox"]);
+    assert.deepEqual(events, ["apply:interrupted_sandbox", "interrupted-execute", "interrupted-status", "destroy-and-restore-checkpoint", "apply:recovered_sandbox"]);
   } finally {
     globalThis.fetch = originalFetch;
   }

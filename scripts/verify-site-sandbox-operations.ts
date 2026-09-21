@@ -96,6 +96,7 @@ try {
   assert((recoveredSubmission.submissionPayloadBytes ?? 0) > 0);
 
   await verifyRequestBoundStatusBudget(client);
+  await verifyLostExecutorAcknowledgementPollsJournal(client);
   await verifyWorkerFailureLeavesPolling(client);
   await verifyFailureOnlyPollDiagnostic(client);
   await verifyConcurrentCanaryFailureCaptureBeforeDestroy(client);
@@ -109,6 +110,7 @@ try {
     duplicateSubmissionReplay: "pass",
     lostAcknowledgementRecovery: "pass",
     requestBoundStatusBudget: "pass",
+    lostExecutorAcknowledgementRecovery: "pass",
     workerFailureLeavesPolling: "pass",
     failureOnlyPollDiagnostic: "pass",
     concurrentCanaryFailureCaptureBeforeDestroy: "pass",
@@ -116,6 +118,25 @@ try {
   })}\n`);
 } finally {
   globalThis.fetch = originalFetch;
+}
+
+async function verifyLostExecutorAcknowledgementPollsJournal(client: SiteSandboxClient) {
+  let executeCalls = 0;
+  let statusCalls = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+    if (url.endsWith(`/operations/${operationId}/execute`)) {
+      executeCalls += 1;
+      return Response.json({ error: "sandbox_operation_failed", detail: "simulated lost executor acknowledgement" }, { status: 500 });
+    }
+    statusCalls += 1;
+    return Response.json({ ...operation("succeeded", "complete"), result });
+  };
+  const recovered = await client.apply("operation_test", "revision-before", source);
+  assert.equal(recovered.revision, result.revision);
+  assert.equal(executeCalls, 1, "A lost executor acknowledgement retried the mutation owner.");
+  assert.equal(statusCalls, 1, "A lost executor acknowledgement did not reconnect through the read-only journal.");
 }
 
 async function verifyWorkerFailureLeavesPolling(client: SiteSandboxClient) {

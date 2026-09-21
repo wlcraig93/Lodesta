@@ -100,6 +100,7 @@ try {
   await verifyMalformedExecutorAcknowledgementPollsJournal(client);
   await verifyTerminatedExecutorAcknowledgementPollsJournal(client);
   await verifyMalformedJournalResponseRecovers(client);
+  await verifyInvalidOperationContractsRecover(client);
   await verifyWorkerFailureLeavesPolling(client);
   await verifyFailureOnlyPollDiagnostic(client);
   await verifyConcurrentCanaryFailureCaptureBeforeDestroy(client);
@@ -117,6 +118,7 @@ try {
     malformedExecutorAcknowledgementRecovery: "pass",
     terminatedExecutorAcknowledgementRecovery: "pass",
     malformedJournalResponseRecovery: "pass",
+    invalidOperationContractRecovery: "pass",
     workerFailureLeavesPolling: "pass",
     failureOnlyPollDiagnostic: "pass",
     concurrentCanaryFailureCaptureBeforeDestroy: "pass",
@@ -201,6 +203,37 @@ async function verifyMalformedJournalResponseRecovers(client: SiteSandboxClient)
   assert.equal(recovered.revision, result.revision);
   assert.equal(executeCalls, 1, "A malformed journal response retried the mutation owner.");
   assert.equal(statusCalls, 2, "A malformed journal response did not recover through bounded polling.");
+}
+
+async function verifyInvalidOperationContractsRecover(client: SiteSandboxClient) {
+  let submitCalls = 0;
+  globalThis.fetch = async (input) => {
+    if (!String(input).endsWith("/apply")) throw new Error(`Unexpected request ${String(input)}`);
+    submitCalls += 1;
+    if (submitCalls === 1) return Response.json({}, { status: 202 });
+    return Response.json({ ...result, replayed: true });
+  };
+  const admitted = await client.apply("operation_test", "revision-before", source);
+  assert.equal(admitted.revision, result.revision);
+  assert.equal(submitCalls, 2, "An invalid admission contract did not use the bounded identical replay.");
+
+  let executeCalls = 0;
+  let statusCalls = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+    if (url.endsWith(`/operations/${operationId}/execute`)) {
+      executeCalls += 1;
+      return Response.json({}, { status: 202 });
+    }
+    statusCalls += 1;
+    if (statusCalls === 1) return Response.json({}, { status: 200 });
+    return Response.json({ ...operation("succeeded", "complete"), result });
+  };
+  const recovered = await client.apply("operation_test", "revision-before", source);
+  assert.equal(recovered.revision, result.revision);
+  assert.equal(executeCalls, 1, "An invalid executor contract retried the mutation owner.");
+  assert.equal(statusCalls, 2, "An invalid journal contract did not recover through bounded polling.");
 }
 
 async function verifyWorkerFailureLeavesPolling(client: SiteSandboxClient) {

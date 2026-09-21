@@ -217,13 +217,13 @@ export class SiteSandboxClient {
     let submissionRecoveryCause: string | undefined;
     let submitted: SandboxBuildSuccess | SandboxOperationStatus;
     try {
-      submitted = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
+      submitted = parseSandboxOperationResponse(await this.call<unknown>(
         sessionId,
         action,
         "POST",
         body,
         sandboxOperationSubmitTimeoutMs
-      );
+      ), action, sessionId);
     } catch (error) {
       if (!isRetryableOperationSubmission(error)) throw error;
       submissionAttempts = 2;
@@ -231,13 +231,13 @@ export class SiteSandboxClient {
       if (error instanceof SiteSandboxRequestError && error.providerCode === "operation_in_progress") {
         await wait(sandboxOperationReplayDelayMs);
       }
-      submitted = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
+      submitted = parseSandboxOperationResponse(await this.call<unknown>(
         sessionId,
         action,
         "POST",
         body,
         sandboxOperationSubmitTimeoutMs
-      );
+      ), action, sessionId);
     }
     const submissionTelemetry = {
       submissionAttempts,
@@ -250,13 +250,13 @@ export class SiteSandboxClient {
     const deadline = Date.now() + sandboxBuildRequestTimeoutMs;
     let lastStatus: SandboxOperationStatus = submitted;
     try {
-      const executed = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
+      const executed = parseSandboxOperationResponse(await this.call<unknown>(
         sessionId,
         `operations/${submitted.operationId}/execute`,
         "POST",
         undefined,
         Math.max(1, deadline - Date.now())
-      );
+      ), action, sessionId);
       if ("revision" in executed) {
         return submissionReplayed
           ? { ...executed, replayed: true, ...submissionTelemetry }
@@ -286,7 +286,7 @@ export class SiteSandboxClient {
       if (remainingMs <= 0) break;
       try {
         pollAttempts += 1;
-        lastStatus = await this.call<SandboxOperationStatus>(
+        lastStatus = parseSandboxOperationStatus(await this.call<unknown>(
           sessionId,
           `operations/${submitted.operationId}`,
           "GET",
@@ -294,7 +294,7 @@ export class SiteSandboxClient {
           // Status is observation-only; the execute request is the mutation's
           // sole preparation, build, and activation owner.
           Math.min(sandboxRequestTimeoutMs, remainingMs)
-        );
+        ), action, sessionId);
         journalResponses += 1;
       } catch (error) {
         if (error instanceof SiteSandboxRequestError && error.providerCode === "sandbox_transport_failed") {
@@ -416,6 +416,86 @@ function isRetryableOperationSubmission(error: unknown) {
   }
   const value = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   return /(?:abort|fetch failed|network|timeout|timed out|econnreset|socket hang up|temporarily unavailable)/i.test(value);
+}
+
+function parseSandboxOperationResponse(value: unknown, action: string, sessionId: string): SandboxBuildSuccess | SandboxOperationStatus {
+  if (isSandboxBuildSuccess(value) || isSandboxOperationStatus(value)) return value;
+  throw invalidSandboxResponse(action, sessionId);
+}
+
+function parseSandboxOperationStatus(value: unknown, action: string, sessionId: string): SandboxOperationStatus {
+  if (isSandboxOperationStatus(value)) return value;
+  throw invalidSandboxResponse(action, sessionId);
+}
+
+function invalidSandboxResponse(action: string, sessionId: string) {
+  return new SiteSandboxRequestError(
+    action,
+    sessionId,
+    502,
+    "sandbox_response_invalid",
+    "Sandbox returned a successful response with an invalid operation contract."
+  );
+}
+
+function isSandboxBuildSuccess(value: unknown): value is SandboxBuildSuccess {
+  if (!isRecord(value)) return false;
+  return value.ok === true
+    && isSha256Hex(value.revision)
+    && typeof value.previewUrl === "string"
+    && Number.isFinite(value.buildDurationMs)
+    && typeof value.placementId === "string"
+    && isSha256Hex(value.operationId)
+    && isSha256Hex(value.activeGenerationRevision)
+    && isDurationRecord(value.phaseTimings);
+}
+
+function isSandboxOperationStatus(value: unknown): value is SandboxOperationStatus {
+  if (!isRecord(value)
+    || typeof value.ok !== "boolean"
+    || !isSha256Hex(value.operationId)
+    || !isOperationStatusValue(value.status)
+    || !isOperationPhase(value.phase)
+    || !isIsoTimestampValue(value.createdAt)
+    || !isIsoTimestampValue(value.updatedAt)
+    || !isIsoTimestampValue(value.phaseStartedAt)
+    || !isTimestampRecord(value.timestamps)
+    || !isDurationRecord(value.phaseTimings)) return false;
+  if (value.status === "succeeded") return isSandboxBuildSuccess(value.result);
+  if (value.status === "failed") {
+    return isRecord(value.failure)
+      && Number.isInteger(value.failure.status)
+      && isRecord(value.failure.payload);
+  }
+  return true;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSha256Hex(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function isOperationStatusValue(value: unknown): value is SandboxOperationStatus["status"] {
+  return value === "queued" || value === "running" || value === "succeeded" || value === "failed";
+}
+
+function isOperationPhase(value: unknown): value is SandboxOperationStatus["phase"] {
+  return value === "queued" || value === "preparing" || value === "validating" || value === "compiling" || value === "promoting" || value === "complete";
+}
+
+function isIsoTimestampValue(value: unknown): value is string {
+  return typeof value === "string" && isIsoTimestamp(value);
+}
+
+function isTimestampRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every(isIsoTimestampValue);
+}
+
+function isDurationRecord(value: unknown): value is Record<string, number> {
+  return isRecord(value) && Object.values(value).every((duration) => typeof duration === "number" && Number.isFinite(duration) && duration >= 0);
 }
 
 function sanitizedSubmissionCause(error: unknown) {

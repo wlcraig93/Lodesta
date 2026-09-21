@@ -94,6 +94,8 @@ process.stdout.write(`${JSON.stringify({
 async function verifyInterruptedExecutorUsesControllerRecovery() {
   const originalFetch = globalThis.fetch;
   const operationId = "a".repeat(64);
+  const recoveredRevision = "b".repeat(64);
+  const now = "2026-09-21T12:00:00.000Z";
   const candidateFiles = [
     { path: "src/site.tsx", content: "export const siteDefinition = { routes: [{ path: '/', element: <main>Retained edit</main> }] };" },
     { path: "src/styles.css", content: "main{display:block}" }
@@ -112,9 +114,28 @@ async function verifyInterruptedExecutorUsesControllerRecovery() {
         bodies.push(String(init?.body));
         if (currentSession === "recovered_sandbox") {
           assert(recycled, "The candidate was replayed before disposal and checkpoint restoration.");
-          return Response.json({ ok: true, revision: "revision-after", operationId, activeGenerationRevision: "revision-after" });
+          return Response.json({
+            ok: true,
+            revision: recoveredRevision,
+            previewUrl: "http://127.0.0.1/v1/sessions/recovered_sandbox/preview/",
+            buildDurationMs: 1200,
+            placementId: "placement-recovered",
+            operationId,
+            activeGenerationRevision: recoveredRevision,
+            phaseTimings: { totalMs: 1200 }
+          });
         }
-        return Response.json({ ok: true, operationId, status: "running", phase: "preparing" }, { status: 202 });
+        return Response.json({
+          ok: true,
+          operationId,
+          status: "running",
+          phase: "preparing",
+          createdAt: now,
+          updatedAt: now,
+          phaseStartedAt: now,
+          timestamps: { preparing: now },
+          phaseTimings: {}
+        }, { status: 202 });
       }
       if (url.endsWith(`/operations/${operationId}/execute`)) {
         events.push("interrupted-execute");
@@ -138,7 +159,7 @@ async function verifyInterruptedExecutorUsesControllerRecovery() {
       recoveryReason: error => error instanceof SiteSandboxRequestError ? error.providerCode! : "unexpected",
       terminalError: error => error
     });
-    assert.equal(actual.revision, "revision-after");
+    assert.equal(actual.revision, recoveredRevision);
     assert.equal(firstExecutions, 1);
     assert.equal(bodies.length, 2);
     assert.equal(bodies[0], bodies[1], "Controller recovery changed the retained revision or pending edit bytes.");

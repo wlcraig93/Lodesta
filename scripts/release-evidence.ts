@@ -27,6 +27,24 @@ type CloudflareContainerApplication = {
   updated_at?: unknown;
 };
 
+type CloudflareContainerApplicationDetails = {
+  id?: unknown;
+  name?: unknown;
+  version?: unknown;
+  updated_at?: unknown;
+  max_instances?: unknown;
+  configuration?: { image?: unknown };
+  health?: {
+    errors?: unknown;
+    instances?: {
+      healthy?: unknown;
+      failed?: unknown;
+      scheduling?: unknown;
+      starting?: unknown;
+    };
+  };
+};
+
 type SandboxHealth = {
   ok?: unknown;
   provider?: unknown;
@@ -104,6 +122,51 @@ export function readyCloudflareContainer(value: unknown, applicationName: string
   return current;
 }
 
+export function readyCloudflareContainerDetails(
+  value: unknown,
+  applicationId: string,
+  applicationName: string,
+  expectedImageDigest: string
+) {
+  if (!/^sha256:[a-f0-9]{64}$/.test(expectedImageDigest)) {
+    throw new Error("Expected Cloudflare container image digest is malformed.");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Cloudflare container application details are malformed.");
+  }
+  const application = value as CloudflareContainerApplicationDetails;
+  const digest = typeof application.configuration?.image === "string"
+    ? application.configuration.image.match(/@(sha256:[a-f0-9]{64})$/)?.[1]
+    : undefined;
+  const health = application.health?.instances;
+  const errors = application.health?.errors;
+  if (application.id !== applicationId || application.name !== applicationName
+    || typeof application.version !== "number" || typeof application.updated_at !== "string"
+    || typeof application.max_instances !== "number" || !digest
+    || !Array.isArray(errors) || !health || typeof health.healthy !== "number"
+    || typeof health.failed !== "number" || typeof health.scheduling !== "number"
+    || typeof health.starting !== "number") {
+    throw new Error(`Cloudflare container application ${applicationName} did not report valid detailed status.`);
+  }
+  if (digest !== expectedImageDigest) {
+    throw new Error(
+      `Cloudflare container application ${applicationName} reports ${digest}, expected ${expectedImageDigest}.`
+    );
+  }
+  if (errors.length || health.failed || health.scheduling || health.starting || health.healthy < 1) {
+    throw new Error(`Cloudflare container application ${applicationName} has not reached healthy detailed status.`);
+  }
+  return {
+    applicationId,
+    applicationName,
+    applicationVersion: application.version,
+    imageDigest: digest,
+    updatedAt: application.updated_at,
+    healthyInstances: health.healthy,
+    maxInstances: application.max_instances
+  };
+}
+
 export function currentRailwayDeployment(value: unknown) {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error("Railway returned no deployments.");
@@ -145,7 +208,7 @@ if (basename(process.argv[1] ?? "") === "release-evidence.ts") {
   const command = process.argv[2];
   const file = process.argv[3];
   if (!command || !file) {
-    throw new Error("Usage: release-evidence.ts <current-cloudflare|current-cloudflare-container|ready-cloudflare-container|deployed-cloudflare|current-railway|current-sandbox-health> <input-file> [application-name] [expected-image-digest]");
+    throw new Error("Usage: release-evidence.ts <current-cloudflare|current-cloudflare-container|ready-cloudflare-container|ready-cloudflare-container-details|deployed-cloudflare|current-railway|current-sandbox-health> <input-file> [application-id|application-name] [application-name|expected-image-digest] [expected-image-digest]");
   }
   const source = await readFile(file, "utf8");
   const result = command === "current-cloudflare"
@@ -154,6 +217,13 @@ if (basename(process.argv[1] ?? "") === "release-evidence.ts") {
       ? currentCloudflareContainer(JSON.parse(source), process.argv[4] ?? "")
     : command === "ready-cloudflare-container"
       ? readyCloudflareContainer(JSON.parse(source), process.argv[4] ?? "", process.argv[5] ?? "")
+    : command === "ready-cloudflare-container-details"
+      ? readyCloudflareContainerDetails(
+          JSON.parse(source),
+          process.argv[4] ?? "",
+          process.argv[5] ?? "",
+          process.argv[6] ?? ""
+        )
     : command === "deployed-cloudflare"
       ? deployedCloudflareRelease(source)
       : command === "current-railway"

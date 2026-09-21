@@ -228,6 +228,9 @@ assert(
     && !productionRelease.includes("restore both prior Railway"),
   "Post-promotion failure must atomically restore only the previous sandbox pointer."
 );
+assert(productionRelease.includes("wrangler containers info \"$application_id\"")
+  && productionRelease.includes("ready-cloudflare-container-details"),
+"Production release must validate the exact Cloudflare container application record, not rely on the stale list view.");
 assert(productionRollback.includes("environment: production")
   && productionRollback.includes("group: production-release")
   && productionRollback.includes("sandbox_deployment_id")

@@ -97,6 +97,9 @@ try {
 
   await verifyRequestBoundStatusBudget(client);
   await verifyLostExecutorAcknowledgementPollsJournal(client);
+  await verifyMalformedExecutorAcknowledgementPollsJournal(client);
+  await verifyTerminatedExecutorAcknowledgementPollsJournal(client);
+  await verifyMalformedJournalResponseRecovers(client);
   await verifyWorkerFailureLeavesPolling(client);
   await verifyFailureOnlyPollDiagnostic(client);
   await verifyConcurrentCanaryFailureCaptureBeforeDestroy(client);
@@ -111,6 +114,9 @@ try {
     lostAcknowledgementRecovery: "pass",
     requestBoundStatusBudget: "pass",
     lostExecutorAcknowledgementRecovery: "pass",
+    malformedExecutorAcknowledgementRecovery: "pass",
+    terminatedExecutorAcknowledgementRecovery: "pass",
+    malformedJournalResponseRecovery: "pass",
     workerFailureLeavesPolling: "pass",
     failureOnlyPollDiagnostic: "pass",
     concurrentCanaryFailureCaptureBeforeDestroy: "pass",
@@ -137,6 +143,64 @@ async function verifyLostExecutorAcknowledgementPollsJournal(client: SiteSandbox
   assert.equal(recovered.revision, result.revision);
   assert.equal(executeCalls, 1, "A lost executor acknowledgement retried the mutation owner.");
   assert.equal(statusCalls, 1, "A lost executor acknowledgement did not reconnect through the read-only journal.");
+}
+
+async function verifyMalformedExecutorAcknowledgementPollsJournal(client: SiteSandboxClient) {
+  let executeCalls = 0;
+  let statusCalls = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+    if (url.endsWith(`/operations/${operationId}/execute`)) {
+      executeCalls += 1;
+      return new Response("{", { status: 202, headers: { "content-type": "application/json" } });
+    }
+    statusCalls += 1;
+    return Response.json({ ...operation("succeeded", "complete"), result });
+  };
+  const recovered = await client.apply("operation_test", "revision-before", source);
+  assert.equal(recovered.revision, result.revision);
+  assert.equal(executeCalls, 1, "A malformed executor acknowledgement retried the mutation owner.");
+  assert.equal(statusCalls, 1, "A malformed executor acknowledgement did not reconnect through the read-only journal.");
+}
+
+async function verifyTerminatedExecutorAcknowledgementPollsJournal(client: SiteSandboxClient) {
+  let executeCalls = 0;
+  let statusCalls = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+    if (url.endsWith(`/operations/${operationId}/execute`)) {
+      executeCalls += 1;
+      throw new TypeError("terminated");
+    }
+    statusCalls += 1;
+    return Response.json({ ...operation("succeeded", "complete"), result });
+  };
+  const recovered = await client.apply("operation_test", "revision-before", source);
+  assert.equal(recovered.revision, result.revision);
+  assert.equal(executeCalls, 1, "A terminated executor acknowledgement retried the mutation owner.");
+  assert.equal(statusCalls, 1, "A terminated executor acknowledgement did not reconnect through the read-only journal.");
+}
+
+async function verifyMalformedJournalResponseRecovers(client: SiteSandboxClient) {
+  let executeCalls = 0;
+  let statusCalls = 0;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+    if (url.endsWith(`/operations/${operationId}/execute`)) {
+      executeCalls += 1;
+      return Response.json(operation("running", "compiling"), { status: 202 });
+    }
+    statusCalls += 1;
+    if (statusCalls === 1) return new Response("{", { status: 200, headers: { "content-type": "application/json" } });
+    return Response.json({ ...operation("succeeded", "complete"), result });
+  };
+  const recovered = await client.apply("operation_test", "revision-before", source);
+  assert.equal(recovered.revision, result.revision);
+  assert.equal(executeCalls, 1, "A malformed journal response retried the mutation owner.");
+  assert.equal(statusCalls, 2, "A malformed journal response did not recover through bounded polling.");
 }
 
 async function verifyWorkerFailureLeavesPolling(client: SiteSandboxClient) {

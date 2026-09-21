@@ -101,7 +101,8 @@ export class SiteSandboxRequestError extends Error {
     readonly status: number,
     readonly providerCode: string | undefined,
     diagnostics: string,
-    readonly operationPollDiagnostic?: SandboxOperationPollDiagnostic
+    readonly operationPollDiagnostic?: SandboxOperationPollDiagnostic,
+    readonly transportCause?: string
   ) {
     super(`${action} failed (${status}): ${providerCode ?? "unknown"}${diagnostics ? `:\n${diagnostics}` : ""}`);
   }
@@ -296,7 +297,10 @@ export class SiteSandboxClient {
         );
         journalResponses += 1;
       } catch (error) {
-        if (error instanceof SiteSandboxRequestError) {
+        if (error instanceof SiteSandboxRequestError && error.providerCode === "sandbox_transport_failed") {
+          transportErrors += 1;
+          lastPollError = { kind: "transport", name: error.transportCause ?? "transport_failure" };
+        } else if (error instanceof SiteSandboxRequestError) {
           httpErrors += 1;
           lastPollError = {
             kind: "http",
@@ -345,7 +349,9 @@ export class SiteSandboxClient {
   private async call<T>(sessionId: string, action: string, method: "GET" | "POST", body?: unknown, timeoutMs = sandboxRequestTimeoutMs): Promise<T> {
     if (!/^[a-z0-9_-]{1,80}$/.test(sessionId)) throw new Error("Sandbox session ID is invalid.");
     await this.beforeRequest?.();
-    const response = await fetch(`${this.baseUrl.replace(/\/$/, "")}/v1/sessions/${sessionId}/${action}`, {
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl.replace(/\/$/, "")}/v1/sessions/${sessionId}/${action}`, {
         method,
         headers: {
           authorization: `Bearer ${this.token}`,
@@ -354,7 +360,41 @@ export class SiteSandboxClient {
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs)
       });
-    const payload = await response.json().catch(() => undefined) as (T & { error?: string; detail?: string; stdout?: string; stderr?: string; currentRevision?: string }) | undefined;
+    } catch (error) {
+      const transportCause = sanitizedTransportErrorName(error);
+      throw new SiteSandboxRequestError(
+        action,
+        sessionId,
+        502,
+        "sandbox_transport_failed",
+        `cause=${transportCause}`,
+        undefined,
+        transportCause
+      );
+    }
+    let payload: (T & { error?: string; detail?: string; stdout?: string; stderr?: string; currentRevision?: string }) | undefined;
+    try {
+      payload = await response.json() as typeof payload;
+    } catch {
+      if (response.ok) {
+        throw new SiteSandboxRequestError(
+          action,
+          sessionId,
+          502,
+          "sandbox_response_invalid",
+          "Sandbox returned a malformed successful response."
+        );
+      }
+    }
+    if (response.ok && (!payload || typeof payload !== "object" || Array.isArray(payload))) {
+      throw new SiteSandboxRequestError(
+        action,
+        sessionId,
+        502,
+        "sandbox_response_invalid",
+        "Sandbox returned an invalid successful response."
+      );
+    }
     if (!response.ok) {
       const diagnostics = [
         payload?.currentRevision ? `currentRevision=${payload.currentRevision}` : undefined,
@@ -379,7 +419,7 @@ function isRetryableOperationSubmission(error: unknown) {
 }
 
 function sanitizedSubmissionCause(error: unknown) {
-  if (error instanceof SiteSandboxRequestError) return error.providerCode ?? `http_${error.status}`;
+  if (error instanceof SiteSandboxRequestError) return error.transportCause ?? error.providerCode ?? `http_${error.status}`;
   if (error instanceof Error && error.name) return error.name.slice(0, 80);
   return "transport_failure";
 }
@@ -422,6 +462,8 @@ const sandboxDiagnosticProviderCodes = new Set([
   "revision_conflict",
   "sandbox_not_found",
   "sandbox_operation_failed",
+  "sandbox_response_invalid",
+  "sandbox_transport_failed",
   "session_not_found",
   "source_file_limit",
   "source_path_violation",

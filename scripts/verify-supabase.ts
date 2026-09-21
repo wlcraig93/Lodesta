@@ -72,7 +72,8 @@ assert.deepEqual(
     "202608230001_canonical_site_quality.sql",
     "202609060001_site_publication_timestamp.sql",
     "202609070001_privacy_minimal_analytics.sql",
-    "202609100001_atomic_prepared_source_input_finalization.sql"
+    "202609100001_atomic_prepared_source_input_finalization.sql",
+    "202609210001_retire_cloudflare_sandbox_control.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );

@@ -2,7 +2,7 @@
 
 Lodesta is an AI-first managed website and local-presence platform for US small businesses. The product is pre-launch. Suitable local businesses can generate sites without a configured domain module; auto body currently has the only optional production context enrichment.
 
-The current website system uses canonical business data, one website manager agent, shared Lodesta capabilities, isolated Cloudflare builds, immutable site artifacts, and Railway/Next.js serving. It does not use presentation templates, copy slots, a planner/compiler design system, or per-vertical generator branches.
+The current website system uses canonical business data, one website manager agent, shared Lodesta capabilities, isolated Railway sandboxes, immutable site artifacts, and Railway/Next.js serving. It does not use presentation templates, copy slots, a planner/compiler design system, or per-vertical generator branches.
 
 The canonical architecture and implementation sequence are documented in [docs/product-path-simplification-plan.md](docs/product-path-simplification-plan.md).
 
@@ -12,8 +12,8 @@ The canonical architecture and implementation sequence are documented in [docs/p
 - `packages/acquisition`: Website Health Reports, outbound campaigns, prospects, adoption, and their worker.
 - `packages/vertical-context`: non-executable auto-body context plus a test-only extensibility module.
 - `packages/site-agent`: the single website-authoring agent, its tools, and knowledge skills.
-- `packages/site-sandbox`: authenticated client for the Cloudflare Sandbox bridge.
-- `workers/site-sandbox`: deny-by-default, prebaked Cloudflare build environment.
+- `packages/site-sandbox`: Railway sandbox client used to build and edit a site.
+- `workers/site-sandbox`: the site compiler copied into each Railway sandbox.
 - `workers/recovery-watchdog`: stateless fifteen-minute recovery trigger for the Railway web service.
 - `packages/site-verification`: sanitizer, factual-claim validation, browser gate, contact sheets, and finalization.
 - `packages/site-artifacts`: content-addressed local or R2 artifact storage.
@@ -32,13 +32,13 @@ npm install
 npm run dev
 ```
 
-The app runs at `http://localhost:4330` by default. Development and production use the same immutable blue-green sandbox lifecycle with separate physical workers and credentials. `npm run dev` verifies the active nonproduction deployment; when sandbox inputs change, it deploys and canaries the drained inactive development slot, registers its exact Worker version, image, and manifest, atomically promotes it, and only then starts Next.js and the authoring worker. Slot credentials and deployment receipts are local and gitignored. The first run requires a one-time Cloudflare login; ordinary application changes skip sandbox deployment entirely. Local authoring never falls back to production workers.
+The app runs at `http://localhost:4330` by default. `npm run dev` starts Next.js and the authoring worker. Site builds run in a Railway sandbox created for that session.
 
-`npm run dev:worker` is an explicit operator command that polls and mutates the shared queues and recovery state; normal development never starts it automatically. Production uses the web process plus the scheduled Cloudflare recovery watchdog, not a persistent Railway worker.
+`npm run dev:worker` is an explicit operator command that polls and mutates the shared queues and recovery state; normal development never starts it automatically. Production runs the Railway web service and the Railway authoring worker, with the scheduled Cloudflare recovery watchdog as the recovery trigger.
 
 For read-only local UI inspection without a browser sign-in, use `npm run dev:inspect`. The inspection launcher accepts only a loopback `HOST`, disables Supabase browser auth and admin-token access for that process, and does not start the background worker. Admin and owner pages remain available in the existing `local_open` mode, while mutating API requests remain unauthorized. Use the normal signed-in development flow whenever testing authentication, ownership, creation, publishing, or another write path.
 
-`npm run start` is the guarded local production-build launcher and clears production sandbox and recovery provenance. Railway alone uses `npm run start:production` with the release workflow's exact SHA and sandbox digest.
+`npm run start` is the guarded local production-build launcher and clears hosted release provenance. Railway alone uses `npm run start:production` with the release workflow's exact SHA.
 
 Important surfaces:
 
@@ -55,7 +55,7 @@ Important surfaces:
 - `/workspace/:slug/settings`: proof-first custom domains, redirects, and access.
 - `/sites/:slug/*`: published immutable site artifact.
 
-Copy `.env.example` to local environment configuration and provide real values outside git. Website generation requires OpenAI, Supabase, Cloudflare Sandbox, and artifact-storage credentials. Synthetic test inputs are constructed at runtime and are never visual baselines.
+Copy `.env.example` to local environment configuration and provide real values outside git. Website generation requires OpenAI, Supabase, a Railway sandbox token, and artifact-storage credentials. Synthetic test inputs are constructed at runtime and are never visual baselines.
 
 ## Verification
 
@@ -88,11 +88,11 @@ Product refinement uses the same signed-in `/account/onboarding` flow as custome
 
 ## Deployment
 
-Railway hosts the Next.js web service and worker. Supabase stores canonical authorities, the compact source manifest, the page-level text index, and operational records. R2 stores content-addressed website response bodies, assets, workspace archives, runtime patches, and finalized site bytes. Cloudflare Sandbox runs untrusted website builds; Cloudflare for SaaS remains the custom-domain integration.
+Railway hosts the Next.js web service and worker. Supabase stores canonical authorities, the compact source manifest, the page-level text index, and operational records. R2 stores content-addressed website response bodies, assets, workspace archives, runtime patches, and finalized site bytes. Railway sandboxes run website builds. Cloudflare for SaaS remains the custom-domain integration, and Cloudflare Workers still host the artifact broker and recovery watchdog.
 
 Required service configuration is documented in `.env.example`. Run `npm run verify:deployment-config` after package or Railway configuration changes. Use `/api/health` for liveness and the authenticated deep health check for service readiness.
 
-Controller and site-sandbox production changes are released only through the serialized post-CI GitHub workflow documented in [docs/production-release.md](docs/production-release.md). Railway GitHub autodeploy remains disabled so Cloudflare verification always precedes deployment of the exact same commit to Railway.
+Controller changes are released only through the serialized post-CI GitHub workflow documented in [docs/production-release.md](docs/production-release.md). Railway GitHub autodeploy remains disabled so the release workflow deploys the exact same commit to both Railway services.
 
 The application schema is created from the canonical baseline followed by the reviewed forward migrations under `supabase/migrations`. Strict immutable authorities are never rewritten in place. Regenerable operational records use canonical unversioned names; the application has no compatibility readers or dual-write paths.
 

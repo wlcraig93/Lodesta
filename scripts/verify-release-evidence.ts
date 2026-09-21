@@ -9,7 +9,6 @@ import {
   readyCloudflareContainerDetails
 } from "./release-evidence";
 import { expectedSiteSandboxManifest } from "../packages/site-contracts";
-import { probeSiteSandboxContainerReadiness } from "./probe-site-sandbox-container-readiness";
 
 assert.deepEqual(currentCloudflareDeployment([
   {
@@ -179,43 +178,4 @@ assert.throws(() => currentSandboxHealth({
   sandboxManifest: "invalid"
 }), /malformed sandbox manifest/i);
 
-const destroyedSessions: string[] = [];
-const readiness = await probeSiteSandboxContainerReadiness({
-  diagnostics: async () => ({
-    ok: false,
-    revision: "uninitialized",
-    versions: [],
-    sandboxManifest: expectedSiteSandboxManifest,
-    placementId: "candidate-placement",
-    processes: []
-  }),
-  destroy: async (sessionId) => {
-    destroyedSessions.push(sessionId);
-    return { ok: true };
-  }
-}, "readiness_fixture", expectedSiteSandboxManifest);
-assert.equal(readiness.observation, "container_manifest_read");
-assert.equal(readiness.placementId, "candidate-placement");
-assert.deepEqual(destroyedSessions, ["readiness_fixture"]);
-
-let staleReadinessDestroyed = false;
-await assert.rejects(
-  () => probeSiteSandboxContainerReadiness({
-    diagnostics: async () => ({
-      ok: true,
-      revision: "uninitialized",
-      versions: [],
-      sandboxManifest: { ...expectedSiteSandboxManifest, toolchainIdentity: "stale-toolchain" },
-      placementId: "stale-placement",
-      processes: []
-    }),
-    destroy: async () => {
-      staleReadinessDestroyed = true;
-      return { ok: true };
-    }
-  }, "stale_readiness_fixture", expectedSiteSandboxManifest),
-  /does not match/i
-);
-assert.equal(staleReadinessDestroyed, true, "A rejected readiness probe did not destroy its fresh sandbox.");
-
-process.stdout.write(`${JSON.stringify({ ok: true, checks: ["cloudflare-current", "cloudflare-container-current", "cloudflare-container-ready", "cloudflare-container-details-ready", "cloudflare-deploy", "sandbox-container-serving", "railway-current", "sandbox-health"] })}\n`);
+process.stdout.write(`${JSON.stringify({ ok: true, checks: ["cloudflare-current", "cloudflare-container-current", "cloudflare-container-ready", "cloudflare-container-details-ready", "cloudflare-deploy", "railway-current", "sandbox-health"] })}\n`);

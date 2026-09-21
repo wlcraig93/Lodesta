@@ -1,8 +1,0 @@
-node_modules
-scaffold/node_modules
-scaffold/dist
-scaffold/.lodesta
-.wrangler
-.data
-*.log
-.DS_Store

@@ -24,26 +24,6 @@ const changed = fingerprintSiteToolchainEntries([
 assert.equal(first, reordered, "Toolchain fingerprint depends on filesystem enumeration order.");
 assert.notEqual(first, changed, "Toolchain fingerprint did not change when a source input changed.");
 const result = await synchronizeSiteSandboxManifest({ mode: "check" });
-const packageLock = JSON.parse(await readFile("package-lock.json", "utf8")) as {
-  packages?: Record<string, { version?: string }>;
-};
-const sandboxSdkVersion = packageLock.packages?.["node_modules/@cloudflare/sandbox"]?.version;
-const sandboxDockerfile = await readFile("workers/site-sandbox/Dockerfile", "utf8");
-const sandboxWorkerSource = await readFile("workers/site-sandbox/src/index.ts", "utf8");
-const sandboxImageVersion = sandboxDockerfile.match(/^FROM docker\.io\/cloudflare\/sandbox:([^\s@]+)(?:@\S+)?$/m)?.[1];
-const sandboxImageDigest = sandboxDockerfile.match(/^FROM docker\.io\/cloudflare\/sandbox:[^\s@]+@(sha256:[a-f0-9]{64})$/m)?.[1];
-assert.ok(sandboxSdkVersion, "The installed @cloudflare/sandbox SDK version is unavailable.");
-assert.equal(
-  sandboxImageVersion,
-  sandboxSdkVersion,
-  "The Cloudflare Sandbox SDK and container image versions must match exactly."
-);
-assert.ok(sandboxImageDigest, "The Cloudflare Sandbox base image must be pinned by digest.");
-assert.match(
-  sandboxWorkerSource,
-  /async function sandboxFor[\s\S]*await sandbox\.setSleepAfter\("15m"\);[\s\S]*await sandbox\.setKeepAlive\(false\);/,
-  "Sandbox lifecycle configuration must complete before filesystem work begins."
-);
 
 const fixtureRoot = await mkdtemp(join(tmpdir(), "lodesta-sandbox-manifest-"));
 try {
@@ -54,11 +34,7 @@ try {
   await cp("packages/site-contracts", join(fixtureRoot, "packages/site-contracts"), { recursive: true });
   const fixtureIdentity = await computeSiteToolchainIdentity(fixtureRoot);
   for (const relativePath of [
-    "workers/site-sandbox/Dockerfile",
-    "workers/site-sandbox/.dockerignore",
-    "workers/site-sandbox/src/index.ts",
-    "workers/site-sandbox/wrangler.blue.jsonc",
-    "workers/site-sandbox/wrangler.green.jsonc",
+    "workers/site-sandbox/src/initial-source.ts",
     "workers/site-sandbox/scaffold/package-lock.json",
     "workers/site-sandbox/scaffold/vite.config.ts"
   ]) {
@@ -71,17 +47,6 @@ try {
       `${relativePath} did not change the production identity.`
     );
     await writeFile(target, original);
-  }
-  for (const slot of ["blue", "green"]) {
-    const devConfig = join(fixtureRoot, `workers/site-sandbox/wrangler.dev.${slot}.jsonc`);
-    const original = await readFile(devConfig, "utf8");
-    await writeFile(devConfig, `${original}\n// development-only change\n`);
-    assert.equal(
-      await computeSiteToolchainIdentity(fixtureRoot),
-      fixtureIdentity,
-      `Development ${slot} Wrangler configuration changed the production identity.`
-    );
-    await writeFile(devConfig, original);
   }
   const controllerClient = join(fixtureRoot, "packages/site-sandbox/client.ts");
   await mkdir(join(fixtureRoot, "packages/site-sandbox"), { recursive: true });
@@ -108,10 +73,6 @@ process.stdout.write(`${JSON.stringify({
   identity: result.identity,
   deterministic: true,
   changedInput: true,
-  developmentConfigIndependent: true,
-  workerBridgeCovered: true,
-  sandboxSdkImageVersionAligned: true,
-  sandboxImageDigestPinned: true,
-  sandboxLifecycleConfigurationAwaited: true,
+  controllerIndependent: true,
   rejectsModifiedGeneratedFile: true
 })}\n`);

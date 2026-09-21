@@ -34,9 +34,9 @@ const [source, packageJsonSource, env, gitignore] = await Promise.all([
 ]);
 const packageJson = JSON.parse(packageJsonSource) as { scripts?: Record<string, string> };
 
-const responseEvidenceMatch = source.match(/function publishedResponseEvidence[\s\S]*?\n}\n\nasync function canarySandboxProvenance/);
+const responseEvidenceMatch = source.match(/function publishedResponseEvidence[\s\S]*?\n}\n\nfunction step/);
 assert(responseEvidenceMatch, "The canary response-evidence helper was not found.");
-const responseEvidenceSource = responseEvidenceMatch[0].replace(/\nasync function canarySandboxProvenance$/, "");
+const responseEvidenceSource = responseEvidenceMatch[0].replace(/\nfunction step$/, "");
 const responseEvidenceBuild = await build({
   stdin: {
     contents: `${responseEvidenceSource}\nexport { publishedResponseEvidence };`,
@@ -239,8 +239,7 @@ for (const requiredBehavior of [
   "cleanupCanaryState",
   '"service_role_fallback"',
   '".data", "owner-journey"',
-  "readDevelopmentSandboxReceipt",
-  "active_deployment_id",
+  "authoringSandbox: \"railway\"",
   '"atomic_project_handoff"',
   '"published_lead_delivery"',
   "verifyPublishedLead",

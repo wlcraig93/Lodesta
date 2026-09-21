@@ -68,10 +68,7 @@ import {
 } from "@/packages/site-agent";
 import {
   configuredRailwayAuthoringSandbox,
-  configuredSiteSandboxClient,
-  configuredSiteSandboxClientForDeployment,
   isConfirmedSandboxAbsent,
-  isRailwaySandboxId,
   isUninitializedSandboxRevision,
   SiteSandboxArtifactContractError,
   SiteSandboxRequestError,
@@ -111,7 +108,6 @@ import {
   type SiteAgentPrincipal,
   type SiteAgentSession,
   type SiteAgentWorkspaceCheckpoint,
-  type SiteSandboxDeployment,
   type SiteBuildArtifact,
   type SiteElementSelection,
   type PlatformSiteRecord,
@@ -209,11 +205,10 @@ export class SiteAuthoringWorkflow {
     sandbox?: AuthoringSandbox,
     private readonly manager = new WebsiteManagerAgent(),
     private readonly operationsRepository: PlatformOperationsRepository = platformOperationsRepository,
-    private readonly imageCreator: typeof createImageBytes = createImageBytes,
-    private readonly pinnedSandboxDeployment?: SiteSandboxDeployment
+    private readonly imageCreator: typeof createImageBytes = createImageBytes
   ) {
     this.sandboxWasInjected = Boolean(sandbox);
-    this.sandbox = sandbox ?? lazyExternalClient(configuredSiteSandboxClient);
+    this.sandbox = sandbox ?? lazyExternalClient(() => configuredRailwayAuthoringSandbox(this.blobStore));
   }
 
   async bootstrapFromUrl(input: {
@@ -266,7 +261,7 @@ export class SiteAuthoringWorkflow {
       principal: { kind: "owner", id: input.ownerId },
       status: "active",
       publicBuildInputId: buildInput.id,
-      sandboxProvider: "cloudflare",
+      sandboxProvider: "railway",
       leaseTokenHash: sha256(randomBytes(32)),
       leaseExpiresAt: new Date(Date.parse(now) + idleLeaseMs).toISOString(),
       rotateAt: new Date(Date.parse(now) + rotationMs).toISOString(),
@@ -759,7 +754,7 @@ export class SiteAuthoringWorkflow {
       status: "active",
       currentWorkspaceRevisionId: site.currentWorkspaceRevisionId,
       publicBuildInputId: buildInput.id,
-      sandboxProvider: "cloudflare",
+      sandboxProvider: "railway",
       sandboxId: undefined,
       leaseTokenHash: sha256(randomBytes(32)),
       leaseExpiresAt: new Date(now.getTime() + idleLeaseMs).toISOString(),
@@ -946,23 +941,16 @@ export class SiteAuthoringWorkflow {
           }
         });
       }
-      if (!this.pinnedSandboxDeployment && !this.sandboxWasInjected) {
-        if (!run.sandboxDeploymentId) throw new Error("claimed_run_sandbox_deployment_missing");
-        const deployment = await this.repository.getSandboxDeployment(run.sandboxDeploymentId);
-        if (!deployment) throw new Error("claimed_run_sandbox_deployment_missing");
+      if (!this.sandboxWasInjected) {
         const scoped = new SiteAuthoringWorkflow(
           this.repository,
           this.blobStore,
           configuredRailwayAuthoringSandbox(this.blobStore),
           this.manager,
           this.operationsRepository,
-          this.imageCreator,
-          deployment
+          this.imageCreator
         );
         return scoped.executeRun(runId, selection, run);
-      }
-      if (this.pinnedSandboxDeployment && run.sandboxDeploymentId !== this.pinnedSandboxDeployment.id) {
-        throw new Error("run_sandbox_deployment_scope_mismatch");
       }
       if (!run.guardrails) throw new Error("responses_run_guardrails_required");
       deadlineAt = Date.parse(run.guardrails.deadlineAt);
@@ -3871,7 +3859,6 @@ export class SiteAuthoringWorkflow {
     reuseAttached?: boolean;
   }): Promise<SiteAgentWorkspaceCheckpoint> {
     const { run, session, buildInput, now } = input;
-    if (!run.sandboxDeploymentId) throw new Error("checkpoint_sandbox_deployment_missing");
     if (!session.sandboxId
       || session.sandboxDeploymentId !== run.sandboxDeploymentId
       || session.currentWorkspaceRevisionId !== run.exactParentRevisionId
@@ -3998,7 +3985,6 @@ export class SiteAuthoringWorkflow {
   }
 
   private async pauseRunForInput(run: SiteAgentRun, question: string, now: string) {
-    if (!run.sandboxDeploymentId) throw new Error("checkpoint_sandbox_deployment_missing");
     const [session, buildInput] = await Promise.all([
       this.requireSession(run.sessionId),
       this.requireBuildInput(run.publicBuildInputId)
@@ -4098,28 +4084,17 @@ export class SiteAuthoringWorkflow {
   }
 
   private expectedSandboxManifest() {
-    if (this.sandboxWasInjected && typeof this.sandbox.provision === "function") return expectedSiteSandboxManifest;
-    return this.pinnedSandboxDeployment?.manifest ?? expectedSiteSandboxManifest;
+    return expectedSiteSandboxManifest;
   }
 
   private currentSandboxImageDigest() {
-    return asContentHash(this.pinnedSandboxDeployment?.imageDigest ?? sandboxImageDigest);
+    return asContentHash(sandboxImageDigest);
   }
 
-  private async sandboxClientForSession(session: SiteAgentSession) {
-    if (session.sandboxId && isRailwaySandboxId(session.sandboxId)) {
-      return typeof this.sandbox.provision === "function"
-        ? this.sandbox
-        : configuredRailwayAuthoringSandbox(this.blobStore);
-    }
-    if (this.sandboxWasInjected
-      || !session.sandboxDeploymentId
-      || session.sandboxDeploymentId === this.pinnedSandboxDeployment?.id) {
-      return this.sandbox;
-    }
-    const deployment = await this.repository.getSandboxDeployment(session.sandboxDeploymentId);
-    if (!deployment) throw new Error("session_sandbox_deployment_missing");
-    return configuredSiteSandboxClientForDeployment(deployment);
+  private async sandboxClientForSession(_session: SiteAgentSession) {
+    return this.sandboxWasInjected
+      ? this.sandbox
+      : configuredRailwayAuthoringSandbox(this.blobStore);
   }
 
   private async destroySessionSandbox(session: SiteAgentSession, input: {
@@ -4255,7 +4230,6 @@ export class SiteAuthoringWorkflow {
     buildInput: SitePublicBuildInput,
     options?: { fullReauthor?: boolean }
   ) {
-    if (!run.sandboxDeploymentId) throw new Error("claimed_run_sandbox_deployment_missing");
     let current = session;
     const executionLeaseExpiresAt = activeExecutionLeaseExpiresAt(run);
     if (session.status === "closed" || session.status === "failed") throw new Error("Agent session is not reusable.");
@@ -5504,12 +5478,10 @@ export class SiteAuthoringWorkflow {
     if (current.status !== "running" || current.executionNumber !== run.executionNumber) return current;
     run = current;
     const continuation = await this.repository.getAgentContinuationHead(run.id);
-    const control = await this.repository.getSandboxControl();
-    const deploymentStillActive = Boolean(run.sandboxDeploymentId
-      && control?.activeDeploymentId === run.sandboxDeploymentId);
-    if (continuation?.workspaceCheckpoint.sandboxId && deploymentStillActive) {
+    const continuationSandboxId = continuation?.workspaceCheckpoint.sandboxId;
+    if (continuationSandboxId) {
       const session = await this.repository.getAgentSession(run.sessionId);
-      if (session?.sandboxId === continuation.workspaceCheckpoint.sandboxId) {
+      if (session?.sandboxId === continuationSandboxId) {
         await this.saveSessionForExecution(run, siteAgentSessionSchema.parse({
           ...session,
           status: "active",

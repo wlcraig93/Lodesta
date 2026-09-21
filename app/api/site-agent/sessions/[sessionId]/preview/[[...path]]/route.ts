@@ -1,6 +1,6 @@
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { authorizedSiteActor, canAccessAgentSession } from "@/app/api/site-agent/auth";
-import { configuredRailwayAuthoringSandbox, configuredSiteSandboxRuntimeForDeployment, isConfirmedSandboxAbsent, isRailwaySandboxId } from "@/packages/site-sandbox";
+import { configuredRailwayAuthoringSandbox, isConfirmedSandboxAbsent } from "@/packages/site-sandbox";
 import { configuredArtifactBlobStore, type ArtifactBlobStore } from "@/packages/site-artifacts";
 import { assetRevisionRefSchema } from "@/packages/site-contracts";
 import type { SitePlatformRepository } from "@/packages/platform-data";
@@ -61,13 +61,8 @@ export async function GET(
   if (!runtimePatch || runtimePatch.securityStatus !== "audited" || runtimePatch.compatibilityStatus !== "passed") {
     return Response.json({ error: "preview_runtime_unavailable" }, { status: 503, headers: { "cache-control": "private, no-store" } });
   }
-  const deployment = session.sandboxDeploymentId
-    ? await sitePlatformRepository.getSandboxDeployment(session.sandboxDeploymentId)
-    : undefined;
-  const upstream = isRailwaySandboxId(session.sandboxId)
-    ? await railwayPreview(session.sandboxId, route)
-    : await cloudflarePreview(session.sandboxId, route, deployment);
-  if (!upstream) return new Response(null, { status: 503 });
+  if (!session.sandboxId) return new Response(null, { status: 503 });
+  const upstream = await railwayPreview(session.sandboxId, route);
   if (upstream.status === 409 && (latest?.stage === "fast_preview" || latest?.stage === "verifying")) {
     return Response.json({ error: "preview_expired" }, { status: 409, headers: { "cache-control": "private, no-store" } });
   }
@@ -95,24 +90,6 @@ async function railwayPreview(sandboxId: string, route: string) {
     }
     throw error;
   }
-}
-
-async function cloudflarePreview(
-  sandboxId: string,
-  route: string,
-  deployment: Parameters<typeof configuredSiteSandboxRuntimeForDeployment>[0] | undefined
-) {
-  let runtime: ReturnType<typeof configuredSiteSandboxRuntimeForDeployment> | undefined;
-  try {
-    runtime = deployment ? configuredSiteSandboxRuntimeForDeployment(deployment) : undefined;
-  } catch {
-    runtime = undefined;
-  }
-  if (!runtime) return undefined;
-  return fetch(`${runtime.url.replace(/\/$/, "")}/v1/sessions/${sandboxId}/preview/${route}`, {
-    headers: { authorization: `Bearer ${runtime.token}` },
-    cache: "no-store"
-  });
 }
 
 export function rewriteFastPreview(html: string, sessionId: string, runtimeSeriesId: string) {

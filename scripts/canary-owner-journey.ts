@@ -5,10 +5,8 @@ import { chromium, devices, type Page } from "playwright";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { isFinalOwnerCanaryPostResponse } from "./owner-canary-response";
-import { readDevelopmentSandboxReceipt } from "../packages/site-sandbox/runtime-config";
 import {
   agentAuthoredArtifactIdentity,
-  expectedSiteSandboxManifest,
   siteToolchainIdentity,
   websiteManagerPromptIdentity,
   workspaceSourcePolicyIdentity
@@ -41,8 +39,6 @@ const admin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },
   global: { fetch: ownerCanaryFetch }
 });
-const sandboxProvenance = await canarySandboxProvenance(origin, admin);
-
 await mkdir(evidenceDirectory, { recursive: true });
 
 type WorkspaceSnapshot = {
@@ -69,7 +65,7 @@ const evidence: Record<string, unknown> = {
     managerPrompt: websiteManagerPromptIdentity,
     sourcePolicy: workspaceSourcePolicyIdentity
   },
-  sandbox: sandboxProvenance,
+  authoringSandbox: "railway",
   steps: [] as Array<Record<string, unknown>>
 };
 
@@ -700,40 +696,6 @@ function publishedResponseEvidence(response: { status(): number; headers(): Reco
     cacheStatus: headers["cache-status"],
     cloudflareCacheStatus: headers["cf-cache-status"],
     xCache: headers["x-cache"]
-  };
-}
-
-async function canarySandboxProvenance(targetOrigin: URL, repository: SupabaseClient) {
-  const { data: control, error: controlError } = await repository
-    .from("site_sandbox_control")
-    .select("active_deployment_id")
-    .eq("id", "production")
-    .single();
-  if (controlError) throw controlError;
-  const activeDeploymentId = control?.active_deployment_id as string | undefined;
-  assert(activeDeploymentId, "The production sandbox control pointer is missing.");
-  const { data: deployment, error: deploymentError } = await repository
-    .from("site_sandbox_deployments")
-    .select("id, slot, worker_version_id, release_sha, image_digest, manifest")
-    .eq("id", activeDeploymentId)
-    .single();
-  if (deploymentError) throw deploymentError;
-  assert(/^sha256:[a-f0-9]{64}$/.test(deployment?.image_digest ?? ""), "The active sandbox deployment has a malformed image digest.");
-  assert.deepEqual(deployment?.manifest, expectedSiteSandboxManifest, "The active sandbox manifest does not match the canary checkout.");
-  if (["localhost", "127.0.0.1"].includes(targetOrigin.hostname)) {
-    const receipt = readDevelopmentSandboxReceipt(deployment.slot);
-    assert.equal(receipt.workerVersionId, deployment.worker_version_id, "The local sandbox receipt does not match the active deployment version.");
-    assert.equal(receipt.releaseSha, deployment.release_sha, "The local sandbox receipt does not match the active deployment release.");
-    assert.equal(receipt.imageDigest, deployment.image_digest, "The local sandbox receipt does not match the active deployment image.");
-  }
-  return {
-    mode: ["localhost", "127.0.0.1"].includes(targetOrigin.hostname) ? "development" : "production",
-    deploymentId: deployment.id,
-    slot: deployment.slot,
-    workerVersionId: deployment.worker_version_id,
-    releaseSha: deployment.release_sha,
-    imageDigest: deployment.image_digest,
-    manifest: deployment.manifest
   };
 }
 

@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, resolve, sep } from "node:path";
 import { sha256, stableJson } from "../packages/business-data";
@@ -10,12 +9,11 @@ import {
 } from "../packages/site-artifacts";
 import { sitePublicBuildInputSchema, type AssetRevisionRef } from "../packages/site-contracts";
 import { LocalSitePlatformRepository, sitePlatformRepository } from "../packages/platform-data";
-import { configuredSiteSandboxClientForDeployment } from "../packages/site-sandbox";
+import { configuredRailwayAuthoringSandbox } from "../packages/site-sandbox";
 import { prepareSiteArtifact, runArtifactBrowserGate } from "../packages/site-verification";
 
 const runId = process.env.LODESTA_RECONSTRUCT_RUN_ID?.trim();
 const reconstructionDirectoryInput = process.env.LODESTA_RECONSTRUCT_OUTPUT_DIR?.trim();
-const sandboxDeploymentOverrideId = process.env.LODESTA_RECONSTRUCT_SANDBOX_DEPLOYMENT_ID?.trim();
 const repeatApplyAfterInspection = process.env.LODESTA_RECONSTRUCT_REPEAT_APPLY === "1";
 const inspectionCountInput = process.env.LODESTA_RECONSTRUCT_INSPECTION_COUNT?.trim();
 const useLocalReconstructionSource = process.env.LODESTA_RECONSTRUCT_LOCAL_SOURCE === "1";
@@ -52,18 +50,15 @@ const store = localBlobRoot
 
 const run = await repository.getAgentRun(runId);
 if (!run) throw new Error(`Unknown site-agent run ${runId}.`);
-if (!run.sandboxDeploymentId) throw new Error(`Run ${runId} has no pinned sandbox deployment.`);
 const candidateVersion = run.candidateVersionId
   ? await repository.getSiteVersion(run.candidateVersionId)
   : undefined;
 if (run.candidateVersionId && !candidateVersion) throw new Error(`Candidate version ${run.candidateVersionId} is unavailable.`);
 const retainedBuildInputId = candidateVersion?.publicBuildInputId ?? run.publicBuildInputId;
-const [deployment, retainedBuildInput, events] = await Promise.all([
-  repository.getSandboxDeployment(sandboxDeploymentOverrideId || run.sandboxDeploymentId),
+const [retainedBuildInput, events] = await Promise.all([
   repository.getPublicBuildInput(retainedBuildInputId),
   repository.listAgentRunEvents(run.id, { limit: 5_000, order: "ascending" })
 ]);
-if (!deployment) throw new Error(`Pinned sandbox deployment ${run.sandboxDeploymentId} is unavailable.`);
 if (!retainedBuildInput) throw new Error(`Retained public build input ${retainedBuildInputId} is unavailable.`);
 const retainedSourceSnapshots = (await Promise.all(
   retainedBuildInput.sourceSnapshotIds.map((snapshotId) => repository.getSourceSnapshot(snapshotId))
@@ -143,14 +138,12 @@ async function readReconstructedSourceFiles(root: string) {
   await walk(root);
   return files.sort((left, right) => left.path.localeCompare(right.path));
 }
-const requestedSessionId = process.env.LODESTA_RECONSTRUCT_SESSION_ID?.trim();
-const sessionId = requestedSessionId || `reconstruct_${randomUUID().replaceAll("-", "").slice(0, 48)}`;
-if (!/^[a-z0-9_-]{1,80}$/.test(sessionId)) throw new Error("LODESTA_RECONSTRUCT_SESSION_ID is invalid.");
+const sandbox = configuredRailwayAuthoringSandbox(store);
+const sessionId = await sandbox.provision();
 const emitPhase = (phase: string, detail: Record<string, unknown> = {}) => {
   process.stdout.write(`${JSON.stringify({ phase, sessionId, ...detail })}\n`);
 };
 emitPhase("starting", { repeatApplyAfterInspection, inspectionCount });
-const sandbox = configuredSiteSandboxClientForDeployment(deployment);
 let operationError: unknown;
 let operationPhase = "bootstrap";
 let result: Awaited<ReturnType<typeof runArtifactBrowserGate>> | undefined;
@@ -239,9 +232,6 @@ try {
     schemaVersion: 1,
     createdAt: new Date().toISOString(),
     runId,
-    sandboxDeploymentId: deployment.id,
-    originalRunSandboxDeploymentId: run.sandboxDeploymentId,
-    sandboxDeploymentOverridden: Boolean(sandboxDeploymentOverrideId),
     sandboxSessionId: sessionId,
     sandboxRevision: appliedRevision,
     bootstrapDurationMs,
@@ -270,7 +260,7 @@ try {
   process.stdout.write(`${JSON.stringify({
     ok: true,
     runId,
-    sandboxDeploymentId: deployment.id,
+    sandboxSessionId: sessionId,
     sandboxRevision: appliedRevision,
     bootstrapDurationMs,
     applyDurationMs,

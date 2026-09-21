@@ -163,7 +163,7 @@ try {
     principal: { kind: "owner", id: owner },
     status: "active",
     publicBuildInputId: input.id,
-    sandboxProvider: "cloudflare",
+    sandboxProvider: "railway",
     leaseTokenHash: sha256("media-recovery-lease"),
     leaseExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
     rotateAt: new Date(Date.now() + 7_200_000).toISOString(),
@@ -269,7 +269,7 @@ try {
     };
   };
   const firstWorkflow = new SiteAuthoringWorkflow(
-    repository, store, firstSandbox as never, firstManager as never, undefined, imageCreator as never, deployment
+    repository, store, firstSandbox as never, firstManager as never, undefined, imageCreator as never
   );
   const paused = await firstWorkflow.executeRun(run.id);
   assert.equal(paused.status, "needs_input", paused.failureReason);
@@ -328,7 +328,7 @@ try {
     }
   };
   const resumedWorkflow = new SiteAuthoringWorkflow(
-    repository, store, resumedSandbox as never, resumedManager as never, undefined, imageCreator as never, deployment
+    repository, store, resumedSandbox as never, resumedManager as never, undefined, imageCreator as never
   );
   const pausedAgain = await resumedWorkflow.executeRun(requeued.id);
   assert.equal(pausedAgain.status, "needs_input", pausedAgain.failureReason);
@@ -394,8 +394,7 @@ try {
     corruptionSandbox as never,
     { run: async () => { corruptionManagerCalls += 1; } } as never,
     undefined,
-    imageCreator as never,
-    deployment
+    imageCreator as never
   );
   const failed = await corruptionWorkflow.executeRun(corruptRun.id);
   assert.equal(failed.status, "failed");
@@ -468,8 +467,7 @@ try {
       throw new ManagerNeedsInputError("Pause after failed media persistence.");
     } } as never,
     undefined,
-    imageCreator as never,
-    deployment
+    imageCreator as never
   );
   const persistencePaused = await persistenceWorkflow.executeRun(persistenceRun.id);
   assert.equal(persistencePaused.status, "needs_input");
@@ -609,8 +607,7 @@ try {
     cleanupSandbox as never,
     { run: async () => { cleanupManagerCalls += 1; } } as never,
     undefined,
-    undefined,
-    deployment
+    undefined
   );
   const cleanupFailed = await cleanupWorkflow.executeRun(cleanupRun.id);
   assert.equal(cleanupFailed.status, "failed");
@@ -757,7 +754,7 @@ async function assertInvalidMediaBytes(input: {
     principal: { kind: "owner", id: input.owner },
     status: "active",
     publicBuildInputId: input.input.id,
-    sandboxProvider: "cloudflare",
+    sandboxProvider: "railway",
     leaseTokenHash: sha256(`media-${input.suffix}`),
     leaseExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
     rotateAt: new Date(Date.now() + 7_200_000).toISOString(),
@@ -797,8 +794,7 @@ async function assertInvalidMediaBytes(input: {
     createSandbox({ store: input.store, initialFiles: fixtureWorkspaceFiles(), label: `invalid-${input.suffix}` }) as never,
     { run: async () => { managerCalls += 1; } } as never,
     undefined,
-    undefined,
-    input.deployment
+    undefined
   );
   const failed = await workflow.executeRun(run.id);
   assert.equal(failed.status, "failed");

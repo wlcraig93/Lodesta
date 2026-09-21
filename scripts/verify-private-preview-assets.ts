@@ -80,9 +80,9 @@ assert.equal(await resolveManagedPreviewAsset({
 assert.match(generatedSiteContentSecurityPolicy("self"), /font-src 'self'/);
 assert.match(generatedSiteContentSecurityPolicy("none"), /font-src 'self'/);
 assert.match(generatedSiteContentSecurityPolicy("none"), /form-action 'none'/);
-const sandboxWorker = await readFile("workers/site-sandbox/src/index.ts", "utf8");
-assert.match(sandboxWorker, /font-src 'self'/);
-assert.doesNotMatch(sandboxWorker, /font-src 'none'/);
+const ownerPreview = await readFile("app/api/site-agent/sessions/[sessionId]/preview/[[...path]]/route.ts", "utf8");
+assert.match(ownerPreview, /font-src 'self'/);
+assert.doesNotMatch(ownerPreview, /font-src 'none'/);
 const previewAccess = await readFile("packages/platform-operations/preview-access.ts", "utf8");
 assert.match(previewAccess, /\/preview\/\$\{encodeURIComponent\(grant\.id\)\}\/\#\$\{secret\}/,
   "Private preview links can still redirect before the fragment-secret exchange.");

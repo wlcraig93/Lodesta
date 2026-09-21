@@ -29,8 +29,6 @@ import {
   sourceSnapshotSchema,
   trustedRuntimePatchSchema,
   trustedRuntimeSeriesSchema,
-  expectedSiteSandboxManifest,
-  sandboxImageDigest,
   type BusinessState,
   type AssetRevision,
   type ControlPlaneChangeRequest,
@@ -2010,9 +2008,6 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     await this.write((store) => {
       const now = new Date().toISOString();
       if (store.maintenanceLeases.site_authoring_maintenance?.leaseUntil > now) return;
-      const control = ensureLocalSandboxRegistry(store, now);
-      const activeDeployment = store.sandboxDeployments[control.activeDeploymentId];
-      if (!activeDeployment) throw new Error("active_sandbox_deployment_missing");
       if (Object.values(store.runs).filter((run) => run.status === "running").length >= 4) return;
 
       const queued = Object.values(store.runs)
@@ -2090,7 +2085,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         stage: target.request.kind === "initial_build" ? "retrieving_sources" : "authoring",
         publicBuildInputId: site.currentPublicBuildInputId,
         exactParentRevisionId: site.currentWorkspaceRevisionId,
-        sandboxDeploymentId: activeDeployment.id,
+        sandboxDeploymentId: undefined,
         resumeCheckpointId: checkpointCurrent ? target.resumeCheckpointId : undefined,
         checkpointRestartedAt: target.resumeCheckpointId && !checkpointCurrent ? now : target.checkpointRestartedAt,
         executionNumber: target.executionNumber + 1,
@@ -2137,35 +2132,6 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     this.queue = next.catch(() => undefined);
     return next;
   }
-}
-
-function ensureLocalSandboxRegistry(store: LocalState, now: string) {
-  if (store.sandboxControl) {
-    assertLocalSandboxControl(store, store.sandboxControl);
-    return siteSandboxControlSchema.parse(store.sandboxControl);
-  }
-  const deploymentId = `sandbox_deployment_local_${expectedSiteSandboxManifest.toolchainIdentity.slice(-16)}`;
-  const deployment = siteSandboxDeploymentSchema.parse({
-    schemaVersion: 1,
-    id: deploymentId,
-    slot: "blue",
-    workerVersionId: "local",
-    releaseSha: "0".repeat(40),
-    imageDigest: sandboxImageDigest,
-    credentialSlot: "blue",
-    manifest: expectedSiteSandboxManifest,
-    createdAt: now
-  });
-  const control = siteSandboxControlSchema.parse({
-    schemaVersion: 1,
-    id: "production",
-    blueDeploymentId: deployment.id,
-    activeDeploymentId: deployment.id,
-    updatedAt: now
-  });
-  store.sandboxDeployments[deployment.id] = deployment;
-  store.sandboxControl = control;
-  return control;
 }
 
 function assertLocalSandboxControl(store: LocalState, control: SiteSandboxControl) {

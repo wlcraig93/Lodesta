@@ -13,19 +13,12 @@ const localEnvironment = {
   LODESTA_RELEASE_GIT_SHA: ""
 };
 
-await ensureDevelopmentSandbox(localEnvironment);
-
 console.log(`[dev] starting Next.js at http://${host}:${port}`);
-console.log(`[dev] repository=${repositoryMode} sandbox=development worker=enabled`);
+console.log(`[dev] repository=${repositoryMode} worker=enabled`);
 
 const sharedEnv = {
   ...localEnvironment,
   FORCE_COLOR: process.env.FORCE_COLOR ?? "1",
-  LODESTA_DEV_SANDBOX: "1",
-  LODESTA_SANDBOX_BLUE_URL: "",
-  LODESTA_SANDBOX_BLUE_TOKEN: "",
-  LODESTA_SANDBOX_GREEN_URL: "",
-  LODESTA_SANDBOX_GREEN_TOKEN: "",
   LODESTA_RELEASE_GIT_SHA: ""
 };
 const web = spawn(localBin("next"), ["dev", "--turbopack", "-p", port, "-H", host], {
@@ -77,20 +70,6 @@ function stop(signal, exitCode = 0) {
   };
   for (const child of children) child.once("exit", finish);
   finish();
-}
-
-async function ensureDevelopmentSandbox(environment) {
-  await new Promise((resolveEnsure, reject) => {
-    const ensure = spawn(process.execPath, ["--import", "tsx", "scripts/ensure-site-sandbox-dev.ts"], {
-      stdio: "inherit",
-      env: environment
-    });
-    ensure.once("error", reject);
-    ensure.once("exit", (code, signal) => {
-      if (code === 0) resolveEnsure();
-      else reject(new Error(`Development sandbox preflight failed with ${signal ?? `exit code ${code}`}.`));
-    });
-  });
 }
 
 function localBin(name) {

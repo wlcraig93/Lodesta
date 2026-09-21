@@ -94,7 +94,7 @@ try {
     idempotencyKey: "approved-document-clone", modelRoute: { apiProvider: "openai", modelId: "gpt-5.6-luna" }, maxCostUsd: 1 })).run.id, canary.run.id);
   const session = siteAgentSessionSchema.parse({ schemaVersion: "site-agent-session", id: "session_form_media",
     siteId: input.siteId, principal: { kind: "owner", id: owner }, status: "active", publicBuildInputId: input.id,
-    sandboxProvider: "cloudflare", sandboxId: "sandbox_form_media", leaseTokenHash: sha256("test-lease"),
+    sandboxProvider: "railway", sandboxId: "sandbox_form_media", leaseTokenHash: sha256("test-lease"),
     leaseExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), rotateAt: new Date(Date.now() + 7_200_000).toISOString(),
     createdAt: now, updatedAt: now });
   await repository.saveAgentSession(session);
@@ -685,7 +685,7 @@ async function verifyGeneratedMediaProvenanceFinalization() {
     const adoptionState = businessStateSchema.parse({ ...adoptionStateBody, stateHash: sha256(stableJson(adoptionStateBody)) });
     const session = siteAgentSessionSchema.parse({ schemaVersion: "site-agent-session", id: "session_media_provenance",
       siteId: input.siteId, principal: { kind: "owner", id: owner }, status: "active", publicBuildInputId: input.id,
-      sandboxProvider: "cloudflare", sandboxId: "sandbox_media_provenance", leaseTokenHash: sha256("media-provenance-lease"),
+      sandboxProvider: "railway", sandboxId: "sandbox_media_provenance", leaseTokenHash: sha256("media-provenance-lease"),
       leaseExpiresAt: "2026-09-10T13:00:00.000Z", rotateAt: "2026-09-10T14:00:00.000Z", createdAt: now, updatedAt: now });
     const runningRun = siteAgentRunSchema.parse({ schemaVersion: "site-agent-run", id: "run_media_provenance", sessionId: session.id,
       siteId: input.siteId, publicBuildInputId: input.id, request: { kind: "owner_instruction", messageIds: ["message_media_provenance"] },

@@ -210,7 +210,7 @@ function allowedBoundaryLabel(path: string, label: string) {
     /^packages\/site-evidence\//,
     /^packages\/site-artifacts\/(?:blob-store|maintenance-store)\.ts$/,
     /^packages\/platform-operations\/preview-access\.ts$/,
-    /^packages\/site-sandbox\/(?:client|runtime-config)\.ts$/,
+    /^packages\/site-sandbox\/client\.ts$/,
     /^packages\/site-agent\/openrouter-anthropic-messages\.ts$/,
     /^packages\/site-verification\/browser-gate\.ts$/,
     /^packages\/business-data\/public-projection\.ts$/,
@@ -218,7 +218,7 @@ function allowedBoundaryLabel(path: string, label: string) {
     /^app\/api\/site-agent\/sessions\/\[sessionId\]\/preview\//,
     /^app\/api\/operator\/runtime\/route\.ts$/,
     /^scripts\/(?:build-first-five-prospect-reports|discover-open-prospects|enrich-prospect-ownership|enrich-prospect-websites|import-pest-control-license-rosters|import-prospects|rank-prospects|select-prospect-sample|verify-google-business-listings|verify-prospect-research)\.ts$/,
-    /^scripts\/(?:canonical-authoring-evidence|configure-r2-lifecycle|deploy-site-sandbox-dev|promote-site-runtime|r2-lifecycle-policy|site-sandbox-manifest|verify-analytics|verify-artifact-storage-boundaries|verify-canonical-authoring-evidence|verify-deployment-config|verify-development-sandbox|verify-r2-lifecycle|verify-release-evidence|verify-site-authoring-platform|verify-site-authoring-render-browser|verify-supabase|verify-trusted-font-coverage|verify-trusted-runtime|verify-website-assessments|view-canonical-authoring-evidence)\.ts$/,
+    /^scripts\/(?:canonical-authoring-evidence|configure-r2-lifecycle|promote-site-runtime|r2-lifecycle-policy|site-sandbox-manifest|verify-analytics|verify-artifact-storage-boundaries|verify-canonical-authoring-evidence|verify-deployment-config|verify-r2-lifecycle|verify-release-evidence|verify-site-authoring-platform|verify-site-authoring-render-browser|verify-supabase|verify-trusted-font-coverage|verify-trusted-runtime|verify-website-assessments|view-canonical-authoring-evidence)\.ts$/,
     /^scripts\/support\/synthetic-site-input\.ts$/,
     /^lib\/(?:analytics|analytics-ingestion|domains|privacy|rate-limit|inquiries)\.ts$/,
     /^scripts\/verify-site-authoring-architecture\.ts$/

@@ -15,11 +15,6 @@ const child = spawn(next, ["dev", "--turbopack", "-p", port, "-H", host], {
     ...process.env,
     LODESTA_REPOSITORY: "local",
     LODESTA_EXECUTION_ROLE: "",
-    LODESTA_DEV_SANDBOX: "0",
-    LODESTA_SANDBOX_BLUE_URL: "",
-    LODESTA_SANDBOX_BLUE_TOKEN: "",
-    LODESTA_SANDBOX_GREEN_URL: "",
-    LODESTA_SANDBOX_GREEN_TOKEN: "",
     LODESTA_RELEASE_GIT_SHA: ""
   }
 });

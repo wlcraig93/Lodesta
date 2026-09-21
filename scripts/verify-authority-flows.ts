@@ -232,7 +232,7 @@ try {
         principal: input.principal,
         status: "active",
         publicBuildInputId: input.buildInput?.id ?? buildInput.id,
-        sandboxProvider: "cloudflare",
+        sandboxProvider: "railway",
         leaseTokenHash: `sha256:${"4".repeat(64)}`,
         leaseExpiresAt: "2026-07-23T13:00:00.000Z",
         rotateAt: "2026-07-23T14:00:00.000Z",

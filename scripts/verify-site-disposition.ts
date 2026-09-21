@@ -35,7 +35,7 @@ try {
     principal: { kind: "owner", id: ownerId },
     status: "active",
     publicBuildInputId: buildInput.id,
-    sandboxProvider: "cloudflare",
+    sandboxProvider: "railway",
     leaseTokenHash: `sha256:${"a".repeat(64)}`,
     leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     rotateAt: new Date(Date.now() + 120_000).toISOString(),

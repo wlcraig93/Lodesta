@@ -106,13 +106,14 @@ const substantiveCompactRoute = buildInformationArchitectureAdvisory({
 });
 assert.deepEqual(substantiveCompactRoute.report.suspectedThinRoutes, [], "The IA advisory must not induce word-count padding on a substantive compact route.");
 
-const [workflow, manager, managerRuntime, authoringProfile, skills, worker, v4Sdk, canaryRoute] = await Promise.all([
+const [workflow, manager, managerRuntime, authoringProfile, skills, compilerPolicy, sdkPackage, v4Sdk, canaryRoute] = await Promise.all([
   readFile("packages/site-platform/workflow.ts", "utf8"),
   readFile("packages/site-agent/manager.ts", "utf8"),
   readFile("packages/site-platform/manager-runtime.ts", "utf8"),
   readFile("packages/site-agent/authoring-profile.ts", "utf8"),
   readFile("packages/site-agent/skills.ts", "utf8"),
-  readFile("workers/site-sandbox/src/index.ts", "utf8"),
+  readFile("workers/site-sandbox/scaffold/platform/source-policy.ts", "utf8"),
+  readFile("workers/site-sandbox/scaffold/package.json", "utf8"),
   readFile("workers/site-sandbox/scaffold/platform/sdk-canonical.tsx", "utf8"),
   readFile("app/api/admin/site-authoring-canaries/route.ts", "utf8")
 ]);
@@ -166,9 +167,9 @@ assert(workflow.includes("preferredRouteLimit: 5")
   && !workflow.includes("all-representative-routes")
   && !authoringProfile.includes("all-representative-routes"),
 "The authoring loop must retain its all-route mechanical pass while returning labeled native frames for the architecture-selected review routes.");
-assert.match(worker, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*unsupported_authoring_runtime_series/);
-assert.match(worker, /"#lodesta-sdk": "\.\/platform\/sdk-canonical\.tsx"/);
-assert.doesNotMatch(worker, /"#lodesta-sdk"[\s\S]{0,300}sdk-native\.tsx/);
+assert.match(compilerPolicy, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*only site-runtime-v4 is canonical/);
+assert.match(sdkPackage, /"#lodesta-sdk": "\.\/platform\/sdk-canonical\.tsx"/);
+assert.doesNotMatch(sdkPackage, /sdk-native\.tsx/);
 assert.match(v4Sdk, /NavigationDisclosure/);
 assert.doesNotMatch(v4Sdk, /LeadLabel|LeadControl/);
 assert.match(canaryRoute, /generator: "canonical"/);

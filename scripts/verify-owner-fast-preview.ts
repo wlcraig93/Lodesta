@@ -129,7 +129,7 @@ const fixtureDependencies: Plugin = {
         listAgentRunEvents: async () => []
       };`,
       "@/app/api/site-agent/auth": `export async function authorizedSiteActor(){ return { ok: true, actorId: "owner_preview_fixture" }; } export function canAccessAgentSession(){ return true; }`,
-      "@/packages/site-sandbox": `export function configuredSiteSandboxRuntimeForDeployment(){ return { url: globalThis.__ownerPreviewFixtureSandboxUrl, token: "fixture-token" }; } export function configuredRailwayAuthoringSandbox(){ return { fetchPreview: async () => new Response(null, { status: 404 }) }; } export function isConfirmedSandboxAbsent(){ return false; } export function isRailwaySandboxId(){ return false; }`,
+      "@/packages/site-sandbox": `export function configuredRailwayAuthoringSandbox(){ return { fetchPreview: async (_sandboxId, route) => fetch(new URL(route || "/", globalThis.__ownerPreviewFixtureSandboxUrl)) }; } export function isConfirmedSandboxAbsent(){ return false; }`,
       "@/packages/site-artifacts": `export function configuredArtifactBlobStore(){ return { get: async () => undefined }; }`,
       "@/packages/site-contracts": `export const assetRevisionRefSchema = { safeParse: () => ({ success: false }) };`
     };

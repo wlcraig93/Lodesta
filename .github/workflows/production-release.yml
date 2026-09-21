@@ -29,10 +29,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      LODESTA_SANDBOX_BLUE_URL: ${{ vars.LODESTA_SANDBOX_BLUE_URL }}
-      LODESTA_SANDBOX_BLUE_TOKEN: ${{ secrets.LODESTA_SANDBOX_BLUE_TOKEN }}
-      LODESTA_SANDBOX_GREEN_URL: ${{ vars.LODESTA_SANDBOX_GREEN_URL }}
-      LODESTA_SANDBOX_GREEN_TOKEN: ${{ secrets.LODESTA_SANDBOX_GREEN_TOKEN }}
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
       RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
@@ -88,109 +84,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           LODESTA_REPOSITORY=local npm run verify:preflight
-
-      - name: Select an inactive drained slot
-        id: slot
-        run: |
-          set -Eeuo pipefail
-          LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- status > "$EVIDENCE_DIR/sandbox-control-before.json"
-          inactive="$(node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            const status = JSON.parse(readFileSync(process.argv[1], "utf8"));
-            if (!status.configured) throw new Error("Run the reviewed one-time blue-green cutover first.");
-            const active = status.control.activeDeploymentId;
-            process.stdout.write(status.control.blueDeploymentId === active ? "green" : "blue");
-          ' "$EVIDENCE_DIR/sandbox-control-before.json")"
-          previous="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-control-before.json')).control.activeDeploymentId")"
-          LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- assert-slot-available --slot "$inactive"
-          echo "slot=$inactive" >> "$GITHUB_OUTPUT"
-          echo "previous_deployment=$previous" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy, canary, and register the inactive sandbox
-        id: sandbox
-        run: |
-          set -Eeuo pipefail
-          slot="${{ steps.slot.outputs.slot }}"
-          config="workers/site-sandbox/wrangler.$slot.jsonc"
-          npx wrangler deploy --config "$config" --strict --containers-rollout=immediate \
-            --tag "$RELEASE_SHA" --message "Blue-green candidate $RELEASE_SHA" \
-            2>&1 | tee "$EVIDENCE_DIR/sandbox-deploy.log"
-          node --import tsx scripts/release-evidence.ts deployed-cloudflare \
-            "$EVIDENCE_DIR/sandbox-deploy.log" > "$EVIDENCE_DIR/sandbox-deployment.json"
-          version="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-deployment.json')).versionId")"
-          digest="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-deployment.json')).imageDigest")"
-          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-          canary_session="sandbox_verify_${RELEASE_SHA:0:12}_${slot}"
-          application_name="$(node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            const config = JSON.parse(readFileSync(process.argv[1], "utf8"));
-            const container = config.containers?.[0];
-            const className = container?.class_name;
-            const applicationName = container?.name
-              ?? (typeof config.name === "string" && typeof className === "string"
-                ? `${config.name}-${className}`.toLowerCase().replaceAll(" ", "-")
-                : undefined);
-            if (typeof applicationName !== "string") {
-              throw new Error("Sandbox Wrangler config does not identify one container application.");
-            }
-            process.stdout.write(applicationName);
-          ' "$config")"
-          # Wrangler returns when the update is accepted. Poll the application
-          # until its ready image is the exact deploy digest, then make a fresh
-          # session read its manifest from inside the container before the full
-          # canary or maintenance window begins.
-          # Cloudflare can keep an exact newly attached image in `provisioning`
-          # for more than ten minutes. This check runs before maintenance, so
-          # observe it for a bounded twenty minutes instead of retrying the
-          # mutation canary against an image that is not ready yet.
-          readiness_timeout_seconds=1200
-          readiness_deadline=$((SECONDS + readiness_timeout_seconds))
-          readiness_attempt=0
-          readiness_observed=false
-          : > "$EVIDENCE_DIR/sandbox-container-readiness.error.log"
-          npx wrangler containers list --per-page 100 --json \
-            > "$EVIDENCE_DIR/cloudflare-containers-after-deploy.json"
-          node --import tsx scripts/release-evidence.ts current-cloudflare-container \
-            "$EVIDENCE_DIR/cloudflare-containers-after-deploy.json" "$application_name" \
-            > "$EVIDENCE_DIR/cloudflare-container-identity.json"
-          application_id="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/cloudflare-container-identity.json')).applicationId")"
-          while (( SECONDS < readiness_deadline )); do
-            readiness_attempt=$((readiness_attempt + 1))
-            # `containers list` can remain stale after a successful application
-            # update. Query the exact application record for rollout identity;
-            # the following fresh-session manifest probe proves it can serve.
-            if npx wrangler containers info "$application_id" \
-              > "$EVIDENCE_DIR/cloudflare-container-details-readiness.json" \
-              2>> "$EVIDENCE_DIR/sandbox-container-readiness.error.log" \
-              && node --import tsx scripts/release-evidence.ts ready-cloudflare-container-details \
-                "$EVIDENCE_DIR/cloudflare-container-details-readiness.json" \
-                "$application_id" "$application_name" "$digest" \
-                > "$EVIDENCE_DIR/cloudflare-container-ready.json" \
-                2>> "$EVIDENCE_DIR/sandbox-container-readiness.error.log"; then
-              readiness_session="sandbox_ready_${RELEASE_SHA:0:12}_${slot}_${readiness_attempt}"
-              if LODESTA_SANDBOX_READINESS_SLOT="$slot" \
-                LODESTA_SANDBOX_READINESS_SESSION_ID="$readiness_session" \
-                node --import tsx scripts/probe-site-sandbox-container-readiness.ts \
-                > "$EVIDENCE_DIR/sandbox-container-readiness.json" \
-                2>> "$EVIDENCE_DIR/sandbox-container-readiness.error.log"; then
-                readiness_observed=true
-                break
-              fi
-            fi
-            sleep 10
-          done
-          if [ "$readiness_observed" != true ]; then
-            echo "Candidate sandbox container did not serve the expected image within ${readiness_timeout_seconds} seconds." >&2
-            exit 1
-          fi
-          LODESTA_SANDBOX_CANARY_SLOT="$slot" LODESTA_SANDBOX_CANARY_SESSION_ID="$canary_session" npm run verify:site-sandbox-deployed \
-            > "$EVIDENCE_DIR/sandbox-canary.json" \
-            2> "$EVIDENCE_DIR/sandbox-canary.error.log"
-          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- register \
-            --slot "$slot" --worker-version "$version" --release-sha "$RELEASE_SHA" \
-            --image-digest "$digest" > "$EVIDENCE_DIR/sandbox-registration.json"
-          deployment="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-registration.json')).deployment.id")"
-          echo "deployment=$deployment" >> "$GITHUB_OUTPUT"
 
       - name: Capture current controller identities
         run: |
@@ -342,22 +235,18 @@ jobs:
             sleep 10
           done
 
-      - name: Promote the registered sandbox and run deep health
-        id: promotion
+      - name: Run deep health
         run: |
           set -Eeuo pipefail
-          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- promote \
-            --deployment-id "${{ steps.sandbox.outputs.deployment }}" > "$EVIDENCE_DIR/sandbox-promotion.json"
-          touch "$EVIDENCE_DIR/promoted"
           for attempt in $(seq 1 30); do
             if curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
-              "$LODESTA_APP_ORIGIN/api/health/?deep=1" > "$EVIDENCE_DIR/post-promotion-health.json"; then
+              "$LODESTA_APP_ORIGIN/api/health/?deep=1" > "$EVIDENCE_DIR/post-deploy-health.json"; then
               node --input-type=module -e '
                 import { readFileSync } from "node:fs";
                 const report = JSON.parse(readFileSync(process.argv[1], "utf8"));
                 const identity = report.checks?.find((check) => check.id === "release_identity");
                 if (report.status === "error" || identity?.detail !== process.env.RELEASE_SHA) process.exit(1);
-              ' "$EVIDENCE_DIR/post-promotion-health.json" && exit 0
+              ' "$EVIDENCE_DIR/post-deploy-health.json" && exit 0
             fi
             sleep 10
           done
@@ -370,24 +259,6 @@ jobs:
           NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent maintenance:site-authoring -- release \
             > "$EVIDENCE_DIR/maintenance-release.json"
           rm -f "$EVIDENCE_DIR/maintenance-active"
-
-      - name: Restore only the sandbox pointer after post-promotion failure
-        if: failure() && steps.promotion.outcome == 'failure'
-        run: |
-          set -Eeuo pipefail
-          [ -f "$EVIDENCE_DIR/promoted" ] || exit 0
-          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- rollback \
-            --deployment-id "${{ steps.slot.outputs.previous_deployment }}" \
-            > "$EVIDENCE_DIR/automatic-sandbox-rollback.json"
-          node --input-type=module -e '
-            import { writeFileSync } from "node:fs";
-            writeFileSync(process.argv[1], JSON.stringify({
-              maintenanceActive: true,
-              operatorWorkflow: "production-rollback.yml",
-              priorSandboxDeploymentId: process.argv[2],
-              priorControllerEvidence: "controller-identities-before.json"
-            }, null, 2));
-          ' "$EVIDENCE_DIR/operator-intervention.json" "${{ steps.slot.outputs.previous_deployment }}"
 
       - name: Upload release evidence
         if: always()

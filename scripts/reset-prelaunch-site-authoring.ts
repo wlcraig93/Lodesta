@@ -5,8 +5,8 @@ import { dirname, resolve } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdminClient } from "../lib/supabase/client";
 import { sha256, stableJson } from "../packages/business-data";
-import { siteSandboxDeploymentSchema } from "../packages/site-contracts";
-import { configuredSiteSandboxClientForDeployment, isConfirmedSandboxAbsent } from "../packages/site-sandbox";
+import { configuredArtifactBlobStore } from "../packages/site-artifacts";
+import { configuredRailwayAuthoringSandbox, isConfirmedSandboxAbsent, isRailwaySandboxId } from "../packages/site-sandbox";
 import { verifyCanonicalAuthoringEvidenceRegistry } from "../packages/site-evidence";
 
 const reportPath = resolve(process.cwd(), ".data/maintenance/site-authoring-reset.json");
@@ -310,24 +310,12 @@ async function assertMaintenanceLease(database: SupabaseClient) {
   }
 }
 
-async function destroySandboxes(database: SupabaseClient, sessions: Array<Record<string, unknown>>) {
-  const retained = sessions.filter((session) => typeof session.sandbox_id === "string" && session.sandbox_id.length > 0);
+async function destroySandboxes(_database: SupabaseClient, sessions: Array<Record<string, unknown>>) {
+  const retained = sessions.filter((session) => typeof session.sandbox_id === "string" && isRailwaySandboxId(session.sandbox_id));
   if (!retained.length) return;
-  const clients = new Map<string, ReturnType<typeof configuredSiteSandboxClientForDeployment>>();
+  const sandbox = configuredRailwayAuthoringSandbox(configuredArtifactBlobStore());
   for (const session of retained) {
-    const sandboxId = typeof session.sandbox_id === "string" ? session.sandbox_id : undefined;
-    const deploymentId = typeof session.sandbox_deployment_id === "string" ? session.sandbox_deployment_id : undefined;
-    if (!sandboxId || !deploymentId) throw new Error("Cutover report contains a live sandbox without immutable deployment provenance.");
-    let sandbox = clients.get(deploymentId);
-    if (!sandbox) {
-      const { data, error } = await database.from("site_sandbox_deployments")
-        .select("deployment")
-        .eq("id", deploymentId)
-        .single();
-      if (error) throw new Error(`Load sandbox deployment ${deploymentId}: ${error.message}`);
-      sandbox = configuredSiteSandboxClientForDeployment(siteSandboxDeploymentSchema.parse(data?.deployment));
-      clients.set(deploymentId, sandbox);
-    }
+    const sandboxId = session.sandbox_id as string;
     try {
       await sandbox.destroy(sandboxId);
     } catch (error) {

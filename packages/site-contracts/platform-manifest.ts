@@ -9,7 +9,7 @@ export const siteSandboxDurableObjectIdentity = "site-sandbox-durable-object@sha
 export const agentAuthoredArtifactIdentity = "agent-authored-artifact@sha256:49565a3bfd2348b4a3baa50be7641bccc4927a43d83b0222b4f262638509ff37";
 // Checked-in release identity for the compiler scaffold, including platform capability CSS.
 // The manifest generator fingerprints source explicitly; imports never derive deploy state.
-export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:f5726b5f56f75e2ea311d66f95698628df0a07f1bbb34eef47de8fed9f46cbee";
+export const siteToolchainIdentity = "lodesta-static-site-workspace@sha256:1948386832c6ac96faa5fccc76f5adb17d99dec9c867c3bb40d213eaabd4eb35";
 // Hash of the actual authoring system prompt. Tool/context changes are carried
 // by the platform identity; they do not redefine unchanged system-prompt bytes.
 export const websiteManagerPromptIdentity = "website-manager@sha256:ca3b2b5018747de7ff36e0a0b9efd6cb243e496a0893035144a5ca16e00fce88";

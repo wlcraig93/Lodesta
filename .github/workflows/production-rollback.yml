@@ -7,10 +7,6 @@ on:
         description: Exact retained Git SHA to deploy to both Railway services
         required: true
         type: string
-      sandbox_deployment_id:
-        description: Immutable retained sandbox deployment ID to reactivate
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -25,10 +21,6 @@ jobs:
     timeout-minutes: 180
     environment: production
     env:
-      LODESTA_SANDBOX_BLUE_URL: ${{ vars.LODESTA_SANDBOX_BLUE_URL }}
-      LODESTA_SANDBOX_BLUE_TOKEN: ${{ secrets.LODESTA_SANDBOX_BLUE_TOKEN }}
-      LODESTA_SANDBOX_GREEN_URL: ${{ vars.LODESTA_SANDBOX_GREEN_URL }}
-      LODESTA_SANDBOX_GREEN_TOKEN: ${{ secrets.LODESTA_SANDBOX_GREEN_TOKEN }}
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
       RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
@@ -66,7 +58,6 @@ jobs:
         run: |
           set -Eeuo pipefail
           [[ "${{ inputs.release_sha }}" =~ ^[a-f0-9]{40}$ ]]
-          [[ "${{ inputs.sandbox_deployment_id }}" =~ ^sandbox_deployment_[a-z0-9_]+$ ]]
           test "$(git -C ../target rev-parse HEAD)" = "${{ inputs.release_sha }}"
           test -f ../target/railway.worker.toml
           mkdir -p "$EVIDENCE_DIR"
@@ -77,7 +68,6 @@ jobs:
             assert.equal(hasHostedExecutionAuthority("release"), true);
             assert.equal(hasHostedExecutionAuthority("site-authoring-worker"), false);
           '
-          LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- status > "$EVIDENCE_DIR/sandbox-control-before.json"
           railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_WEB_SERVICE_ID" \
             --limit 20 --json > "$EVIDENCE_DIR/railway-web-before.json"
           railway deployment list --environment "$RAILWAY_ENVIRONMENT_ID" --service "$RAILWAY_WORKER_SERVICE_ID" \
@@ -195,12 +185,10 @@ jobs:
             sleep 10
           done
 
-      - name: Reactivate the retained sandbox deployment
+      - name: Verify rollback health and release maintenance
         working-directory: control
         run: |
           set -Eeuo pipefail
-          NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- rollback \
-            --deployment-id "${{ inputs.sandbox_deployment_id }}" > "$EVIDENCE_DIR/sandbox-rollback.json"
           curl --fail --silent --show-error --header "authorization: Bearer $LODESTA_ADMIN_TOKEN" \
             "$LODESTA_APP_ORIGIN/api/health/?deep=1" > "$EVIDENCE_DIR/deep-health.json"
           node --input-type=module -e '
@@ -223,10 +211,9 @@ jobs:
               ok: false,
               maintenanceMayRemainActive: existsSync(process.argv[2]),
               operatorInterventionRequired: true,
-              targetReleaseSha: process.env.LODESTA_RELEASE_GIT_SHA,
-              targetSandboxDeploymentId: process.argv[3]
+              targetReleaseSha: process.env.LODESTA_RELEASE_GIT_SHA
             }, null, 2));
-          ' "$EVIDENCE_DIR/rollback-failure.json" "$EVIDENCE_DIR/maintenance-active" "${{ inputs.sandbox_deployment_id }}"
+          ' "$EVIDENCE_DIR/rollback-failure.json" "$EVIDENCE_DIR/maintenance-active"
 
       - name: Upload rollback evidence
         if: always()

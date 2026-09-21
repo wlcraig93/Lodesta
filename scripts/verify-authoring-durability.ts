@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const [worker, dev, workflow, manager, history, repository, migration, sandboxMigration, verificationMigration, contracts, runtimeConfig, recoveryConfig, route, operatorRequeue] = await Promise.all([
+const [worker, dev, workflow, manager, history, repository, migration, sandboxMigration, verificationMigration, contracts, recoveryConfig, route, operatorRequeue] = await Promise.all([
   readFile("workers/runner.ts", "utf8"),
   readFile("scripts/dev.mjs", "utf8"),
   readFile("packages/site-platform/workflow.ts", "utf8"),
@@ -12,7 +12,6 @@ const [worker, dev, workflow, manager, history, repository, migration, sandboxMi
   readFile("supabase/migrations/202607310003_minimal_blue_green_sandboxes.sql", "utf8"),
   readFile("supabase/migrations/202608040003_checkpointed_verification_and_luna_authoring.sql", "utf8"),
   readFile("packages/site-contracts/index.ts", "utf8"),
-  readFile("packages/site-sandbox/runtime-config.ts", "utf8"),
   readFile("workers/recovery-watchdog/wrangler.jsonc", "utf8"),
   readFile("app/api/site-agent/sites/route.ts", "utf8"),
   readFile("scripts/control-site-authoring-run.ts", "utf8")
@@ -79,13 +78,10 @@ assert(!workflow.includes("inputExpiresAt"));
 assert(contracts.includes("siteAgentWorkspaceCheckpointSchema"));
 assert(contracts.includes("sandboxDeploymentId"));
 assert(!contracts.includes("inputExpiresAt"));
-assert(runtimeConfig.includes("LODESTA_SANDBOX_BLUE"));
-assert(runtimeConfig.includes("LODESTA_SANDBOX_GREEN"));
-assert(!runtimeConfig.includes("environment.LODESTA_SANDBOX_URL"));
 assert(recoveryConfig.includes('"* * * * *"'));
 assert(verificationMigration.includes("checkpoint_site_agent_run_workspace"));
 assert(verificationMigration.includes("requeue_checkpointed_site_agent_run"));
 assert(repository.includes("checkpointAgentRunWorkspace"));
 assert(repository.includes("requeueCheckpointedAgentRun"));
 
-process.stdout.write("Process-resumable authoring, durable pauses, blue-green pinning, and stale-worker fencing verified.\n");
+process.stdout.write("Process-resumable authoring, durable pauses, and stale-worker fencing verified.\n");

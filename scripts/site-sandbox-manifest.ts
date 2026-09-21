@@ -37,10 +37,6 @@ export async function computeSiteToolchainIdentity(root = process.cwd()) {
   const sandboxRoot = join(workspaceRoot, "workers/site-sandbox");
   const scaffoldRoot = join(sandboxRoot, "scaffold");
   const files = [
-    join(sandboxRoot, "Dockerfile"),
-    join(sandboxRoot, ".dockerignore"),
-    join(sandboxRoot, "wrangler.blue.jsonc"),
-    join(sandboxRoot, "wrangler.green.jsonc"),
     ...await listWorkerInputs(join(sandboxRoot, "src")),
     ...await listScaffoldInputs(scaffoldRoot)
   ];

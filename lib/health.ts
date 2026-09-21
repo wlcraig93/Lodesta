@@ -2,8 +2,6 @@ import { chromium } from "playwright";
 import { appOriginEnvName } from "./app-origin";
 import { hasConfiguredHashSecret, usesDevelopmentHashSecret } from "./hash-secret";
 import { sitePlatformRepository } from "@/packages/platform-data";
-import { expectedSiteSandboxManifest } from "@/packages/site-contracts";
-import { configuredSiteSandboxRuntimeForDeployment } from "@/packages/site-sandbox";
 
 export type HealthState = "ok" | "warning" | "error";
 export type HealthCheck = { id: string; label: string; state: HealthState; detail: string };
@@ -20,10 +18,10 @@ export function getReleaseIdentityReport(): HealthReport {
 
 export async function getHealthReport(options: { deep?: boolean } = {}): Promise<HealthReport> {
   const checks = [
-    checkUrl(), checkReleaseIdentity(), checkRepository(), checkAuth(), checkAdmin(), await checkSandbox(),
+    checkUrl(), checkReleaseIdentity(), checkRepository(), checkAuth(), checkAdmin(),
     checkArtifactBroker(), checkOpenAi(), checkOpenRouter(), checkHashSecret(), checkEmail()
   ];
-  if (options.deep) checks.push(await checkRepositoryReadiness(), await checkSandboxReadiness(), await checkBrowserReadiness());
+  if (options.deep) checks.push(await checkRepositoryReadiness(), await checkBrowserReadiness());
   return { status: worst(checks.map((item) => item.state)), timestamp: new Date().toISOString(), checks };
 }
 
@@ -60,16 +58,6 @@ function checkAdmin() {
   return process.env.LODESTA_ADMIN_TOKEN ? ok("admin", "Admin authorization", "Admin token is configured.") : (deployed() ? error : warning)("admin", "Admin authorization", "LODESTA_ADMIN_TOKEN is not configured.");
 }
 
-async function checkSandbox() {
-  try {
-    const runtime = await activeSandboxRuntime();
-    if (!runtime) return ok("sandbox", "Cloudflare Sandbox", "Local repository mode does not require a production sandbox slot.");
-    return ok("sandbox", "Cloudflare Sandbox", `${runtime.mode === "development" ? "Development" : "Production"} sandbox bridge and authentication are configured.`);
-  } catch (caught) {
-    return error("sandbox", "Cloudflare Sandbox", message(caught));
-  }
-}
-
 function checkArtifactBroker() {
   if (process.env.LODESTA_ARTIFACT_STORAGE !== "r2") {
     return ok("artifacts", "Immutable artifact storage", "Local immutable artifact storage is configured.");
@@ -89,42 +77,6 @@ async function checkRepositoryReadiness() {
   catch (caught) { return error("repository_readiness", "Repository readiness", message(caught)); }
 }
 
-export async function checkSandboxReadiness(input: {
-  url?: string;
-  token?: string;
-  fetcher?: typeof fetch;
-  timeoutMs?: number;
-} = {}) {
-  try {
-    const configured = input.url || input.token
-      ? { url: input.url, token: input.token }
-      : await activeSandboxRuntime();
-    const url = configured?.url;
-    const token = configured?.token;
-    const expectedManifest = configured && "sandboxManifest" in configured && configured.sandboxManifest
-      ? configured.sandboxManifest
-      : expectedSiteSandboxManifest;
-    if (!url || !token) return error("sandbox_readiness", "Sandbox readiness", "Sandbox configuration is missing.");
-    const response = await (input.fetcher ?? fetch)(`${url.replace(/\/$/, "")}/health`, {
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(input.timeoutMs ?? 8_000)
-    });
-    if (!response.ok) return error("sandbox_readiness", "Sandbox readiness", `Sandbox returned ${response.status}.`);
-    const payload = await response.json().catch(() => undefined) as { sandboxManifest?: unknown } | undefined;
-    if (!validSandboxManifest(payload?.sandboxManifest)) {
-      return error("sandbox_readiness", "Sandbox readiness", "Sandbox returned a malformed compatibility manifest.");
-    }
-    if (!sameSandboxManifest(payload.sandboxManifest, expectedManifest)) {
-      return error(
-        "sandbox_readiness",
-        "Sandbox readiness",
-        `Sandbox manifest mismatch. Expected ${JSON.stringify(expectedManifest)}; received ${JSON.stringify(payload.sandboxManifest)}.`
-      );
-    }
-    return ok("sandbox_readiness", "Sandbox readiness", "Cloudflare Sandbox is compatible with this controller.");
-  } catch (caught) { return error("sandbox_readiness", "Sandbox readiness", message(caught)); }
-}
-
 async function checkBrowserReadiness() {
   try { const browser = await chromium.launch({ headless: true }); await browser.close(); return ok("browser", "Browser verification", "Playwright Chromium launched."); }
   catch (caught) { return (deployed() ? error : warning)("browser", "Browser verification", `${message(caught)} Run npm run install:browsers.`); }
@@ -136,45 +88,3 @@ function worst(states: HealthState[]): HealthState { return states.includes("err
 function ok(id: string, label: string, detail: string): HealthCheck { return { id, label, state: "ok", detail }; }
 function warning(id: string, label: string, detail: string): HealthCheck { return { id, label, state: "warning", detail }; }
 function error(id: string, label: string, detail: string): HealthCheck { return { id, label, state: "error", detail }; }
-
-type SandboxManifest = {
-  kind: "site-sandbox-manifest";
-  apiIdentity: string;
-  storageIdentity: string;
-  durableObjectIdentity: string;
-  artifactContractIdentity: string;
-  toolchainIdentity: string;
-  sourcePolicyIdentity: string;
-};
-
-function validSandboxManifest(value: unknown): value is SandboxManifest {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const manifest = value as Record<string, unknown>;
-  return manifest.kind === "site-sandbox-manifest"
-    && typeof manifest.apiIdentity === "string"
-    && typeof manifest.storageIdentity === "string"
-    && typeof manifest.durableObjectIdentity === "string"
-    && typeof manifest.artifactContractIdentity === "string"
-    && typeof manifest.toolchainIdentity === "string"
-    && typeof manifest.sourcePolicyIdentity === "string"
-    && Object.keys(manifest).length === 7;
-}
-
-function sameSandboxManifest(left: SandboxManifest, right: SandboxManifest) {
-  return left.kind === right.kind
-    && left.apiIdentity === right.apiIdentity
-    && left.storageIdentity === right.storageIdentity
-    && left.durableObjectIdentity === right.durableObjectIdentity
-    && left.artifactContractIdentity === right.artifactContractIdentity
-    && left.toolchainIdentity === right.toolchainIdentity
-    && left.sourcePolicyIdentity === right.sourcePolicyIdentity;
-}
-
-async function activeSandboxRuntime() {
-  if (process.env.LODESTA_REPOSITORY === "local" && process.env.LODESTA_DEV_SANDBOX !== "1") return undefined;
-  const control = await sitePlatformRepository.getSandboxControl();
-  if (!control) throw new Error("Sandbox control is not registered.");
-  const deployment = await sitePlatformRepository.getSandboxDeployment(control.activeDeploymentId);
-  if (!deployment) throw new Error("Active sandbox deployment is missing.");
-  return configuredSiteSandboxRuntimeForDeployment(deployment);
-}

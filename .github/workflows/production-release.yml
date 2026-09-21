@@ -139,7 +139,12 @@ jobs:
           # until its ready image is the exact deploy digest, then make a fresh
           # session read its manifest from inside the container before the full
           # canary or maintenance window begins.
-          readiness_deadline=$((SECONDS + 600))
+          # Cloudflare can keep an exact newly attached image in `provisioning`
+          # for more than ten minutes. This check runs before maintenance, so
+          # observe it for a bounded twenty minutes instead of retrying the
+          # mutation canary against an image that is not ready yet.
+          readiness_timeout_seconds=1200
+          readiness_deadline=$((SECONDS + readiness_timeout_seconds))
           readiness_attempt=0
           readiness_observed=false
           : > "$EVIDENCE_DIR/sandbox-container-readiness.error.log"
@@ -165,7 +170,7 @@ jobs:
             sleep 10
           done
           if [ "$readiness_observed" != true ]; then
-            echo "Candidate sandbox container did not serve the expected image within 600 seconds." >&2
+            echo "Candidate sandbox container did not serve the expected image within ${readiness_timeout_seconds} seconds." >&2
             exit 1
           fi
           LODESTA_SANDBOX_CANARY_SLOT="$slot" LODESTA_SANDBOX_CANARY_SESSION_ID="$canary_session" npm run verify:site-sandbox-deployed \

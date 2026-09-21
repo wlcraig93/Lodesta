@@ -1,6 +1,6 @@
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { authorizedSiteActor, canAccessAgentSession } from "@/app/api/site-agent/auth";
-import { configuredSiteSandboxRuntimeForDeployment } from "@/packages/site-sandbox";
+import { configuredRailwayAuthoringSandbox, configuredSiteSandboxRuntimeForDeployment, isConfirmedSandboxAbsent, isRailwaySandboxId } from "@/packages/site-sandbox";
 import { configuredArtifactBlobStore, type ArtifactBlobStore } from "@/packages/site-artifacts";
 import { assetRevisionRefSchema } from "@/packages/site-contracts";
 import type { SitePlatformRepository } from "@/packages/platform-data";
@@ -64,18 +64,10 @@ export async function GET(
   const deployment = session.sandboxDeploymentId
     ? await sitePlatformRepository.getSandboxDeployment(session.sandboxDeploymentId)
     : undefined;
-  let runtime: ReturnType<typeof configuredSiteSandboxRuntimeForDeployment> | undefined;
-  try {
-    runtime = deployment ? configuredSiteSandboxRuntimeForDeployment(deployment) : undefined;
-  } catch {
-    runtime = undefined;
-  }
-  if (!runtime) return new Response(null, { status: 503 });
-  const { url: base, token } = runtime;
-  const upstream = await fetch(`${base.replace(/\/$/, "")}/v1/sessions/${session.sandboxId}/preview/${route}`, {
-    headers: { authorization: `Bearer ${token}` },
-    cache: "no-store"
-  });
+  const upstream = isRailwaySandboxId(session.sandboxId)
+    ? await railwayPreview(session.sandboxId, route)
+    : await cloudflarePreview(session.sandboxId, route, deployment);
+  if (!upstream) return new Response(null, { status: 503 });
   if (upstream.status === 409 && (latest?.stage === "fast_preview" || latest?.stage === "verifying")) {
     return Response.json({ error: "preview_expired" }, { status: 409, headers: { "cache-control": "private, no-store" } });
   }
@@ -90,6 +82,36 @@ export async function GET(
       "content-security-policy": fastPreviewContentSecurityPolicy,
       "x-robots-tag": "noindex, nofollow"
     }
+  });
+}
+
+async function railwayPreview(sandboxId: string, route: string) {
+  try {
+    return await configuredRailwayAuthoringSandbox(configuredArtifactBlobStore())
+      .fetchPreview(sandboxId, route ? `/${route}` : "/");
+  } catch (error) {
+    if (isConfirmedSandboxAbsent(error)) {
+      return Response.json({ error: "preview_expired" }, { status: 409, headers: { "cache-control": "private, no-store" } });
+    }
+    throw error;
+  }
+}
+
+async function cloudflarePreview(
+  sandboxId: string,
+  route: string,
+  deployment: Parameters<typeof configuredSiteSandboxRuntimeForDeployment>[0] | undefined
+) {
+  let runtime: ReturnType<typeof configuredSiteSandboxRuntimeForDeployment> | undefined;
+  try {
+    runtime = deployment ? configuredSiteSandboxRuntimeForDeployment(deployment) : undefined;
+  } catch {
+    runtime = undefined;
+  }
+  if (!runtime) return undefined;
+  return fetch(`${runtime.url.replace(/\/$/, "")}/v1/sessions/${sandboxId}/preview/${route}`, {
+    headers: { authorization: `Bearer ${runtime.token}` },
+    cache: "no-store"
   });
 }
 

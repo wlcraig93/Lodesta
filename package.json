@@ -126,6 +126,7 @@
     "postcss": "8.5.23",
     "postcss-value-parser": "^4.2.0",
     "qrcode": "^1.5.4",
+    "railway": "^3.11.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sharp": "0.35.4",

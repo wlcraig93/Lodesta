@@ -12,7 +12,7 @@ const sandboxOperationSubmitTimeoutMs = 30_000;
 const sandboxOperationPollIntervalMs = 500;
 const sandboxOperationReplayDelayMs = 250;
 
-type SandboxBuildSuccess = {
+export type SandboxBuildSuccess = {
   ok: true;
   revision: string;
   previewUrl: string;
@@ -91,6 +91,20 @@ export type SandboxDiagnostics = {
   activeOperation?: SandboxOperationStatus;
   processes: Array<{ id: string; command: string; status: string }>;
 };
+
+export interface AuthoringSandbox {
+  provision?: () => Promise<string>;
+  bootstrap(sessionId: string, buildInput: SitePublicBuildInput): Promise<{ ok: true; revision: string }>;
+  apply(sessionId: string, expectedRevision: string, files: WorkspaceSourceFile[]): Promise<SandboxBuildSuccess>;
+  rebase(sessionId: string, expectedRevision: string, buildInput: SitePublicBuildInput): Promise<SandboxBuildSuccess>;
+  getArtifact(sessionId: string): Promise<AgentAuthoredArtifact>;
+  getSource(sessionId: string): Promise<{ ok: true; revision: string; files: WorkspaceSourceFile[] }>;
+  backup(sessionId: string): Promise<{ ok: true; backup: { id: string; revision: string; size: number; key: string; contentHash: `sha256:${string}` } }>;
+  restore(sessionId: string, backupId: string, expectedRevision: string, expectedArchiveHash: `sha256:${string}`): Promise<SandboxBuildSuccess>;
+  diagnostics(sessionId: string, timeoutMs?: number): Promise<SandboxDiagnostics>;
+  destroy(sessionId: string): Promise<{ ok: true }>;
+  fetchPreview(sessionId: string, route?: string): Promise<Response>;
+}
 
 export class SiteSandboxRequestError extends Error {
   readonly name = "SiteSandboxRequestError";

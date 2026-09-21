@@ -67,13 +67,15 @@ import {
   type WorkspaceSourceFile
 } from "@/packages/site-agent";
 import {
+  configuredRailwayAuthoringSandbox,
   configuredSiteSandboxClient,
   configuredSiteSandboxClientForDeployment,
   isConfirmedSandboxAbsent,
+  isRailwaySandboxId,
   isUninitializedSandboxRevision,
   SiteSandboxArtifactContractError,
   SiteSandboxRequestError,
-  type SiteSandboxClient
+  type AuthoringSandbox
 } from "@/packages/site-sandbox";
 import {
   siteAuthoringPlatformIdentity,
@@ -198,13 +200,13 @@ class SiteAgentRunNoLongerActiveError extends Error {
 }
 
 export class SiteAuthoringWorkflow {
-  private readonly sandbox: SiteSandboxClient;
+  private readonly sandbox: AuthoringSandbox;
   private readonly sandboxWasInjected: boolean;
 
   constructor(
     private readonly repository: SitePlatformRepository = sitePlatformRepository,
     private readonly blobStore: ArtifactBlobStore = lazyExternalClient(configuredArtifactBlobStore),
-    sandbox?: SiteSandboxClient,
+    sandbox?: AuthoringSandbox,
     private readonly manager = new WebsiteManagerAgent(),
     private readonly operationsRepository: PlatformOperationsRepository = platformOperationsRepository,
     private readonly imageCreator: typeof createImageBytes = createImageBytes,
@@ -951,7 +953,7 @@ export class SiteAuthoringWorkflow {
         const scoped = new SiteAuthoringWorkflow(
           this.repository,
           this.blobStore,
-          configuredSiteSandboxClientForDeployment(deployment),
+          configuredRailwayAuthoringSandbox(this.blobStore),
           this.manager,
           this.operationsRepository,
           this.imageCreator,
@@ -4090,7 +4092,13 @@ export class SiteAuthoringWorkflow {
     }
   }
 
+  private async provisionSandboxId() {
+    if (this.sandboxWasInjected && typeof this.sandbox.provision === "function") return this.sandbox.provision();
+    return sandboxId();
+  }
+
   private expectedSandboxManifest() {
+    if (this.sandboxWasInjected && typeof this.sandbox.provision === "function") return expectedSiteSandboxManifest;
     return this.pinnedSandboxDeployment?.manifest ?? expectedSiteSandboxManifest;
   }
 
@@ -4099,6 +4107,11 @@ export class SiteAuthoringWorkflow {
   }
 
   private async sandboxClientForSession(session: SiteAgentSession) {
+    if (session.sandboxId && isRailwaySandboxId(session.sandboxId)) {
+      return typeof this.sandbox.provision === "function"
+        ? this.sandbox
+        : configuredRailwayAuthoringSandbox(this.blobStore);
+    }
     if (this.sandboxWasInjected
       || !session.sandboxDeploymentId
       || session.sandboxDeploymentId === this.pinnedSandboxDeployment?.id) {
@@ -4312,7 +4325,7 @@ export class SiteAuthoringWorkflow {
       currentWorkspaceRevisionId: run.exactParentRevisionId,
       publicBuildInputId: buildInput.id,
       sandboxDeploymentId: run.sandboxDeploymentId,
-      sandboxId: sandboxId(),
+      sandboxId: await this.provisionSandboxId(),
       sandboxLastStartedAt: startedAt,
       leaseExpiresAt: executionLeaseExpiresAt,
       updatedAt: startedAt
@@ -4371,7 +4384,7 @@ export class SiteAuthoringWorkflow {
           currentWorkspaceRevisionId: run.exactParentRevisionId,
           publicBuildInputId: buildInput.id,
           sandboxDeploymentId: run.sandboxDeploymentId,
-          sandboxId: sandboxId(),
+          sandboxId: await this.provisionSandboxId(),
           sandboxLastStartedAt: restartedAt,
           leaseExpiresAt: executionLeaseExpiresAt,
           updatedAt: restartedAt

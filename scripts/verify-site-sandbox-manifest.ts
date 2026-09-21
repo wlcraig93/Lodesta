@@ -31,11 +31,18 @@ const sandboxSdkVersion = packageLock.packages?.["node_modules/@cloudflare/sandb
 const sandboxDockerfile = await readFile("workers/site-sandbox/Dockerfile", "utf8");
 const sandboxWorkerSource = await readFile("workers/site-sandbox/src/index.ts", "utf8");
 const sandboxImageVersion = sandboxDockerfile.match(/^FROM docker\.io\/cloudflare\/sandbox:([^\s@]+)(?:@\S+)?$/m)?.[1];
+const sandboxImageDigest = sandboxDockerfile.match(/^FROM docker\.io\/cloudflare\/sandbox:[^\s@]+@(sha256:[a-f0-9]{64})$/m)?.[1];
 assert.ok(sandboxSdkVersion, "The installed @cloudflare/sandbox SDK version is unavailable.");
 assert.equal(
   sandboxImageVersion,
   sandboxSdkVersion,
   "The Cloudflare Sandbox SDK and container image versions must match exactly."
+);
+assert.ok(sandboxImageDigest, "The Cloudflare Sandbox base image must be pinned by digest.");
+assert.match(
+  sandboxDockerfile,
+  /apt-get install --reinstall -y --no-install-recommends bash[\s\S]*test -x \/bin\/bash/,
+  "The sandbox image must install the shell required by @cloudflare/sandbox command execution."
 );
 assert.match(
   sandboxWorkerSource,
@@ -109,6 +116,8 @@ process.stdout.write(`${JSON.stringify({
   developmentConfigIndependent: true,
   workerBridgeCovered: true,
   sandboxSdkImageVersionAligned: true,
+  sandboxImageDigestPinned: true,
+  sandboxCommandShellInstalled: true,
   sandboxLifecycleConfigurationAwaited: true,
   rejectsModifiedGeneratedFile: true
 })}\n`);

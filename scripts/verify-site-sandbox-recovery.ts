@@ -117,7 +117,7 @@ async function verifyInterruptedExecutorUsesControllerRecovery() {
           return Response.json({
             ok: true,
             revision: recoveredRevision,
-            previewUrl: "http://127.0.0.1/v1/sessions/recovered_sandbox/preview/",
+            previewUrl: "http://127.0.0.1/preview/recovered_sandbox/",
             buildDurationMs: 1200,
             placementId: "placement-recovered",
             operationId,

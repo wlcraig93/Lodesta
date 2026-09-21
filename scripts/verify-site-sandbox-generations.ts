@@ -62,15 +62,12 @@ await verifyFreshMutationLock();
 await verifyBootstrapStartFailureShortCircuit();
 await verifyOperationJournalReads();
 await verifySubmissionJournalReadSafety();
-await verifyQueuedJournalRace();
-await verifyPreWorkLockOwnershipCleanup();
 await verifyPreparationObserver();
-await verifyAbandonedPreparationOwner();
-await verifyProcessStartJournalAmbiguity();
-await verifyExplicitJournalAbsenceAfterCompilation();
-await verifyCompletedOperationPoll();
+await verifySingleExecutorLifecycle();
+await verifyDifferentPayloadConcurrency();
+await verifyFailedPayloadReplay();
+await verifyTerminalBuildFailureCleanup();
 await verifyAmbiguousPromotionResponse();
-await verifyConcurrentFinalizationPoll();
 await verifyRequestBoundOperationLifetime();
 const fixture = await mkdtemp(join(tmpdir(), "lodesta-generation-protocol-"));
 try {
@@ -110,9 +107,11 @@ process.stdout.write(`${JSON.stringify({
   immutableGenerations: "pass",
   atomicPointerFaults: "pass",
   boundedFreshSandboxReplay: "pass",
-  abandonedPreparingOwner: "pass",
-  postProcessJournalAmbiguity: "pass",
-  explicitJournalAbsence: "pass"
+  singleExecutorLifecycle: "pass",
+  readOnlyObservation: "pass",
+  deterministicConcurrentLoser: "pass",
+  failedPayloadReplay: "pass",
+  terminalFailureCleanup: "pass"
 })}\n`);
 
 // Execute the actual Worker function against a deterministic filesystem/RPC
@@ -293,9 +292,7 @@ async function verifyOperationJournalReads() {
   const status = productionWorkerFunction("operationStatus", {
     readOperationJournal: read,
     SandboxOperationError: Conflict,
-    publicOperationStatus: productionWorkerFunction("publicOperationStatus", {}),
-    startQueuedOperation: async () => { throw new Error("unexpected queued operation"); },
-    advanceRunningOperation: async () => { throw new Error("unexpected running operation"); }
+    publicOperationStatus: productionWorkerFunction("publicOperationStatus", {})
   });
   const fetchStatus = (sandbox: unknown) => productionWorkerFetch({
     authorized: () => true,
@@ -529,12 +526,10 @@ async function verifyPreparationObserver() {
   const journal = { operationId: "same-operation", status: "running", phase: "preparing", phaseStartedAt: "1970-01-01T00:00:00.000Z" };
   const status = productionWorkerFunction("operationStatus", {
     readOperationJournal: async () => journal,
-    publicOperationStatus: (value: unknown) => value,
-    startQueuedOperation: async () => { throw new Error("A preparing observer restarted preparation."); },
-    advanceRunningOperation: async () => { throw new Error("A preparing observer attempted destructive recovery."); }
+    publicOperationStatus: (value: unknown) => value
   });
-  const result = await status({}, "session", "https://sandbox.example", journal.operationId, async () => ({}));
-  assert.equal(result, journal, "A poll without proof of a completed preparation must not reset its journal or remove its lock.");
+  const result = await status({}, journal.operationId);
+  assert.equal(result, journal, "A read-only observer changed a preparing journal.");
 }
 
 async function verifyAbandonedPreparationOwner() {
@@ -998,50 +993,277 @@ async function verifyConcurrentFinalizationPoll() {
   }
 }
 
-async function verifyRequestBoundOperationLifetime() {
-  const failures: Error[] = [];
-  const check = async (name: string, run: () => Promise<void>) => {
-    try {
-      await run();
-      process.stdout.write(`${JSON.stringify({ fixture: name, status: "pass" })}\n`);
-    } catch (error) {
-      const failure = new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`);
-      failures.push(failure);
-      process.stdout.write(`${JSON.stringify({ fixture: name, status: "fail", error: failure.message })}\n`);
+async function verifySingleExecutorLifecycle() {
+  const operationId = "1".repeat(64);
+  const queued = operationFixture(operationId, "payload-one");
+  let retained: Record<string, any> = queued;
+  let activeRevision = oldRevision;
+  let lockOwned = false;
+  let commandCount = 0;
+  const buildEntered = deferred<void>();
+  const buildRelease = deferred<void>();
+  class Conflict extends Error {
+    constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
+  }
+  const transitionOperation = productionWorkerFunction("transitionOperation", {
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { retained = journal; }
+  });
+  const execute = productionWorkerFunction("executeQueuedOperation", {
+    readOperationJournal: async () => retained,
+    acquireMutationLock: async () => { assert.equal(lockOwned, false); lockOwned = true; },
+    mutationLock: "/fixture/mutation.lock",
+    transitionOperation,
+    operationRequestPath: () => "/fixture/request.json",
+    readJson: async () => ({ action: "apply", expectedRevision: oldRevision, files: [{ path: "src/site.tsx", content: "one" }], publicInputJson: "{}" }),
+    readActiveGeneration: async () => ({ revision: activeRevision }),
+    reconcileGenerationCleanup: async () => undefined,
+    digest: async () => newRevision,
+    generationPath: () => "/fixture/candidate-one",
+    scaffoldGenerationCommand: () => "prepare-candidate",
+    writeGenerationInput: async () => undefined,
+    writeGenerationSource: async () => undefined,
+    parseSourcePolicyResult: () => ({}),
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, unknown>) => { retained = journal; },
+    finalizeBuiltOperation: async (_sandbox: unknown, _session: string, _origin: string, journal: Record<string, any>) => {
+      assert.equal(journal.phase, "promoting");
+      assert.equal(activeRevision, oldRevision, "Candidate became visible before atomic activation.");
+      activeRevision = newRevision;
+      lockOwned = false;
+      retained = { ...journal, status: "succeeded", phase: "complete", result: { revision: newRevision } };
+      return retained;
+    },
+    failOperation: async () => { throw new Error("Successful executor entered failure cleanup."); },
+    SandboxOperationError: Conflict
+  });
+  const sandbox = {
+    writeFile: async () => undefined,
+    deleteFile: async () => undefined,
+    exec: async (command: string) => {
+      commandCount += 1;
+      if (command === "npm run build") {
+        buildEntered.resolve();
+        await buildRelease.promise;
+      }
+      return { success: true, stdout: "", stderr: "" };
     }
   };
-  await check("POST apply accepts without background mutation", async () => {
-    const accepted = { operationId: "c".repeat(64), status: "queued", phase: "queued" };
-    let starts = 0;
-    let scheduled = 0;
-    const fetch = productionWorkerFetch({
-      authorized: () => true,
-      sandboxFor: async () => ({}),
-      json: (body: unknown, status = 200) => Response.json(body, { status }),
-      validateApply: (body: unknown) => body,
-      applyGeneration: async () => accepted,
-      publicOperationStatus: productionWorkerFunction("publicOperationStatus", {}),
-      startQueuedOperation: async () => { starts++; return accepted; },
-      SandboxOperationError: class extends Error {}
-    });
-    const response = await fetch(new Request("http://127.0.0.1/v1/sessions/session/apply", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: oldRevision, files: [] })
-    }), {}, { waitUntil: work => { scheduled++; void work.catch(() => undefined); } });
-    assert.equal(response.status, 202);
-    assert.equal((await response.json() as { status: string }).status, "queued");
-    assert.equal(starts, 0, "POST acceptance started preparation outside a polling request.");
-    assert.equal(scheduled, 0, "POST acceptance used waitUntil for generation work.");
+  const running = execute(sandbox, "session", "https://sandbox.example", operationId, async () => sandbox) as Promise<Record<string, any>>;
+  await fixtureEntered(buildEntered.promise, "single executor build");
+  const status = productionWorkerFunction("operationStatus", {
+    readOperationJournal: async () => retained,
+    publicOperationStatus: (value: unknown) => value,
+    SandboxOperationError: Conflict
   });
-  for (const phase of ["queued", "promoting"] as const) {
-    for (const fails of [false, true]) {
-      for (const viaFetch of [false, true]) {
-        await check(`${viaFetch ? "GET handler" : "operationStatus"} awaits ${phase} ${fails ? "failure" : "completion"}`,
-          () => verifyDeferredStatus(phase, fails, viaFetch));
-      }
-    }
+  const observed = await status(sandbox, operationId) as Record<string, unknown>;
+  assert.equal(observed.phase, "compiling");
+  assert.equal(activeRevision, oldRevision, "Read-only observation exposed a partial candidate.");
+  const commandsBeforeSecondObservation = commandCount;
+  await status(sandbox, operationId);
+  assert.equal(commandCount, commandsBeforeSecondObservation, "Status observation ran preparation, validation, build, or activation work.");
+  buildRelease.resolve();
+  const completed = await running;
+  assert.equal(completed.status, "succeeded");
+  assert.equal(activeRevision, newRevision);
+  assert.equal(lockOwned, false);
+}
+
+async function verifyDifferentPayloadConcurrency() {
+  const firstId = "2".repeat(64);
+  const secondId = "3".repeat(64);
+  const journals = new Map<string, Record<string, any>>([
+    [firstId, operationFixture(firstId, "payload-a")],
+    [secondId, operationFixture(secondId, "payload-b")]
+  ]);
+  let lockOwner: string | undefined;
+  let activeRevision = oldRevision;
+  const candidates: string[] = [];
+  const buildEntered = deferred<void>();
+  const buildRelease = deferred<void>();
+  class Conflict extends Error {
+    constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
   }
-  assert.equal(failures.length, 0, `Request-bound lifecycle fixtures failed:\n${failures.map(error => error.message).join("\n")}`);
+  const transitionOperation = productionWorkerFunction("transitionOperation", {
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, any>) => { journals.set(journal.operationId, journal); }
+  });
+  const execute = productionWorkerFunction("executeQueuedOperation", {
+    readOperationJournal: async (_sandbox: unknown, id: string) => journals.get(id),
+    acquireMutationLock: async (_sandbox: unknown, id: string) => {
+      if (lockOwner) throw new Conflict(409, { error: "operation_in_progress", operationId: lockOwner });
+      lockOwner = id;
+    },
+    mutationLock: "/fixture/mutation.lock",
+    transitionOperation,
+    operationRequestPath: (id: string) => id,
+    readJson: async (_sandbox: unknown, id: string) => ({ action: "apply", expectedRevision: oldRevision,
+      files: [{ path: "src/site.tsx", content: id === firstId ? "alpha" : "beta" }], publicInputJson: "{}" }),
+    readActiveGeneration: async () => ({ revision: activeRevision }),
+    reconcileGenerationCleanup: async () => undefined,
+    digest: async (value: string) => value.includes("payload-a") ? "4".repeat(64) : "5".repeat(64),
+    generationPath: (revision: string) => `/fixture/${revision}`,
+    scaffoldGenerationCommand: () => "prepare-candidate",
+    writeGenerationInput: async () => undefined,
+    writeGenerationSource: async (_sandbox: unknown, root: string) => { candidates.push(root); },
+    parseSourcePolicyResult: () => ({}),
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, any>) => { journals.set(journal.operationId, journal); },
+    finalizeBuiltOperation: async (_sandbox: unknown, _session: string, _origin: string, journal: Record<string, any>) => {
+      activeRevision = journal.candidateRevision;
+      lockOwner = undefined;
+      const complete = { ...journal, status: "succeeded", phase: "complete", result: { revision: activeRevision } };
+      journals.set(journal.operationId, complete);
+      return complete;
+    },
+    failOperation: async () => { throw new Error("Concurrent winner failed unexpectedly."); },
+    SandboxOperationError: Conflict
+  });
+  const sandbox = {
+    writeFile: async () => undefined,
+    deleteFile: async () => undefined,
+    exec: async (command: string) => {
+      if (command === "npm run build") { buildEntered.resolve(); await buildRelease.promise; }
+      return { success: true, stdout: "", stderr: "" };
+    }
+  };
+  const winner = execute(sandbox, "session", "https://sandbox.example", firstId, async () => sandbox) as Promise<Record<string, any>>;
+  await fixtureEntered(buildEntered.promise, "first distinct payload build");
+  const identicalObserver = await execute(
+    sandbox,
+    "session",
+    "https://sandbox.example",
+    firstId,
+    async () => sandbox
+  ) as Record<string, any>;
+  assert.equal(identicalObserver.status, "running", "An identical concurrent executor overwrote its shared running journal.");
+  assert.equal(journals.get(firstId)?.status, "running", "Observing an identical operation changed the retained execution state.");
+  const loser = await execute(sandbox, "session", "https://sandbox.example", secondId, async () => sandbox) as Record<string, any>;
+  assert.equal(loser.status, "failed");
+  assert.equal(loser.failure.status, 409);
+  assert.equal(loser.failure.payload.operationId, firstId,
+    "A different payload sharing the same base revision was not deterministically rejected by the single-writer lock.");
+  assert.deepEqual(candidates, [`/fixture/${"4".repeat(64)}`], "The losing payload prepared or mixed a candidate.");
+  assert.equal(activeRevision, oldRevision);
+  buildRelease.resolve();
+  await winner;
+  assert.equal(activeRevision, "4".repeat(64));
+  assert.equal(journals.get(secondId)?.status, "failed", "The lock loser remained queued for implicit execution.");
+}
+
+async function verifyFailedPayloadReplay() {
+  const operationId = "6".repeat(64);
+  const failed = { ...operationFixture(operationId, "payload-failed"), status: "failed", phase: "complete",
+    failure: { status: 422, payload: { error: "build_failed" } } };
+  let mutations = 0;
+  const execute = productionWorkerFunction("executeQueuedOperation", {
+    readOperationJournal: async () => failed,
+    acquireMutationLock: async () => { mutations += 1; }
+  });
+  assert.equal(await execute({ exec: async () => { mutations += 1; } }, "session", "https://sandbox.example", operationId, async () => ({})), failed);
+  assert.equal(mutations, 0, "Exact failed-payload replay rebuilt or acquired the writer lock.");
+}
+
+async function verifyTerminalBuildFailureCleanup() {
+  const operationId = "7".repeat(64);
+  let retained: Record<string, any> = operationFixture(operationId, "payload-terminal");
+  let lockOwned = false;
+  let activeRevision = oldRevision;
+  const commands: string[] = [];
+  const candidateRoot = "/fixture/candidate-terminal";
+  class Conflict extends Error {
+    constructor(public status: number, public payload: Record<string, unknown>) { super(String(payload.error)); }
+  }
+  const cleanupOperationArtifacts = productionWorkerFunction("cleanupOperationArtifacts", {
+    operationRequestPath: () => "/fixture/request.json"
+  });
+  const failOperation = productionWorkerFunction("failOperation", {
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, any>) => { retained = journal; },
+    cleanupOperationArtifacts,
+    mutationLock: "/fixture/mutation.lock",
+    SandboxOperationError: Conflict
+  });
+  const transitionOperation = productionWorkerFunction("transitionOperation", {
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, any>) => { retained = journal; }
+  });
+  const execute = productionWorkerFunction("executeQueuedOperation", {
+    readOperationJournal: async () => retained,
+    acquireMutationLock: async () => { lockOwned = true; },
+    mutationLock: "/fixture/mutation.lock",
+    transitionOperation,
+    operationRequestPath: () => "/fixture/request.json",
+    readJson: async () => ({ action: "apply", expectedRevision: oldRevision, files: [], publicInputJson: "{}" }),
+    readActiveGeneration: async () => ({ revision: activeRevision }),
+    reconcileGenerationCleanup: async () => undefined,
+    digest: async () => newRevision,
+    generationPath: () => candidateRoot,
+    scaffoldGenerationCommand: () => "prepare-candidate",
+    writeGenerationInput: async () => undefined,
+    writeGenerationSource: async () => undefined,
+    parseSourcePolicyResult: () => ({}),
+    writeOperationJournal: async (_sandbox: unknown, journal: Record<string, any>) => { retained = journal; },
+    finalizeBuiltOperation: async () => { throw new Error("Failed build reached activation."); },
+    failOperation,
+    SandboxOperationError: Conflict
+  });
+  const sandbox = {
+    writeFile: async () => undefined,
+    deleteFile: async () => undefined,
+    cleanupCompletedProcesses: async () => undefined,
+    exec: async (command: string) => {
+      commands.push(command);
+      if (command === "npm run build") return { success: false, stdout: "", stderr: "fixture compile error" };
+      if (command === `rm -rf ${candidateRoot}`) return { success: true, stdout: "", stderr: "" };
+      if (command === "rm -rf /fixture/mutation.lock") { lockOwned = false; return { success: true, stdout: "", stderr: "" }; }
+      return { success: true, stdout: "", stderr: "" };
+    }
+  };
+  const failed = await execute(sandbox, "session", "https://sandbox.example", operationId, async () => sandbox) as Record<string, any>;
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.failure.status, 422);
+  assert.equal(activeRevision, oldRevision, "A failed build replaced the last-good generation.");
+  assert.equal(lockOwned, false, "Terminal 422 retained the writer lock.");
+  assert(commands.includes(`rm -rf ${candidateRoot}`), "Terminal 422 retained its candidate.");
+  assert(!commands.some(command => command.includes("mv -Tf")), "Terminal 422 attempted activation.");
+}
+
+function operationFixture(operationId: string, payloadHash: string) {
+  const now = "2026-09-21T00:00:00.000Z";
+  return { schemaVersion: 1, operationId, payloadHash, status: "queued", phase: "queued", createdAt: now,
+    updatedAt: now, phaseStartedAt: now, timestamps: { queued: now }, phaseTimings: {} };
+}
+
+async function verifyRequestBoundOperationLifetime() {
+  const accepted = { operationId: "c".repeat(64), status: "queued", phase: "queued" };
+  const completed = { ...accepted, status: "succeeded", phase: "complete", result: { revision: newRevision } };
+  let executions = 0;
+  let observations = 0;
+  let scheduled = 0;
+  const fetch = productionWorkerFetch({
+    authorized: () => true,
+    sandboxFor: async () => ({}),
+    json: (body: unknown, status = 200) => Response.json(body, { status }),
+    validateApply: (body: unknown) => body,
+    applyGeneration: async () => accepted,
+    publicOperationStatus: (value: unknown) => value,
+    operationStatus: async () => { observations += 1; return accepted; },
+    executeQueuedOperation: async () => { executions += 1; return completed; },
+    SandboxOperationError: class extends Error {}
+  });
+  const context = { waitUntil: (_work: Promise<unknown>) => { scheduled += 1; } };
+  const admission = await fetch(new Request("http://127.0.0.1/v1/sessions/session/apply", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedRevision: oldRevision, files: [] })
+  }), {}, context);
+  assert.equal(admission.status, 202);
+  assert.equal(executions, 0, "Admission executed the mutation.");
+  const observed = await fetch(new Request(`http://127.0.0.1/v1/sessions/session/operations/${accepted.operationId}`), {}, context);
+  assert.equal((await observed.json() as { phase?: string }).phase, "queued");
+  assert.equal(observations, 1);
+  assert.equal(executions, 0, "GET status executed the mutation.");
+  const execution = await fetch(new Request(`http://127.0.0.1/v1/sessions/session/operations/${accepted.operationId}/execute`, {
+    method: "POST"
+  }), {}, context);
+  assert.equal(execution.status, 200);
+  assert.equal((await execution.json() as { revision?: string }).revision, newRevision);
+  assert.equal(executions, 1, "The explicit executor was not the sole mutation owner.");
+  assert.equal(scheduled, 0, "The lifecycle escaped into waitUntil work.");
 }
 
 async function verifyDeferredStatus(phase: "queued" | "promoting", fails: boolean, viaFetch: boolean) {
@@ -1166,7 +1388,7 @@ async function verifyAmbiguousPromotionResponse() {
       return { operationId: journal.operationId, result };
     },
     writeOperationJournal: async (target: unknown) => { assert.equal(target, freshSandbox); },
-    cleanupOperationProcess: async (target: unknown) => { assert.equal(target, freshSandbox); },
+    cleanupOperationArtifacts: async (target: unknown) => { assert.equal(target, freshSandbox); },
     mutationLock: "/fixture/mutation.lock",
     failOperation: async () => { failures++; return { ...journal, status: "failed" }; }
   });

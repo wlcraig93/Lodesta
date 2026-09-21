@@ -31,6 +31,9 @@ try {
     if (url.endsWith("/apply")) {
       return Response.json(operation("queued"), { status: 202 });
     }
+    if (url.endsWith(`/operations/${operationId}/execute`)) {
+      return Response.json(operation("running", "compiling"), { status: 202 });
+    }
     statusCalls += 1;
     if (statusCalls === 1) throw new TypeError("simulated transport reset");
     if (statusCalls === 2) return Response.json(operation("running", "compiling"));
@@ -40,11 +43,13 @@ try {
   const applied = await client.apply("operation_test", "revision-before", source);
   assert.equal(applied.revision, result.revision);
   assert.equal(requests.filter((url) => url.endsWith("/apply")).length, 1, "Polling resubmitted the mutation after transport loss.");
-  assert.equal(requests.filter((url) => url.endsWith(`/operations/${operationId}`)).length, 3, "Client did not reconnect through the operation status endpoint.");
+  assert.equal(requests.filter((url) => url.endsWith(`/operations/${operationId}/execute`)).length, 1, "Client did not invoke exactly one mutation executor.");
+  assert.equal(requests.filter((url) => url.endsWith(`/operations/${operationId}`)).length, 3, "Client did not reconnect through the read-only operation status endpoint.");
 
   globalThis.fetch = async (input) => {
     const url = String(input);
     if (url.endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+    if (!url.endsWith(`/operations/${operationId}/execute`)) throw new Error(`Unexpected request ${url}`);
     return Response.json({
       ...operation("failed", "complete"),
       ok: false,
@@ -66,6 +71,7 @@ try {
   globalThis.fetch = async (input) => {
     const url = String(input);
     if (url.endsWith("/apply")) return Response.json({ ...operation("running", "validating"), submissionReplayed: true }, { status: 202 });
+    if (url.endsWith(`/operations/${operationId}/execute`)) return Response.json(operation("running", "validating"), { status: 202 });
     return Response.json({ ...operation("succeeded", "complete"), result });
   };
   const replayed = await client.apply("operation_test", "revision-before", source);
@@ -77,7 +83,7 @@ try {
     if (url.endsWith("/apply")) {
       submitCalls += 1;
       if (submitCalls === 1) throw new DOMException("simulated lost acknowledgement", "TimeoutError");
-      return Response.json({ ...operation("succeeded", "complete"), result, submissionReplayed: true }, { status: 202 });
+      return Response.json({ ...result, replayed: true });
     }
     throw new Error(`Unexpected operation replay request ${url}`);
   };
@@ -116,6 +122,7 @@ async function verifyWorkerFailureLeavesPolling(client: SiteSandboxClient) {
   let statusCalls = 0;
   globalThis.fetch = async (input) => {
     if (String(input).endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+    if (String(input).endsWith(`/operations/${operationId}/execute`)) return Response.json(operation("running", "compiling"), { status: 202 });
     statusCalls += 1;
     return Response.json({ error: "sandbox_operation_failed", detail: "simulated poisoned Durable Object stub" }, { status: 500 });
   };
@@ -143,17 +150,18 @@ async function verifyRequestBoundStatusBudget(client: SiteSandboxClient) {
     };
     globalThis.fetch = async (input) => {
       if (String(input).endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
-      if (++polls === 1) {
-        // Preparation/finalization now stays attached to the request. Simulate
-        // elapsed operation time without sleeping through a real deadline.
+      if (String(input).endsWith(`/operations/${operationId}/execute`)) {
         now = 200_000;
-        return Response.json(operation("running", "promoting"));
+        return Response.json(operation("running", "promoting"), { status: 202 });
       }
-      return Response.json({ ...operation("succeeded", "complete"), result });
+      if (++polls === 1) {
+        return Response.json({ ...operation("succeeded", "complete"), result });
+      }
+      throw new Error("Unexpected extra status poll.");
     };
     assert.equal((await client.apply("operation_test", "revision-before", source)).revision, result.revision);
-    assert.deepEqual(timeouts, [30_000, 150_000, 10_000],
-      "Status work must use the normal request ceiling capped by the remaining 210-second operation deadline; submission acknowledgement stays 30 seconds.");
+    assert.deepEqual(timeouts, [30_000, 210_000, 10_000],
+      "The sole executor must receive the 210-second operation budget; admission stays at 30 seconds and read-only status is capped by the remainder.");
   } finally {
     Date.now = originalNow;
     AbortSignal.timeout = originalTimeout;
@@ -173,6 +181,7 @@ async function verifyFailureOnlyPollDiagnostic(client: SiteSandboxClient) {
     }) as typeof setTimeout;
     globalThis.fetch = async (input) => {
       if (String(input).endsWith("/apply")) return Response.json(operation("queued"), { status: 202 });
+      if (String(input).endsWith(`/operations/${operationId}/execute`)) return Response.json(operation("running", "validating"), { status: 202 });
       statusCalls += 1;
       if (statusCalls === 1) throw new TypeError("transport token=never-retained");
       now = 210_000;
@@ -186,12 +195,12 @@ async function verifyFailureOnlyPollDiagnostic(client: SiteSandboxClient) {
         assert.deepEqual(error.operationPollDiagnostic, {
           operationId,
           lastJournal: {
-            status: "queued",
-            phase: "queued",
+            status: "running",
+            phase: "validating",
             createdAt: error.operationPollDiagnostic?.lastJournal.createdAt,
             updatedAt: error.operationPollDiagnostic?.lastJournal.updatedAt,
             phaseStartedAt: error.operationPollDiagnostic?.lastJournal.phaseStartedAt,
-            timestamps: { queued: error.operationPollDiagnostic?.lastJournal.timestamps.queued },
+            timestamps: { validating: error.operationPollDiagnostic?.lastJournal.timestamps.validating },
             phaseTimings: {}
           },
           pollAttempts: 2,

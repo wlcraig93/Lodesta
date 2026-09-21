@@ -88,6 +88,22 @@ export function currentCloudflareContainer(value: unknown, applicationName: stri
   };
 }
 
+export function readyCloudflareContainer(value: unknown, applicationName: string, expectedImageDigest: string) {
+  if (!/^sha256:[a-f0-9]{64}$/.test(expectedImageDigest)) {
+    throw new Error("Expected Cloudflare container image digest is malformed.");
+  }
+  const current = currentCloudflareContainer(value, applicationName);
+  if (current.state !== "ready") {
+    throw new Error(`Cloudflare container application ${applicationName} is ${current.state}, not ready.`);
+  }
+  if (current.imageDigest !== expectedImageDigest) {
+    throw new Error(
+      `Cloudflare container application ${applicationName} reports ${current.imageDigest}, expected ${expectedImageDigest}.`
+    );
+  }
+  return current;
+}
+
 export function currentRailwayDeployment(value: unknown) {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error("Railway returned no deployments.");
@@ -129,13 +145,15 @@ if (basename(process.argv[1] ?? "") === "release-evidence.ts") {
   const command = process.argv[2];
   const file = process.argv[3];
   if (!command || !file) {
-    throw new Error("Usage: release-evidence.ts <current-cloudflare|current-cloudflare-container|deployed-cloudflare|current-railway|current-sandbox-health> <input-file> [application-name]");
+    throw new Error("Usage: release-evidence.ts <current-cloudflare|current-cloudflare-container|ready-cloudflare-container|deployed-cloudflare|current-railway|current-sandbox-health> <input-file> [application-name] [expected-image-digest]");
   }
   const source = await readFile(file, "utf8");
   const result = command === "current-cloudflare"
     ? currentCloudflareDeployment(JSON.parse(source))
     : command === "current-cloudflare-container"
       ? currentCloudflareContainer(JSON.parse(source), process.argv[4] ?? "")
+    : command === "ready-cloudflare-container"
+      ? readyCloudflareContainer(JSON.parse(source), process.argv[4] ?? "", process.argv[5] ?? "")
     : command === "deployed-cloudflare"
       ? deployedCloudflareRelease(source)
       : command === "current-railway"

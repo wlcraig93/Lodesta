@@ -204,12 +204,15 @@ for (const [name, workflow] of [["release", productionRelease], ["rollback", pro
     && workflow.includes("timeout --kill-after=5s 15s railway logs"),
   `Production ${name} must retry bounded Railway control-plane failures without confusing them with failed deployments.`);
 }
-assert(productionRelease.includes("sandbox-canary-attempt-1.error.log")
-  && productionRelease.includes("sandbox-canary-attempt-2.error.log")
-  && productionRelease.includes("LODESTA_SANDBOX_CANARY_SESSION_ID")
-  && productionRelease.includes("container_readiness_delay_seconds=90")
-  && productionRelease.match(/sleep "\$container_readiness_delay_seconds"/g)?.length === 2,
-  "A new Cloudflare container rollout must preserve its first canary failure and retry the same canary session exactly once after a bounded readiness delay.");
+assert(productionRelease.includes("ready-cloudflare-container")
+  && productionRelease.includes("probe-site-sandbox-container-readiness.ts")
+  && productionRelease.includes("sandbox-container-readiness.json")
+  && productionRelease.includes("LODESTA_SANDBOX_READINESS_SESSION_ID")
+  && productionRelease.indexOf("ready-cloudflare-container") < productionRelease.indexOf("npm run verify:site-sandbox-deployed")
+  && productionRelease.match(/npm run verify:site-sandbox-deployed/g)?.length === 1
+  && !productionRelease.includes("container_readiness_delay_seconds")
+  && !productionRelease.includes("sandbox-canary-attempt-"),
+  "A new Cloudflare container rollout must prove the exact ready image serves a fresh request before running the full canary once.");
 assert(productionSandboxes.every((source) => source.includes('"observability"')
   && source.includes('"invocation_logs": true')
   && source.includes('"head_sampling_rate": 1')),

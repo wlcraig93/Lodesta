@@ -247,7 +247,19 @@ export class SiteSandboxClient {
     if ("revision" in submitted) return { ...submitted, ...submissionTelemetry };
     const submissionReplayed = submissionAttempts === 2 || Boolean(submitted.submissionReplayed);
     const deadline = Date.now() + sandboxBuildRequestTimeoutMs;
-    let lastStatus = submitted;
+    const executed = await this.call<SandboxBuildSuccess | SandboxOperationStatus>(
+      sessionId,
+      `operations/${submitted.operationId}/execute`,
+      "POST",
+      undefined,
+      Math.max(1, deadline - Date.now())
+    );
+    if ("revision" in executed) {
+      return submissionReplayed
+        ? { ...executed, replayed: true, ...submissionTelemetry }
+        : { ...executed, ...submissionTelemetry };
+    }
+    let lastStatus = executed;
     let pollAttempts = 0;
     let journalResponses = 0;
     let transportErrors = 0;
@@ -270,8 +282,8 @@ export class SiteSandboxClient {
           `operations/${submitted.operationId}`,
           "GET",
           undefined,
-          // A status request may prepare or promote a generation. Keep that
-          // work connected without extending the overall operation deadline.
+          // Status is observation-only; the execute request is the mutation's
+          // sole preparation, build, and activation owner.
           Math.min(sandboxRequestTimeoutMs, remainingMs)
         );
         journalResponses += 1;
@@ -382,7 +394,6 @@ const sandboxDiagnosticProviderCodes = new Set([
   "backup_not_found",
   "backup_verification_failed",
   "build_failed",
-  "build_process_missing",
   "build_timeout",
   "candidate_cleanup_failed",
   "candidate_promotion_failed",

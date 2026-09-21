@@ -1,4 +1,34 @@
-# Keep sandbox preparation and promotion inside the request
+# Give each sandbox mutation one executor
+
+## September 21: single executor with read-only observation
+
+The canonical mutation lifecycle now separates idempotent admission from
+execution. `apply`, `rebase`, and `restore` retain a deterministic request and
+return its operation identity. The client then makes exactly one non-retryable
+`POST /operations/:operationId/execute`. That connected request owns
+preparation, source validation, compilation, and atomic activation. A
+`GET /operations/:operationId` only reads the retained journal; it never starts,
+advances, finalizes, cleans up, or retries work.
+
+Validation and compilation use bounded one-time container commands. The session
+mutation lock remains the single-writer authority. A different payload that
+loses the lock becomes a terminal `operation_in_progress` result rather than an
+implicit queue. An identical concurrent request observes the same deterministic
+operation. Replaying a terminal success or failure returns the retained result
+without rebuilding.
+
+The executor prepares an immutable candidate while the active pointer continues
+to expose the last-good generation. A confirmed validation or build failure
+records a terminal result, removes its candidate and request payload, and
+releases its owned lock. Activation still uses the atomic `active.next` rename,
+active-generation readback, and the existing promotion fault boundaries. If a
+container command or activation response is lost, the executor does not infer
+termination, remove the lock, or replay. The controller must first confirm
+sandbox destruction, restore the retained checkpoint, and then replay through a
+fresh sandbox.
+
+The earlier request-bound polling implementation below is retained as incident
+history, not as the active design.
 
 ## September 18: failure handling must not reuse a broken connection
 

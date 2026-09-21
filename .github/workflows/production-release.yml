@@ -121,27 +121,56 @@ jobs:
           digest="$(node -p "JSON.parse(require('fs').readFileSync('$EVIDENCE_DIR/sandbox-deployment.json')).imageDigest")"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           canary_session="sandbox_verify_${RELEASE_SHA:0:12}_${slot}"
-          # Wrangler returns after the application update is accepted, before
-          # every new Durable Object connection is guaranteed to resolve to the
-          # replacement container image. Keep this wait outside maintenance so
-          # rollout propagation cannot lengthen the authoring blackout.
-          container_readiness_delay_seconds=90
-          sleep "$container_readiness_delay_seconds"
-          if ! LODESTA_SANDBOX_CANARY_SLOT="$slot" LODESTA_SANDBOX_CANARY_SESSION_ID="$canary_session" npm run verify:site-sandbox-deployed \
-            > "$EVIDENCE_DIR/sandbox-canary-attempt-1.json" \
-            2> "$EVIDENCE_DIR/sandbox-canary-attempt-1.error.log"; then
-            # Cloudflare may accept the Worker version before the new container
-            # application has finished replacing its runtime connections. Keep the
-            # first failure as evidence, then retry the complete canary exactly once
-            # against the same immutable deployment after a bounded readiness delay.
-            sleep "$container_readiness_delay_seconds"
-            LODESTA_SANDBOX_CANARY_SLOT="$slot" LODESTA_SANDBOX_CANARY_SESSION_ID="$canary_session" npm run verify:site-sandbox-deployed \
-              > "$EVIDENCE_DIR/sandbox-canary-attempt-2.json" \
-              2> "$EVIDENCE_DIR/sandbox-canary-attempt-2.error.log"
-            cp "$EVIDENCE_DIR/sandbox-canary-attempt-2.json" "$EVIDENCE_DIR/sandbox-canary.json"
-          else
-            cp "$EVIDENCE_DIR/sandbox-canary-attempt-1.json" "$EVIDENCE_DIR/sandbox-canary.json"
+          application_name="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const config = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            const container = config.containers?.[0];
+            const className = container?.class_name;
+            const applicationName = container?.name
+              ?? (typeof config.name === "string" && typeof className === "string"
+                ? `${config.name}-${className}`.toLowerCase().replaceAll(" ", "-")
+                : undefined);
+            if (typeof applicationName !== "string") {
+              throw new Error("Sandbox Wrangler config does not identify one container application.");
+            }
+            process.stdout.write(applicationName);
+          ' "$config")"
+          # Wrangler returns when the update is accepted. Poll the application
+          # until its ready image is the exact deploy digest, then make a fresh
+          # session read its manifest from inside the container before the full
+          # canary or maintenance window begins.
+          readiness_deadline=$((SECONDS + 600))
+          readiness_attempt=0
+          readiness_observed=false
+          : > "$EVIDENCE_DIR/sandbox-container-readiness.error.log"
+          while (( SECONDS < readiness_deadline )); do
+            readiness_attempt=$((readiness_attempt + 1))
+            if npx wrangler containers list --per-page 100 --json \
+              > "$EVIDENCE_DIR/cloudflare-containers-readiness.json" \
+              2>> "$EVIDENCE_DIR/sandbox-container-readiness.error.log" \
+              && node --import tsx scripts/release-evidence.ts ready-cloudflare-container \
+                "$EVIDENCE_DIR/cloudflare-containers-readiness.json" "$application_name" "$digest" \
+                > "$EVIDENCE_DIR/cloudflare-container-ready.json" \
+                2>> "$EVIDENCE_DIR/sandbox-container-readiness.error.log"; then
+              readiness_session="sandbox_ready_${RELEASE_SHA:0:12}_${slot}_${readiness_attempt}"
+              if LODESTA_SANDBOX_READINESS_SLOT="$slot" \
+                LODESTA_SANDBOX_READINESS_SESSION_ID="$readiness_session" \
+                node --import tsx scripts/probe-site-sandbox-container-readiness.ts \
+                > "$EVIDENCE_DIR/sandbox-container-readiness.json" \
+                2>> "$EVIDENCE_DIR/sandbox-container-readiness.error.log"; then
+                readiness_observed=true
+                break
+              fi
+            fi
+            sleep 10
+          done
+          if [ "$readiness_observed" != true ]; then
+            echo "Candidate sandbox container did not serve the expected image within 600 seconds." >&2
+            exit 1
           fi
+          LODESTA_SANDBOX_CANARY_SLOT="$slot" LODESTA_SANDBOX_CANARY_SESSION_ID="$canary_session" npm run verify:site-sandbox-deployed \
+            > "$EVIDENCE_DIR/sandbox-canary.json" \
+            2> "$EVIDENCE_DIR/sandbox-canary.error.log"
           NODE_ENV=production LODESTA_REPOSITORY=supabase npm run --silent sandbox:deployments -- register \
             --slot "$slot" --worker-version "$version" --release-sha "$RELEASE_SHA" \
             --image-digest "$digest" > "$EVIDENCE_DIR/sandbox-registration.json"

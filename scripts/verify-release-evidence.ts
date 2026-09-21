@@ -4,8 +4,11 @@ import {
   currentCloudflareContainer,
   currentRailwayDeployment,
   currentSandboxHealth,
-  deployedCloudflareRelease
+  deployedCloudflareRelease,
+  readyCloudflareContainer
 } from "./release-evidence";
+import { expectedSiteSandboxManifest } from "../packages/site-contracts";
+import { probeSiteSandboxContainerReadiness } from "./probe-site-sandbox-container-readiness";
 
 assert.deepEqual(currentCloudflareDeployment([
   {
@@ -58,6 +61,22 @@ assert.deepEqual(currentCloudflareContainer([{
   updatedAt: "2026-01-02T12:00:00.000Z"
 });
 
+assert.deepEqual(readyCloudflareContainer([{
+  id: "container-app",
+  name: "lodesta-site-sandbox-v1-sandbox",
+  state: "ready",
+  image: `registry.cloudflare.com/account/lodesta-site-sandbox-v1-sandbox@sha256:${"c".repeat(64)}`,
+  version: 23,
+  updated_at: "2026-01-02T12:00:00.000Z"
+}], "lodesta-site-sandbox-v1-sandbox", `sha256:${"c".repeat(64)}`), {
+  applicationId: "container-app",
+  applicationName: "lodesta-site-sandbox-v1-sandbox",
+  state: "ready",
+  applicationVersion: 23,
+  imageDigest: `sha256:${"c".repeat(64)}`,
+  updatedAt: "2026-01-02T12:00:00.000Z"
+});
+
 assert.deepEqual(currentRailwayDeployment([{
   id: "railway-deployment",
   status: "SUCCESS",
@@ -102,6 +121,22 @@ assert.deepEqual(currentSandboxHealth({
 
 assert.throws(() => currentCloudflareDeployment([]), /no deployments/i);
 assert.throws(() => currentCloudflareContainer([], "missing"), /content-addressed/i);
+assert.throws(() => readyCloudflareContainer([{
+  id: "container-app",
+  name: "candidate",
+  state: "deploying",
+  image: `registry.cloudflare.com/account/candidate@sha256:${"c".repeat(64)}`,
+  version: 23,
+  updated_at: "2026-01-02T12:00:00.000Z"
+}], "candidate", `sha256:${"c".repeat(64)}`), /not ready/i);
+assert.throws(() => readyCloudflareContainer([{
+  id: "container-app",
+  name: "candidate",
+  state: "ready",
+  image: `registry.cloudflare.com/account/candidate@sha256:${"b".repeat(64)}`,
+  version: 23,
+  updated_at: "2026-01-02T12:00:00.000Z"
+}], "candidate", `sha256:${"c".repeat(64)}`), /expected/i);
 assert.throws(() => deployedCloudflareRelease("Current Version ID: missing-digest"), /both/i);
 assert.throws(() => currentRailwayDeployment([{ status: "SUCCESS" }]), /malformed/i);
 assert.throws(() => currentSandboxHealth({ ok: false, provider: "cloudflare-sandbox" }), /healthy/i);
@@ -111,4 +146,43 @@ assert.throws(() => currentSandboxHealth({
   sandboxManifest: "invalid"
 }), /malformed sandbox manifest/i);
 
-process.stdout.write(`${JSON.stringify({ ok: true, checks: ["cloudflare-current", "cloudflare-container-current", "cloudflare-deploy", "railway-current", "sandbox-health"] })}\n`);
+const destroyedSessions: string[] = [];
+const readiness = await probeSiteSandboxContainerReadiness({
+  diagnostics: async () => ({
+    ok: false,
+    revision: "uninitialized",
+    versions: [],
+    sandboxManifest: expectedSiteSandboxManifest,
+    placementId: "candidate-placement",
+    processes: []
+  }),
+  destroy: async (sessionId) => {
+    destroyedSessions.push(sessionId);
+    return { ok: true };
+  }
+}, "readiness_fixture", expectedSiteSandboxManifest);
+assert.equal(readiness.observation, "container_manifest_read");
+assert.equal(readiness.placementId, "candidate-placement");
+assert.deepEqual(destroyedSessions, ["readiness_fixture"]);
+
+let staleReadinessDestroyed = false;
+await assert.rejects(
+  () => probeSiteSandboxContainerReadiness({
+    diagnostics: async () => ({
+      ok: true,
+      revision: "uninitialized",
+      versions: [],
+      sandboxManifest: { ...expectedSiteSandboxManifest, toolchainIdentity: "stale-toolchain" },
+      placementId: "stale-placement",
+      processes: []
+    }),
+    destroy: async () => {
+      staleReadinessDestroyed = true;
+      return { ok: true };
+    }
+  }, "stale_readiness_fixture", expectedSiteSandboxManifest),
+  /does not match/i
+);
+assert.equal(staleReadinessDestroyed, true, "A rejected readiness probe did not destroy its fresh sandbox.");
+
+process.stdout.write(`${JSON.stringify({ ok: true, checks: ["cloudflare-current", "cloudflare-container-current", "cloudflare-container-ready", "cloudflare-deploy", "sandbox-container-serving", "railway-current", "sandbox-health"] })}\n`);

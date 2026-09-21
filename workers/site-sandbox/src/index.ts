@@ -84,7 +84,6 @@ type OperationJournal = {
   timestamps: Partial<Record<OperationPhase, string>>;
   phaseTimings: Record<string, number>;
   candidateRevision?: string;
-  processId?: string;
   result?: BuildSuccess;
   failure?: OperationFailure;
   completedAt?: string;
@@ -99,7 +98,6 @@ const nextActiveLink = `${sessionRoot}/active.next`;
 const mutationLock = `${sessionRoot}/mutation.lock`;
 const cleanupPendingPath = `${operationsRoot}/cleanup-pending.json`;
 const operationRequestSuffix = ".request.json";
-const operationValidationSuffix = ".source-policy-passed";
 const workspaceRoot = activeLink;
 const revisionPath = `${workspaceRoot}/.lodesta/revision`;
 const publicInputPath = `${workspaceRoot}/public-build-input.json`;
@@ -148,19 +146,32 @@ export default {
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     }
 
-    const operationMatch = url.pathname.match(/^\/v1\/sessions\/([a-z0-9_-]{1,80})\/operations\/([a-f0-9]{64})$/);
-    if (request.method === "GET" && operationMatch) {
+    const operationMatch = url.pathname.match(/^\/v1\/sessions\/([a-z0-9_-]{1,80})\/operations\/([a-f0-9]{64})(\/execute)?$/);
+    if (request.method === "GET" && operationMatch && !operationMatch[3]) {
       const sessionId = operationMatch[1];
       const sandbox = await sandboxFor(env, sessionId);
       try {
-        const status = await operationStatus(
+        const status = await operationStatus(sandbox, operationMatch[2]);
+        return json(status);
+      } catch (error) {
+        if (error instanceof SandboxOperationError) return json(error.payload, error.status);
+        return json({ error: "sandbox_operation_failed", detail: error instanceof Error ? error.message : String(error) }, 500);
+      }
+    }
+
+    if (request.method === "POST" && operationMatch?.[3] === "/execute") {
+      const sessionId = operationMatch[1];
+      const sandbox = await sandboxFor(env, sessionId);
+      try {
+        const operation = await executeQueuedOperation(
           sandbox,
           sessionId,
           url.origin,
           operationMatch[2],
           () => sandboxFor(env, sessionId)
         );
-        return json(status);
+        if (operation.status === "succeeded") return json(operation.result);
+        return json(publicOperationStatus(operation), 202);
       } catch (error) {
         if (error instanceof SandboxOperationError) return json(error.payload, error.status);
         return json({ error: "sandbox_operation_failed", detail: error instanceof Error ? error.message : String(error) }, 500);
@@ -532,25 +543,14 @@ async function submitGeneration(
 
 async function operationStatus(
   sandbox: ReturnType<typeof getSandbox>,
-  sessionId: string,
-  origin: string,
-  operationId: string,
-  freshSandbox: () => Promise<ReturnType<typeof getSandbox>>
+  operationId: string
 ) {
-  let journal = await readOperationJournal(sandbox, operationId);
+  const journal = await readOperationJournal(sandbox, operationId);
   if (!journal) throw new SandboxOperationError(404, { error: "operation_not_found", operationId });
-  // Keep preparation and promotion inside the polling request. Post-response
-  // waitUntil work can be canceled after 30 seconds, stranding filesystem locks.
-  // Compilation itself remains an asynchronous container process.
-  if (journal.status === "queued") {
-    journal = await startQueuedOperation(sandbox, sessionId, origin, operationId, freshSandbox);
-  } else if (journal.status === "running" && ["validating", "compiling", "promoting"].includes(journal.phase)) {
-    journal = await advanceRunningOperation(sandbox, sessionId, origin, journal, freshSandbox);
-  }
   return publicOperationStatus(journal);
 }
 
-async function startQueuedOperation(
+async function executeQueuedOperation(
   sandbox: ReturnType<typeof getSandbox>,
   sessionId: string,
   origin: string,
@@ -563,12 +563,32 @@ async function startQueuedOperation(
   try {
     await acquireMutationLock(sandbox, operationId, freshSandbox);
   } catch (error) {
-    if (error instanceof SandboxOperationError && error.payload.error === "operation_in_progress") return journal;
+    if (error instanceof SandboxOperationError && error.payload.error === "operation_in_progress") {
+      if (error.payload.operationId === operationId) {
+        const shared = await readOperationJournal(sandbox, operationId);
+        if (!shared) throw new SandboxOperationError(404, { error: "operation_not_found", operationId });
+        return { ...shared, submissionReplayed: true };
+      }
+      const now = new Date().toISOString();
+      const failed: OperationJournal = {
+        ...journal,
+        status: "failed",
+        phase: "complete",
+        updatedAt: now,
+        phaseStartedAt: now,
+        timestamps: { ...journal.timestamps, complete: now },
+        phaseTimings: { ...journal.phaseTimings, totalMs: Math.max(0, Date.parse(now) - Date.parse(journal.createdAt)) },
+        failure: { status: error.status, payload: error.payload },
+        completedAt: now
+      };
+      await writeOperationJournal(sandbox, failed);
+      await sandbox.deleteFile(operationRequestPath(operationId)).catch(() => undefined);
+      return failed;
+    }
     throw error;
   }
-  // A queued poll can wait behind the original execution until it completes.
-  // Re-read under our exclusive lock; its earlier queued snapshot grants no
-  // permission to overwrite a completed journal or rebuild an old revision.
+  // Admission and execution are separate requests. Re-read after claiming the
+  // session's sole writer so a delayed executor cannot rebuild a terminal replay.
   let retained: OperationJournal | undefined;
   try {
     retained = await readOperationJournal(sandbox, operationId);
@@ -598,158 +618,92 @@ async function startQueuedOperation(
     const revision = await digest(`${input.expectedRevision}:${input.action}:${journal.payloadHash}`);
     candidateRoot = generationPath(revision);
     const prepareStarted = Date.now();
+    processStartRequested = true;
     const prepared = await sandbox.exec(`rm -rf ${candidateRoot} && ${scaffoldGenerationCommand(candidateRoot)}`, { timeout: 30_000 });
+    processStartRequested = false;
     if (!prepared.success) {
       throw new SandboxOperationError(500, { error: "candidate_cleanup_failed", detail: prepared.stderr.slice(-4_000) });
     }
     await writeGenerationInput(sandbox, candidateRoot, input.publicInputJson);
     await writeGenerationSource(sandbox, candidateRoot, input.files);
     const sourcePolicyInput = `/tmp/lodesta-source-policy-${operationId}.json`;
-    const validationMarker = operationValidationMarker(candidateRoot, operationId);
     const runtimeSeriesId = (JSON.parse(input.publicInputJson) as { capabilityConfiguration?: { trustedRuntimeSeries?: unknown } })
       .capabilityConfiguration?.trustedRuntimeSeries;
     await sandbox.writeFile(sourcePolicyInput, JSON.stringify({
       files: input.files,
       runtimeSeriesId: typeof runtimeSeriesId === "string" ? runtimeSeriesId : undefined
     }));
-    const validationCompleteCommand = `node -e 'require("fs").writeFileSync("${validationMarker}", String(Date.now()))'`;
-    processStartRequested = true;
-    const process = await sandbox.startProcess(
-      `npm run validate-source -- ${sourcePolicyInput} && ${validationCompleteCommand} && npm run build`,
-      {
-        cwd: candidateRoot,
-        timeout: 150_000,
-        processId: `lodesta-build-${operationId.slice(0, 24)}`,
-        autoCleanup: false
-      }
-    );
-    const processId = process.id;
-    disposeRpc(process);
-    const now = new Date().toISOString();
+    const validatingAt = new Date().toISOString();
     journal = {
       ...journal,
       status: "running",
       phase: "validating",
-      updatedAt: now,
-      phaseStartedAt: now,
-      timestamps: { ...journal.timestamps, validating: now },
+      updatedAt: validatingAt,
+      phaseStartedAt: validatingAt,
+      timestamps: { ...journal.timestamps, validating: validatingAt },
       phaseTimings: {
         ...journal.phaseTimings,
-        queueMs: Math.max(0, Date.parse(journal.timestamps.preparing ?? now) - Date.parse(journal.createdAt)),
+        queueMs: Math.max(0, Date.parse(journal.timestamps.preparing ?? validatingAt) - Date.parse(journal.createdAt)),
         prepareMs: Date.now() - prepareStarted
       },
-      candidateRevision: revision,
-      processId
+      candidateRevision: revision
     };
     await writeOperationJournal(sandbox, journal);
-    return journal;
-  } catch (error) {
-    // Once the process has started, an ambiguous journal-write response must
-    // not race a status poll into failing or deleting a successful candidate.
-    // Propagate the ambiguous execution failure to the controller's confirmed
-    // destroy/restore boundary; never infer that a lost response stopped work.
-    if (journal.processId || processStartRequested) throw error;
-    return failOperation(await freshSandbox(), journal, error, candidateRoot);
-  }
-}
-
-async function advanceRunningOperation(
-  sandbox: ReturnType<typeof getSandbox>,
-  sessionId: string,
-  origin: string,
-  journal: OperationJournal,
-  freshSandbox: () => Promise<ReturnType<typeof getSandbox>>
-): Promise<OperationJournal> {
-  // Serialize process-status interpretation with promotion and cleanup, using
-  // the existing finalization lock. A delayed poll must re-read the journal
-  // before interpreting the absence of an already-cleaned completed process.
-  const finalizationLock = `${operationsRoot}/${journal.operationId}.finalize.lock`;
-  const locked = await sandbox.exec(`mkdir ${finalizationLock}`);
-  if (!locked.success) return (await readOperationJournal(sandbox, journal.operationId)) ?? journal;
-  try {
-    const current = await readOperationJournal(sandbox, journal.operationId);
-    if (!current || current.status !== "running") return current ?? journal;
-    if (current.phase === "promoting") return await finalizeBuiltOperation(sandbox, sessionId, origin, current, freshSandbox);
-    if (current.phase === "validating" || current.phase === "compiling") {
-      return await advanceBuildProcess(sandbox, sessionId, origin, current, freshSandbox);
+    const validationStarted = Date.now();
+    processStartRequested = true;
+    const validated = await sandbox.exec(`npm run validate-source -- ${sourcePolicyInput}`, {
+      cwd: candidateRoot,
+      timeout: 30_000
+    });
+    processStartRequested = false;
+    if (!validated.success) {
+      return failOperation(sandbox, journal, new SandboxOperationError(422, {
+        error: "source_policy_violation",
+        ...parseSourcePolicyResult(validated.stdout),
+        detail: validated.stderr.trim().slice(-4_000) || "Generated source failed the sandbox source policy."
+      }), candidateRoot);
     }
-    return current;
-  } finally {
-    await sandbox.exec(`rm -rf ${finalizationLock}`).catch(() => undefined);
-  }
-}
-
-async function advanceBuildProcess(
-  sandbox: ReturnType<typeof getSandbox>,
-  sessionId: string,
-  origin: string,
-  journal: OperationJournal,
-  freshSandbox: () => Promise<ReturnType<typeof getSandbox>>
-): Promise<OperationJournal> {
-  if (!journal.processId || !journal.candidateRevision) {
-    return failOperation(sandbox, journal, new SandboxOperationError(500, { error: "build_process_missing" }));
-  }
-  const processId = journal.processId;
-  const candidateRoot = generationPath(journal.candidateRevision);
-  const validationMarker = operationValidationMarker(candidateRoot, journal.operationId);
-  const validationPassed = await sandbox.exists(validationMarker);
-  if (validationPassed.exists && journal.phase === "validating") {
-    const validationCompletedAt = Number((await sandbox.readFile(validationMarker, { encoding: "utf8" })).content.trim());
-    const compilingAt = Number.isFinite(validationCompletedAt) ? new Date(validationCompletedAt).toISOString() : new Date().toISOString();
+    const compilingAt = new Date().toISOString();
     journal = {
       ...journal,
       phase: "compiling",
       updatedAt: compilingAt,
       phaseStartedAt: compilingAt,
       timestamps: { ...journal.timestamps, compiling: compilingAt },
-      phaseTimings: {
-        ...journal.phaseTimings,
-        validationMs: Math.max(0, Date.parse(compilingAt) - Date.parse(journal.timestamps.validating ?? compilingAt))
-      }
+      phaseTimings: { ...journal.phaseTimings, validationMs: Date.now() - validationStarted }
     };
     await writeOperationJournal(sandbox, journal);
-  }
-  const process = await sandbox.getProcess(processId);
-  try {
-    if (process && (process.status === "starting" || process.status === "running")) return journal;
-    const logs = process
-      ? await process.getLogs()
-      : await sandbox.getProcessLogs(processId).catch(() => ({ stdout: "", stderr: "" }));
-    const status = process ? await process.getStatus().catch(() => process.status) : "error";
-    const exitCode = process?.exitCode;
-    if (status !== "completed" || exitCode !== 0) {
-      const sourcePolicyFailed = !validationPassed.exists;
+    const buildStarted = Date.now();
+    processStartRequested = true;
+    const built = await sandbox.exec("npm run build", { cwd: candidateRoot, timeout: 150_000 });
+    processStartRequested = false;
+    if (!built.success) {
       return failOperation(sandbox, journal, new SandboxOperationError(
-        sourcePolicyFailed ? 422 : status === "killed" || /timeout|timed out/i.test(`${logs.stderr}\n${logs.stdout}`) ? 504 : 422,
-        sourcePolicyFailed
-          ? {
-              error: "source_policy_violation",
-              ...parseSourcePolicyResult(logs.stdout),
-              detail: logs.stderr.trim().slice(-4_000) || "Generated source failed the sandbox source policy."
-            }
-          : {
-              error: status === "killed" || /timeout|timed out/i.test(`${logs.stderr}\n${logs.stdout}`) ? "build_timeout" : "build_failed",
-              stdout: logs.stdout.slice(-12_000),
-              stderr: logs.stderr.slice(-12_000)
-            }
+        /timeout|timed out/i.test(`${built.stderr}\n${built.stdout}`) ? 504 : 422,
+        {
+          error: /timeout|timed out/i.test(`${built.stderr}\n${built.stdout}`) ? "build_timeout" : "build_failed",
+          stdout: built.stdout.slice(-12_000),
+          stderr: built.stderr.slice(-12_000)
+        }
       ), candidateRoot);
     }
-    const now = new Date().toISOString();
+    const promotingAt = new Date().toISOString();
     journal = {
       ...journal,
       phase: "promoting",
-      updatedAt: now,
-      phaseStartedAt: now,
-      timestamps: { ...journal.timestamps, promoting: now },
-      phaseTimings: {
-        ...journal.phaseTimings,
-        buildMs: Math.max(0, Date.parse(now) - Date.parse(journal.timestamps.compiling ?? now))
-      }
+      updatedAt: promotingAt,
+      phaseStartedAt: promotingAt,
+      timestamps: { ...journal.timestamps, promoting: promotingAt },
+      phaseTimings: { ...journal.phaseTimings, buildMs: Date.now() - buildStarted }
     };
     await writeOperationJournal(sandbox, journal);
     return finalizeBuiltOperation(sandbox, sessionId, origin, journal, freshSandbox);
-  } finally {
-    disposeRpc(process);
+  } catch (error) {
+    // An exec response can be lost while the container command is still alive.
+    // Keep the lock and journal for controller-led destroy/restore; neither a
+    // duplicate execute request nor a read-only observer may replay the work.
+    if (processStartRequested) throw error;
+    return failOperation(await freshSandbox(), journal, error, candidateRoot);
   }
 }
 
@@ -864,7 +818,7 @@ async function finalizeBuiltOperation(
         detail: error instanceof Error ? error.message : String(error)
       })).catch(() => undefined);
     }
-    await cleanupOperationProcess(sandbox, journal);
+    await cleanupOperationArtifacts(sandbox, journal);
     await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
     return completed;
   } catch (error) {
@@ -887,7 +841,7 @@ async function finalizeBuiltOperation(
         completedAt: now
       };
       await writeOperationJournal(reconnected, recovered);
-      await cleanupOperationProcess(reconnected, journal);
+      await cleanupOperationArtifacts(reconnected, journal);
       await reconnected.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
       return recovered;
     }
@@ -920,21 +874,13 @@ async function failOperation(
     completedAt: now
   };
   await writeOperationJournal(sandbox, failed);
-  await cleanupOperationProcess(sandbox, journal);
+  await cleanupOperationArtifacts(sandbox, journal);
   if (candidateRoot) await sandbox.exec(`rm -rf ${candidateRoot}`).catch(() => undefined);
   await sandbox.exec(`rm -rf ${mutationLock}`).catch(() => undefined);
   return failed;
 }
 
-async function cleanupOperationProcess(sandbox: ReturnType<typeof getSandbox>, journal: OperationJournal) {
-  if (journal.processId) {
-    const process = await sandbox.getProcess(journal.processId).catch(() => null);
-    try {
-      if (process && (process.status === "starting" || process.status === "running")) await process.kill().catch(() => undefined);
-    } finally {
-      disposeRpc(process);
-    }
-  }
+async function cleanupOperationArtifacts(sandbox: ReturnType<typeof getSandbox>, journal: OperationJournal) {
   await sandbox.deleteFile(`/tmp/lodesta-source-policy-${journal.operationId}.json`).catch(() => undefined);
   await sandbox.deleteFile(operationRequestPath(journal.operationId)).catch(() => undefined);
   await sandbox.cleanupCompletedProcesses().catch(() => undefined);
@@ -977,10 +923,6 @@ function publicOperationStatus(journal: OperationJournal) {
 
 function operationRequestPath(operationId: string) {
   return `${operationsRoot}/${operationId}${operationRequestSuffix}`;
-}
-
-function operationValidationMarker(candidateRoot: string, operationId: string) {
-  return `${candidateRoot}/.lodesta/${operationId}${operationValidationSuffix}`;
 }
 
 function candidatePromotionFailed(stderr: string, fallback: string) {

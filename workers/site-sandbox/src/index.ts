@@ -1120,7 +1120,11 @@ function canonicalJson(value: unknown): string {
 }
 
 async function sandboxFor(env: Env, sessionId: string) {
-  const sandbox = getSandbox(env.Sandbox, sessionId, { enableDefaultSession: false });
+  // The stable 0.12.x SDK's sessionless exec path cannot spawn its own Bash
+  // process in hosted Containers. Use the SDK's serialized per-sandbox shell;
+  // Lodesta commands use explicit cwd/absolute paths and the mutation lock
+  // remains the sole workspace-writer authority.
+  const sandbox = getSandbox(env.Sandbox, sessionId, { enableDefaultSession: true });
   // getSandbox applies lifecycle options without awaiting the Durable Object RPC.
   // Make the bounded continuity policy a prerequisite for every filesystem call.
   await sandbox.setSleepAfter("15m");

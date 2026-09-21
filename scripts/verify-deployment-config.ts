@@ -10,12 +10,12 @@ const watchdogSource = readFileSync("workers/recovery-watchdog/src/index.ts", "u
 const workerSource = readFileSync("workers/runner.ts", "utf8");
 const sandboxWorkerSource = readFileSync("workers/site-sandbox/src/index.ts", "utf8");
 assert(
-  sandboxWorkerSource.includes("enableDefaultSession: false")
-    && !sandboxWorkerSource.includes("enableDefaultSession: true")
+  sandboxWorkerSource.includes("enableDefaultSession: true")
+    && !sandboxWorkerSource.includes("enableDefaultSession: false")
     && sandboxWorkerSource.includes('await sandbox.setSleepAfter("15m")')
     && sandboxWorkerSource.includes("await sandbox.setKeepAlive(false)")
     && !sandboxWorkerSource.includes("keepAlive: true"),
-  "Sandbox operations must isolate shell state and await a bounded idle lifecycle above the inspection ceiling."
+  "Sandbox operations must use the hosted-compatible serialized shell and await a bounded idle lifecycle above the inspection ceiling."
 );
 const sandboxClientSource = readFileSync("packages/site-sandbox/client.ts", "utf8");
 const sandboxManifestGenerator = readFileSync("scripts/site-sandbox-manifest.ts", "utf8");

@@ -40,11 +40,6 @@ assert.equal(
 );
 assert.ok(sandboxImageDigest, "The Cloudflare Sandbox base image must be pinned by digest.");
 assert.match(
-  sandboxDockerfile,
-  /apt-get install --reinstall -y --no-install-recommends bash[\s\S]*test -x \/bin\/bash/,
-  "The sandbox image must install the shell required by @cloudflare/sandbox command execution."
-);
-assert.match(
   sandboxWorkerSource,
   /async function sandboxFor[\s\S]*await sandbox\.setSleepAfter\("15m"\);[\s\S]*await sandbox\.setKeepAlive\(false\);/,
   "Sandbox lifecycle configuration must complete before filesystem work begins."
@@ -117,7 +112,6 @@ process.stdout.write(`${JSON.stringify({
   workerBridgeCovered: true,
   sandboxSdkImageVersionAligned: true,
   sandboxImageDigestPinned: true,
-  sandboxCommandShellInstalled: true,
   sandboxLifecycleConfigurationAwaited: true,
   rejectsModifiedGeneratedFile: true
 })}\n`);

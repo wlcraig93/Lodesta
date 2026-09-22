@@ -1,32 +1,178 @@
+/*
+ * Starter styles. Restyle everything for this business: palette, type, spacing,
+ * layout and components. Keep these working properties when you change them:
+ *  - every surface sets its own text colors, so nested surfaces never inherit
+ *    text meant for another background; every text color stays at least 4.5:1
+ *    against its surface (3:1 for large headings); change token pairs together;
+ *  - exactly one navigation pattern is visible at each width;
+ *  - headings wrap between words, never inside one;
+ *  - body and form text 16px or larger, controls at least 48px tall.
+ */
 :root {
-  --site-color-background: #ffffff;
+  /* Surfaces and the text that sits on each one. */
+  --site-color-background: #fbfaf7;
   --site-color-surface: #ffffff;
-  --site-color-text: #151515;
-  --site-color-muted: #5f6360;
-  --site-color-accent: #245c4f;
+  --site-color-text: #1b1d1f;
+  --site-color-muted: #4e5358;
+  --site-color-border: #d8dcd9;
+  --site-color-accent: #1f5c4a;
   --site-color-on-accent: #ffffff;
-  --site-color-border: #d9ddda;
-  --site-font-body: Arial, sans-serif;
-  --site-font-display: Georgia, serif;
-  --site-space-1: 0.25rem;
-  --site-space-2: 0.5rem;
-  --site-space-3: 0.75rem;
-  --site-space-4: 1rem;
-  --site-space-5: 1.5rem;
-  --site-space-6: 2rem;
-  --site-space-7: 3rem;
-  --site-space-8: 4rem;
+  --site-color-dark: #14231f;
+  --site-color-on-dark: #f4f1ea;
+  --site-color-on-dark-muted: #c9d2cd;
+
+  --site-font-body: "Lodesta Inter", Arial, sans-serif;
+  --site-font-display: "Lodesta Inter", Arial, sans-serif;
   --site-content-width: 72rem;
-  --site-radius-sm: 0.25rem;
-  --site-radius-md: 0.5rem;
-  --site-radius-lg: 1rem;
-  --site-shadow-sm: 0 0.25rem 0.75rem rgb(0 0 0 / 0.08);
-  --site-shadow-md: 0 1rem 2.5rem rgb(0 0 0 / 0.12);
-  --site-motion-fast: 120ms;
-  --site-motion-standard: 180ms;
+  --site-space-section: clamp(3rem, 8vw, 6rem);
+  --site-radius: 0.5rem;
+
   color: var(--site-color-text);
   background: var(--site-color-background);
   font-family: var(--site-font-body);
+  font-size: 1.0625rem;
+  line-height: 1.6;
 }
+
+*, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; }
-main { min-height: 100vh; display: grid; place-items: center; padding: 2rem; }
+img { display: block; max-width: 100%; height: auto; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--site-color-accent); outline-offset: 3px; }
+
+h1, h2, h3 {
+  font-family: var(--site-font-display);
+  line-height: 1.15;
+  margin: 0 0 0.75em;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: manual;
+  text-wrap: balance;
+}
+h1 { font-size: clamp(2.125rem, 5vw, 3.5rem); }
+h2 { font-size: clamp(1.625rem, 3.5vw, 2.5rem); }
+h3 { font-size: 1.25rem; }
+p { margin: 0 0 1em; max-width: 68ch; }
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -4rem;
+  z-index: 10;
+  padding: 0.75rem 1rem;
+  background: var(--site-color-accent);
+  color: var(--site-color-on-accent);
+}
+.skip-link:focus { top: 1rem; }
+
+.container { width: min(100% - 2.5rem, var(--site-content-width)); margin-inline: auto; }
+
+/* Header and navigation */
+.site-header { background: var(--site-color-surface); border-bottom: 1px solid var(--site-color-border); }
+.header-inner { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; min-height: 4.5rem; }
+.brand { display: inline-flex; align-items: center; min-height: 3rem; text-decoration: none; font-weight: 700; font-size: 1.125rem; }
+.desktop-nav { display: flex; gap: 1.5rem; }
+.desktop-nav a { display: inline-flex; align-items: center; min-height: 3rem; text-decoration: none; font-weight: 600; }
+.desktop-nav a:hover { text-decoration: underline; }
+.mobile-nav { display: none; }
+
+.menu-toggle {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  padding: 0;
+  border: 1px solid var(--site-color-border);
+  border-radius: var(--site-radius);
+  background: var(--site-color-surface);
+  color: var(--site-color-text);
+  cursor: pointer;
+}
+.menu-icon { position: relative; display: block; width: 1.375rem; height: 1rem; }
+.menu-icon span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+.menu-icon span:nth-child(1) { top: 0; }
+.menu-icon span:nth-child(2) { top: calc(50% - 1px); }
+.menu-icon span:nth-child(3) { bottom: 0; }
+.menu-toggle[aria-expanded="true"] .menu-icon span:nth-child(1) { top: calc(50% - 1px); transform: rotate(45deg); }
+.menu-toggle[aria-expanded="true"] .menu-icon span:nth-child(2) { opacity: 0; }
+.menu-toggle[aria-expanded="true"] .menu-icon span:nth-child(3) { bottom: calc(50% - 1px); transform: rotate(-45deg); }
+
+/* Panel contents only; the platform positions the panel itself. */
+.menu-panel { padding: 1rem 1.25rem 2rem; background: var(--site-color-background); color: var(--site-color-text); }
+.menu-links { display: grid; }
+.menu-links a {
+  display: flex;
+  align-items: center;
+  min-height: 3.25rem;
+  border-bottom: 1px solid var(--site-color-border);
+  font-size: 1.25rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+@media (max-width: 56rem) {
+  .desktop-nav { display: none; }
+  .mobile-nav { display: block; }
+}
+
+/* Sections and layout pieces */
+.section { padding-block: var(--site-space-section); }
+.section-alt { background: var(--site-color-surface); }
+.section-dark { background: var(--site-color-dark); color: var(--site-color-on-dark); }
+.section-dark :where(p) { color: var(--site-color-on-dark-muted); }
+
+.split { display: grid; gap: clamp(1.5rem, 4vw, 3.5rem); align-items: center; }
+@media (min-width: 56rem) { .split { grid-template-columns: 1fr 1fr; } }
+
+.image-band img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+@media (max-width: 40rem) { .image-band img { aspect-ratio: 4 / 3; } }
+
+.card-grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); }
+.card { padding: 1.5rem; border: 1px solid var(--site-color-border); border-radius: var(--site-radius); background: var(--site-color-surface); color: var(--site-color-text); }
+.card :where(p) { color: var(--site-color-muted); }
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0.75rem 1.25rem;
+  border: 2px solid var(--site-color-accent);
+  border-radius: var(--site-radius);
+  background: var(--site-color-accent);
+  color: var(--site-color-on-accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+.button-secondary { background: transparent; color: var(--site-color-accent); }
+.section-dark .button-secondary { border-color: var(--site-color-on-dark); color: var(--site-color-on-dark); }
+
+/* Managed lead form layout */
+.form-grid { display: grid; gap: 1rem; }
+@media (min-width: 40rem) { .form-grid { grid-template-columns: 1fr 1fr; } .form-grid .form-wide { grid-column: 1 / -1; } }
+.form-field { display: grid; gap: 0.375rem; font-weight: 600; }
+.form-control {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.75rem;
+  border: 1px solid var(--site-color-muted);
+  border-radius: var(--site-radius);
+  background: var(--site-color-surface);
+  color: var(--site-color-text);
+  font: inherit;
+}
+
+/* Footer */
+.site-footer { padding-block: 3rem; background: var(--site-color-dark); color: var(--site-color-on-dark); }
+.footer-inner { display: grid; gap: 1.5rem; }
+.footer-name { font-weight: 700; margin: 0; }
+.footer-nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; }
+.footer-nav a { display: inline-flex; align-items: center; min-height: 3rem; color: var(--site-color-on-dark); }

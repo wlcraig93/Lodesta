@@ -56,6 +56,8 @@ export type ProviderCapabilityCheck = {
 const checks = new Map<string, ProviderCapabilityCheck>();
 const openAiContextWindowTokens = {
   "gpt-6-astra": 1_050_000,
+  "gpt-6-sol": 1_050_000,
+  "gpt-6-luna": 1_050_000,
   "gpt-5.6-sol": 1_050_000,
   "gpt-5.6-terra": 1_050_000,
   "gpt-5.6-luna": 1_050_000,

@@ -4,8 +4,8 @@ import { usageForModel } from "@/packages/site-agent/run-policy";
 import { assertOpenAiStrictJsonSchema } from "@/packages/site-agent/strict-tool-schema";
 import { sha256, stableJson } from "./hash";
 
-const researchModel = "gpt-5.6-sol";
-const googleAggregateRatingResearchModel = "gpt-5.6-luna";
+const researchModel = "gpt-6-sol";
+const googleAggregateRatingResearchModel = "gpt-6-luna";
 const maximumOutputTokens = 6_000;
 const webSearchCallEstimateUsd = 0.01;
 const googleAggregateRatingOutputTokens = 1_200;

@@ -1107,12 +1107,12 @@ assert.equal(astraCapabilities.transport, "openai_responses");
 assert.deepEqual(astraCapabilities.requestFields, openAiCapabilities.requestFields);
 assert.notEqual(astraCapabilities.descriptorIdentity, openAiCapabilities.descriptorIdentity);
 const comparisonModels = normalizeOpenAiModelCatalog({ data: [
-  { id: "gpt-6-astra" }, { id: "gpt-5.5" }, { id: "gpt-5.6-luna" }, { id: "gpt-5.6-terra" }, { id: "gpt-5.6-sol" }, { id: "unprobed-model" }
+  { id: "gpt-6-astra" }, { id: "gpt-5.5" }, { id: "gpt-5.6-luna" }, { id: "gpt-5.6-terra" }, { id: "gpt-5.6-sol" }, { id: "gpt-6-luna" }, { id: "gpt-6-sol" }, { id: "unprobed-model" }
 ] });
-for (const id of ["gpt-6-astra", "gpt-5.5"]) assert.equal(comparisonModels.find(model => model.id === id)?.siteAgentAvailability, "not_enabled");
-for (const id of ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) assert.equal(comparisonModels.find(model => model.id === id)?.siteAgentAvailability, "selectable");
-for (const id of ["gpt-6-astra", "gpt-5.5"]) assert.equal(validateSiteAuthoringModelSettingsUpdate({ version: 0, siteAgentProvider: "openai", siteAgentModel: id }).ok, false);
-for (const id of ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) assert.equal(validateSiteAuthoringModelSettingsUpdate({ version: 0, siteAgentProvider: "openai", siteAgentModel: id }).ok, true);
+for (const id of ["gpt-6-astra", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) assert.equal(comparisonModels.find(model => model.id === id)?.siteAgentAvailability, "not_enabled");
+for (const id of ["gpt-6-luna", "gpt-6-sol"]) assert.equal(comparisonModels.find(model => model.id === id)?.siteAgentAvailability, "selectable");
+for (const id of ["gpt-6-astra", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]) assert.equal(validateSiteAuthoringModelSettingsUpdate({ version: 0, siteAgentProvider: "openai", siteAgentModel: id }).ok, false);
+for (const id of ["gpt-6-luna", "gpt-6-sol"]) assert.equal(validateSiteAuthoringModelSettingsUpdate({ version: 0, siteAgentProvider: "openai", siteAgentModel: id }).ok, true);
 assert.equal(comparisonModels.find((model) => model.id === "unprobed-model")?.siteAgentAvailability, "pricing_unconfigured");
 assert.equal(usageForModel("gpt-6-astra", {
   input_tokens: 100_000,
@@ -1158,6 +1158,15 @@ assert.equal(usageForModel("gpt-5.6-luna", {
   output_tokens: 0
 }, 0).costUsd, 0.04);
 
+assert.equal(usageForModel("gpt-6-sol", {
+  input_tokens: 100_000, output_tokens: 10_000
+}, 0).costUsd, 0.3);
+assert.equal(usageForModel("gpt-6-luna", {
+  input_tokens: 200_000,
+  input_tokens_details: { cached_tokens: 100_000 },
+  output_tokens: 20_000
+}, 0).costUsd, 0.021);
+
 const openRouterCapabilities = providerAuthoringCapabilities("openrouter", "moonshotai/kimi-k3", 1_048_576);
 assert.equal(openRouterCapabilities.requestFields.context_management, "stripped");
 assert.equal(openRouterCapabilities.contextCompaction.mechanism, "unsupported");
@@ -1177,7 +1186,7 @@ const requests: Parameters<ManagerResponsesClient["create"]>[0][] = [];
 const responses = [
   {
     id: "response_compacted",
-    model: "gpt-5.6-sol",
+    model: "gpt-6-sol",
     output_text: "",
     status: "completed",
     error: null,
@@ -1205,7 +1214,7 @@ const responses = [
   },
   {
     id: "response_finish",
-    model: "gpt-5.6-sol",
+    model: "gpt-6-sol",
     output_text: "",
     status: "completed",
     error: null,
@@ -1271,7 +1280,7 @@ const managerResult = await new WebsiteManagerAgent(client).run({
   authoringContext: context,
   instruction: "Build a private candidate.",
   kind: "initial_build",
-  route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+  route: { apiProvider: "openai", modelId: "gpt-6-sol" },
   runtime
 });
 assert.equal(requests.length, 2);
@@ -1306,7 +1315,7 @@ await new WebsiteManagerAgent({ create: async (params) => {
   assetEvidenceRequests.push(params);
   return {
     id: "response_asset_evidence",
-    model: "gpt-5.6-sol",
+    model: "gpt-6-sol",
     output_text: "",
     status: "completed",
     error: null,
@@ -1324,7 +1333,7 @@ await new WebsiteManagerAgent({ create: async (params) => {
   authoringContext: context,
   instruction: "Build a private candidate.",
   kind: "initial_build",
-  route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+  route: { apiProvider: "openai", modelId: "gpt-6-sol" },
   authoringProfile: {
     ...canonicalAuthoringProfile("initial_build"),
     assetEvidenceReferences
@@ -1519,7 +1528,7 @@ await assert.rejects(
       imageToolRequests.push(params);
       return {
         id: "response_create_image",
-        model: "gpt-5.6-luna",
+        model: "gpt-6-luna",
         output_text: "",
         status: "completed",
         error: null,
@@ -1545,7 +1554,7 @@ await assert.rejects(
     authoringContext: context,
     instruction: "Build a private candidate.",
     kind: "initial_build",
-    route: { apiProvider: "openai", modelId: "gpt-5.6-luna" },
+    route: { apiProvider: "openai", modelId: "gpt-6-luna" },
     runtime: imageToolRuntime,
     guardrails: { maxCostUsd: 0.012 },
     onEvents: async (events) => { imageToolEvents.push(...events); },
@@ -1628,9 +1637,9 @@ try {
   assert.equal(retainedWorkflowResearch.length, 1, "Successful public-web research was not retained through the actual workflow branch.");
   assert.equal(bridgeResult.diagnosticOutput.ok, true);
   assert.equal(bridgeResult.metering?.apiProvider, "openai");
-  assert.equal(bridgeResult.metering?.modelId, "gpt-5.6-sol");
+  assert.equal(bridgeResult.metering?.modelId, "gpt-6-sol");
   assert(bridgeResult.metering, "Successful public-web research did not pass metering through the actual workflow branch.");
-  assert.equal(bridgeResult.metering.usage.costUsd, usageForModel("gpt-5.6-sol", {
+  assert.equal(bridgeResult.metering.usage.costUsd, usageForModel("gpt-6-sol", {
     input_tokens: 100,
     input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
     output_tokens: 100,
@@ -1663,7 +1672,7 @@ try {
   assert.equal(workflowResearchRequests.length, 5);
   assert.equal(retainedWorkflowResearch.length, 2, "Research without consulted web sources must not retain a report-only snapshot.");
   assert.equal(unresolvedBridgeResult.diagnosticOutput.error, "public_web_search_unresolved");
-  assert.equal(unresolvedBridgeResult.metering?.usage.costUsd, usageForModel("gpt-5.6-sol", {
+  assert.equal(unresolvedBridgeResult.metering?.usage.costUsd, usageForModel("gpt-6-sol", {
     input_tokens: 100,
     input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
     output_tokens: 100,
@@ -1678,7 +1687,7 @@ assert(successfulResearchMetering && successfulResearchSourceId && missingUsageR
 
 const researchMeteringResponses = [{
   id: "response_research_metering",
-  model: "gpt-5.6-sol",
+  model: "gpt-6-sol",
   output_text: "",
   status: "completed",
   error: null,
@@ -1724,7 +1733,7 @@ await assert.rejects(
     authoringContext: context,
     instruction: "Answer a narrow current-fact question.",
     kind: "initial_build",
-    route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+    route: { apiProvider: "openai", modelId: "gpt-6-sol" },
     runtime: researchMeteringRuntime,
     guardrails: { maxCostUsd: successfulResearchMetering.usage.costUsd },
     onProgress: async ({ usage }) => { researchProgressCosts.push(usage.costUsd); }
@@ -1751,7 +1760,7 @@ await assert.rejects(
       if (unavailableResearchProviderCalls > 1) throw new Error("unavailable_research_fixture_made_an_unexpected_second_provider_call");
       return {
         id: "response_unavailable_research",
-        model: "gpt-5.6-sol",
+        model: "gpt-6-sol",
         output_text: "",
         status: "completed",
         error: null,
@@ -1776,11 +1785,11 @@ await assert.rejects(
     authoringContext: context,
     instruction: "Answer a narrow current-fact question.",
     kind: "initial_build",
-    route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+    route: { apiProvider: "openai", modelId: "gpt-6-sol" },
     runtime: unavailableResearchRuntime,
     onProgress: async ({ usage }) => { unavailableResearchProgressSources.push(usage.costSource); }
   }),
-  /tool_cost_telemetry_unavailable:search_public_web:openai:gpt-5\.6-sol/
+  /tool_cost_telemetry_unavailable:search_public_web:openai:gpt-6-sol/
 );
 assert.equal(unavailableResearchProviderCalls, 1, "Unavailable research telemetry permitted another provider turn.");
 assert.deepEqual(unavailableResearchProgressSources, ["unavailable"], "Unavailable research telemetry did not reach manager progress before termination.");
@@ -1789,11 +1798,11 @@ for (const kind of ["edit", "rebase"] as const) {
   const scopedRequests: Parameters<ManagerResponsesClient["create"]>[0][] = [];
   await new WebsiteManagerAgent({ create: async params => {
     scopedRequests.push(params);
-    return { id: `response_${kind}`, model: "gpt-5.6-luna", output_text: "", status: "completed", error: null,
+    return { id: `response_${kind}`, model: "gpt-6-luna", output_text: "", status: "completed", error: null,
       incomplete_details: null, output: [{ type: "function_call", call_id: `finish_${kind}`, name: "finish",
         arguments: JSON.stringify({ ownerMessage: "Requested change complete." }), status: "completed" }] } as never;
   }}).run({ buildInput, authoringContext: context, instruction: "Apply the requested change.", kind,
-    route: { apiProvider: "openai", modelId: "gpt-5.6-luna" }, runtime });
+    route: { apiProvider: "openai", modelId: "gpt-6-luna" }, runtime });
   assert.equal(scopedRequests[0]?.text?.verbosity, "low", "Initial-build output detail must not broaden owner edits or rebases.");
 }
 
@@ -1808,7 +1817,7 @@ await assert.rejects(
     authoringContext: context,
     instruction: "Build a private candidate.",
     kind: "initial_build",
-    route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+    route: { apiProvider: "openai", modelId: "gpt-6-sol" },
     runtime,
     signal: ignoredAbortController.signal
   }),
@@ -1824,7 +1833,7 @@ const glyphGuardResponses = [
   }))
 ].map((call, index) => ({
   id: `response_glyph_guard_${index + 1}`,
-  model: "gpt-5.6-sol",
+  model: "gpt-6-sol",
   output_text: "",
   status: "completed",
   error: null,
@@ -1886,7 +1895,7 @@ await assert.rejects(
     authoringContext: context,
     instruction: "Build a private candidate.",
     kind: "initial_build",
-    route: { apiProvider: "openai", modelId: "gpt-5.6-sol" },
+    route: { apiProvider: "openai", modelId: "gpt-6-sol" },
     runtime: glyphGuardRuntime
   }),
   /authoring_stalled:finish/

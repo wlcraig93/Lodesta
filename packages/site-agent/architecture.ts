@@ -12,7 +12,7 @@ import { normalizeSiteRedirectPath } from "@/packages/platform-operations/contra
 import { isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
 import type { ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
 
-export const siteArchitectureModelId = "gpt-5.6-luna" as const;
+export const siteArchitectureModelId = "gpt-6-luna" as const;
 
 export type SiteArchitectureInventoryEntry = {
   path: string;

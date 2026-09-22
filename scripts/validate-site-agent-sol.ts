@@ -5,7 +5,7 @@ import { sitePlatformRepository } from "../packages/platform-data";
 import { siteAuthoringWorkflow } from "../packages/site-platform/workflow";
 import { siteAgentRunGuardrailDefaults } from "../packages/site-agent";
 
-const model = "gpt-5.6-sol";
+const model = "gpt-6-sol";
 const apiProvider = "openai";
 const maxCostUsd = Number(process.env.LODESTA_SOL_VALIDATION_MAX_COST_USD ?? siteAgentRunGuardrailDefaults.initial_build.maxCostUsd);
 if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 15) {

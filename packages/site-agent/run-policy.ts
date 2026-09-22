@@ -1,10 +1,20 @@
 import type { ManagerModelUsage, ManagerRunGuardrails } from "./contracts";
 import { SiteAuthoringTerminalError } from "./failures";
 
-// Standard direct-OpenAI rates, checked September 5, 2026:
-// https://developers.openai.com/api/docs/pricing
+// Standard direct-OpenAI rates, checked September 5, 2026 (GPT-6 Sol and Luna
+// September 22, 2026): https://developers.openai.com/api/docs/pricing
 // Retained usage is historical evidence; never recompute stored run costs.
 export const siteAgentModelPricing = {
+  "gpt-6-sol": {
+    inputUsdPerMillion: 2,
+    cachedInputUsdPerMillion: 0.2,
+    outputUsdPerMillion: 10
+  },
+  "gpt-6-luna": {
+    inputUsdPerMillion: 0.1,
+    cachedInputUsdPerMillion: 0.01,
+    outputUsdPerMillion: 0.5
+  },
   "gpt-6-astra": {
     inputUsdPerMillion: 10,
     cachedInputUsdPerMillion: 1,
@@ -42,7 +52,7 @@ export const siteAgentModelPricing = {
 type PricedSiteAgentModel = keyof typeof siteAgentModelPricing;
 // Owner-approved production choices. Pricing for historical experiments remains
 // available for audit; a pricing entry alone no longer enables new authoring.
-export type SupportedSiteAgentModel = "gpt-5.6-luna" | "gpt-5.6-terra" | "gpt-5.6-sol";
+export type SupportedSiteAgentModel = "gpt-6-luna" | "gpt-6-sol";
 
 export const siteAgentReasoningEffort = "high" as const;
 export const siteAgentReasoningContext = "all_turns" as const;
@@ -68,7 +78,7 @@ export const siteAgentRunGuardrailDefaults = {
 } as const;
 
 export function isSupportedSiteAgentModel(modelId: string): modelId is SupportedSiteAgentModel {
-  return modelId === "gpt-5.6-luna" || modelId === "gpt-5.6-terra" || modelId === "gpt-5.6-sol";
+  return modelId === "gpt-6-luna" || modelId === "gpt-6-sol";
 }
 
 export function managerGuardrailsForKind(kind: "initial_build" | "edit" | "rebase"): ManagerRunGuardrails {

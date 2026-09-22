@@ -3,25 +3,29 @@
 Lodesta can run the website manager either directly through OpenAI or through OpenRouter. The canonical default remains:
 
 - API provider: `openai`
-- website manager model: `gpt-5.6-luna`
-- business-ingestion provider: direct OpenAI
+- website manager model: `gpt-6-luna`
+- business-ingestion provider: direct OpenAI (`gpt-6-sol` research, `gpt-6-luna` Google-rating lookup)
 
-Initial builds use `gpt-5.6-luna` at high reasoning for both the exhaustive
-architecture request and the workspace author. Architecture and authoring usage
+Initial builds use `gpt-6-luna` at high reasoning for both the exhaustive
+architecture request and the workspace author. GPT-6 Sol and GPT-6 Luna were
+released on September 22, 2026 and replace the GPT-5.6 family for authoring;
+`gpt-6-sol` is the selectable higher-capability author for comparison. Architecture and authoring usage
 share the same run deadline and cost fuse. Edits and rebases go directly to the
 configured website manager without another architecture request. The approved
 decision and canary evidence are recorded in
 `docs/decisions/2026-08-03-luna-architecture-authoring-workflow.md`.
 
-The direct OpenAI website-manager picker exposes the GPT-5.6 family, GPT-5.5 as a prior-generation baseline, and GPT-6 Astra for an operator-controlled quality experiment. Adding an option does not change the canonical default. Standard short-context pricing was checked against the official API table on September 5, 2026:
+The direct OpenAI website-manager picker enables `gpt-6-luna` and `gpt-6-sol`. GPT-5.6, GPT-5.5 and GPT-6 Astra keep pricing entries for historical run accounting only. Standard short-context pricing was checked against the official API table on September 5, 2026 (GPT-6 Sol and Luna on September 22, 2026):
 
 | Model | Intended use | Input / cached input / output per 1M tokens |
 | --- | --- | --- |
-| `gpt-6-astra` | Unpromoted operator quality comparison | $10.00 / $1.00 / $50.00 |
-| `gpt-5.6-sol` | Operator comparison or focused high-capability work | $4.00 / $0.40 / $20.00 |
-| `gpt-5.6-terra` | Balance of intelligence and cost | $2.00 / $0.20 / $12.00 |
-| `gpt-5.6-luna` | Canonical architecture and website authoring | $0.20 / $0.02 / $1.20 |
-| `gpt-5.5` | Prior-generation comparison or fallback | $5.00 / $0.50 / $30.00 |
+| `gpt-6-sol` | Selectable higher-capability author | $2.00 / $0.20 / $10.00 |
+| `gpt-6-luna` | Canonical architecture and website authoring | $0.10 / $0.01 / $0.50 |
+| `gpt-6-astra` | Historical accounting only | $10.00 / $1.00 / $50.00 |
+| `gpt-5.6-sol` | Historical accounting only | $4.00 / $0.40 / $20.00 |
+| `gpt-5.6-terra` | Historical accounting only | $2.00 / $0.20 / $12.00 |
+| `gpt-5.6-luna` | Historical accounting only | $0.20 / $0.02 / $1.20 |
+| `gpt-5.5` | Historical accounting only | $5.00 / $0.50 / $30.00 |
 
 For these models, more than 272,000 total input tokens applies 2× input/cache and 1.5× output pricing to the whole request. Cache writes reported by the API add 25% of the uncached input rate for those tokens. Provider-reported cost takes precedence. These are standard-rate estimates, not invoices; historical run usage is never recomputed after catalog updates. Sol's current price is promotional, available at least through November 21, 2026.
 
@@ -105,6 +109,8 @@ GPT Image 2.5 Flare uses the Image API's returned token breakdown and the local 
 
 ## References
 
+- [OpenAI GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol)
+- [OpenAI GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)
 - [OpenAI GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)
 - [OpenAI GPT-6 Astra migration guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra)
 - [OpenAI current API pricing](https://developers.openai.com/api/docs/pricing)

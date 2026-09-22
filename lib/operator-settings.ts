@@ -8,7 +8,7 @@ import { getSupabaseAdminClient } from "./supabase/client";
 export const SITE_AUTHORING_MODEL_SETTING_KEY = "site_authoring_models";
 export const SITE_AUTHORING_MODEL_DEFAULTS = {
   siteAgentProvider: "openai",
-  siteAgentModel: "gpt-5.6-luna"
+  siteAgentModel: "gpt-6-luna"
 } as const;
 
 const cacheTtlMs = 60_000;
@@ -24,7 +24,7 @@ function refineSettings(
   context: z.RefinementCtx
 ) {
   if (value.siteAgentProvider === "openai" && !isSupportedSiteAgentModel(value.siteAgentModel)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["siteAgentModel"], message: "Site authoring supports Luna, Terra, or Sol. Historical model pricing does not enable production use." });
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["siteAgentModel"], message: "Site authoring supports GPT-6 Luna or GPT-6 Sol. Historical model pricing does not enable production use." });
   }
   if (value.siteAgentProvider === "openrouter" && !value.siteAgentModel.includes("/")) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["siteAgentModel"], message: "OpenRouter models must use a provider-qualified slug such as openai/gpt-5." });

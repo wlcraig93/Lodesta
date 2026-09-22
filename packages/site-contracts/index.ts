@@ -1101,7 +1101,8 @@ const siteAgentUsageSchema = z.object({
 export const siteAgentArchitectureSchema = z.object({
   schemaVersion: z.literal(1),
   producer: z.string().min(1).max(200),
-  modelId: z.literal("gpt-5.6-luna"),
+  // Retained runs record the planner that produced them.
+  modelId: z.enum(["gpt-5.6-luna", "gpt-6-luna"]),
   reasoningEffort: z.literal("high"),
   publicBuildInputId: identifier,
   sourceInventoryHash: contentHash,

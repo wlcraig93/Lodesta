@@ -183,6 +183,10 @@ const rotationMs = 2 * 60 * 60_000;
 export const initialGenerationDeadlineMs = siteAgentRunGuardrailDefaults.initial_build.deadlineMs;
 export const siteEditDeadlineMs = siteAgentRunGuardrailDefaults.edit.deadlineMs;
 
+function findingIdentityKey(finding: { id: string; route?: string; message: string }) {
+  return `${finding.id}|${finding.route ?? ""}|${finding.message}`;
+}
+
 export function retainedCanarySourceIsAvailable(
   snapshot: SourceSnapshot | undefined,
   pageCount: number
@@ -3577,7 +3581,24 @@ export class SiteAuthoringWorkflow {
       signal: input.signal,
       runtimeSource
     });
-    const inspectionFindings = [...prepared.findings, ...browserGate.findings];
+    // The screenshot sample covers a few routes; release verification covers
+    // every route. Run the release browser checks on every route now, without
+    // screenshots, so the author sees each blocker finish would report.
+    const releaseGate = await runArtifactBrowserGate({
+      prepared,
+      buildInput: input.buildInput,
+      blobStore: this.blobStore,
+      capturePrefix: `${capturePrefix}/release-preview`,
+      routePaths: prepared.routes.map((route) => route.path),
+      captureMode: "verification",
+      signal: input.signal,
+      runtimeSource
+    });
+    const sampleFindingKeys = new Set(browserGate.findings.map(findingIdentityKey));
+    const releaseBlockers = releaseGate.findings
+      .filter(isTechnicalReleaseBlocker)
+      .filter((finding) => !sampleFindingKeys.has(findingIdentityKey(finding)));
+    const inspectionFindings = [...prepared.findings, ...browserGate.findings, ...releaseBlockers];
     const browserCaptureMs = Date.now() - browserStartedAt;
     input.onPhase?.("browser_navigation_capture", browserCaptureMs);
     const visualEvidenceStartedAt = Date.now();

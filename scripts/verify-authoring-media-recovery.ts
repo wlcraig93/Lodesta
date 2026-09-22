@@ -622,15 +622,20 @@ try {
   assert.equal(cleanupBootstrapCalls, 1, "Container startup failure was replayed before cleanup completed.");
   assert.equal(cleanupDestroyCalls, 1, "Cleanup-pending failure repeated inline sandbox destruction.");
   assert.equal(cleanupCheckpointCalls, 0, "Cleanup-pending failure called the sandbox checkpoint RPC.");
-  const rotatingCleanupSession = (await repository.getAgentSession(cleanupSession.id))!;
-  assert.equal(rotatingCleanupSession.status, "rotating");
-  assert(rotatingCleanupSession.sandboxId, "Cleanup-pending failure cleared an unconfirmed sandbox binding.");
-  assert.equal(rotatingCleanupSession.currentWorkspaceRevisionId, cleanupRun.exactParentRevisionId);
-  assert.equal(rotatingCleanupSession.publicBuildInputId, cleanupRun.publicBuildInputId);
+  const retainedCleanupSession = (await repository.getAgentSession(cleanupSession.id))!;
+  assert.equal(retainedCleanupSession.status, "active");
+  assert(retainedCleanupSession.sandboxId, "Cleanup-pending failure cleared an unconfirmed sandbox binding.");
+  assert.equal(retainedCleanupSession.currentWorkspaceRevisionId, cleanupRun.exactParentRevisionId);
+  assert.equal(retainedCleanupSession.publicBuildInputId, cleanupRun.publicBuildInputId);
   assert.equal((await repository.getSite(input.siteId))!.currentWorkspaceRevisionId, retainedParent.id,
     "Cleanup-pending edit changed the site's retained parent.");
 
   allowCleanup = true;
+  const expiredAt = new Date().toISOString();
+  await repository.saveAgentSession(siteAgentSessionSchema.parse({
+    ...retainedCleanupSession,
+    leaseExpiresAt: expiredAt
+  }));
   const reaped = await cleanupWorkflow.reapExpiredSessions({
     now: new Date(Date.now() + 60_000).toISOString(),
     limit: 100

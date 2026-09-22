@@ -89,6 +89,9 @@ export const defaultBrowserGateViewports: readonly BrowserGateViewport[] = [
   { name: "mobile" as const, width: 390, height: 844 }
 ];
 
+/** Author-review screenshot budget. Verification mode ignores this and keeps full release captures. */
+export type AuthorReviewScreenshot = "none" | "desktop-top" | "focus" | "full";
+
 export async function runArtifactBrowserGate(input: {
   prepared: PreparedSiteArtifact;
   buildInput: SitePublicBuildInput;
@@ -97,6 +100,12 @@ export async function runArtifactBrowserGate(input: {
   routePaths?: string[];
   focusSelector?: string;
   captureMode?: "verification" | "review";
+  /**
+   * Limits author-review PNG capture. `none` keeps measured text only;
+   * `desktop-top` returns one desktop top frame; `focus` returns one focused
+   * element frame. Omitted review callers keep the historical full set.
+   */
+  authorScreenshot?: AuthorReviewScreenshot;
   /** Author-review/operator/test viewport override. Final verification uses the defaults. */
   viewports?: readonly BrowserGateViewport[];
   signal?: AbortSignal;
@@ -130,6 +139,7 @@ async function runArtifactBrowserGateOnce(input: {
   routePaths?: string[];
   focusSelector?: string;
   captureMode?: "verification" | "review";
+  authorScreenshot?: AuthorReviewScreenshot;
   viewports?: readonly BrowserGateViewport[];
   signal?: AbortSignal;
 }, attempt: 1 | 2): Promise<FullBrowserGateResult> {
@@ -137,7 +147,8 @@ async function runArtifactBrowserGateOnce(input: {
   let browser: Browser | undefined;
   try {
     const isAuthorReview = input.captureMode === "review";
-    // Author review is a visual feedback tool, not an early release gate. The
+    const authorScreenshot = isAuthorReview ? (input.authorScreenshot ?? "full") : "full";
+    // Author review is a measured feedback tool, not an early release gate. The
     // final verification pass still exercises every route and functional
     // contract after authoring is complete.
     const findings = isAuthorReview
@@ -215,7 +226,7 @@ async function runArtifactBrowserGateOnce(input: {
         });
         if (!response?.ok()) routeFindings.push(finding("route.response", `Route returned ${response?.status() ?? "no response"}.`, route.path));
         const naturalMetrics = await inspectPage(page, activeLogoRevisionIds, ownerLogoRevisionIds);
-        if (input.captureMode === "review" && route.path === "/" && viewport.name !== "tablet") {
+        if (authorScreenshot === "full" && input.captureMode === "review" && route.path === "/" && viewport.name !== "tablet") {
           const naturalKey = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-natural.png`;
           captures.push({
             key: naturalKey,
@@ -247,16 +258,20 @@ async function runArtifactBrowserGateOnce(input: {
         // presentation cannot be assessed honestly from the closed header,
         // while capturing every route would add redundant evidence and cost.
         if (viewport.name === "mobile" && (isAuthorReview || route.path === "/")) {
-          const openNavigation = await captureOpenNavigation(page);
+          const openNavigation = await captureOpenNavigation(page, {
+            captureScreenshot: authorScreenshot === "full"
+          });
           if (openNavigation) {
-            captures.push({
-              key: `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-navigation.png`,
-              route: route.path,
-              viewport: viewport.name,
-              stage: "settled",
-              frame: "navigation",
-              bytes: openNavigation.bytes
-            });
+            if (openNavigation.bytes) {
+              captures.push({
+                key: `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-navigation.png`,
+                route: route.path,
+                viewport: viewport.name,
+                stage: "settled",
+                frame: "navigation",
+                bytes: openNavigation.bytes
+              });
+            }
             if (openNavigation.callActionLabelSpacingExamples.length > 0) {
               routeFindings.push(finding(
                 "render.call_action_label_spacing",
@@ -362,6 +377,15 @@ async function runArtifactBrowserGateOnce(input: {
         }
         if (metrics.headingOverflowCount > 0) {
           routeFindings.push(finding("render.heading_overflow", `${metrics.headingOverflowCount} heading(s) overflow at ${viewport.name}.`, route.path, "render", "warning"));
+        }
+        if (metrics.headingWordBreakCount > 0) {
+          routeFindings.push(finding(
+            "render.heading_word_break",
+            `${metrics.headingWordBreakCount} heading(s) break a word across lines at ${viewport.name} (overflow-wrap/word-break mid-word wrap). Examples: ${metrics.headingWordBreakExamples.join("; ")}.`,
+            route.path,
+            "render",
+            "error"
+          ));
         }
         if (metrics.brokenImages > 0) {
           routeFindings.push(finding("render.broken_image", `${metrics.brokenImages} image(s) failed at ${viewport.name}.`, route.path));
@@ -952,7 +976,52 @@ async function runArtifactBrowserGateOnce(input: {
           }
         }
         let focusedSelection = false;
-        if (input.focusSelector) {
+        if (authorScreenshot === "focus" && input.focusSelector && viewport.name === "desktop") {
+          try {
+            const selected = page.locator(input.focusSelector).first();
+            if (await selected.count() && await selected.isVisible()) {
+              await selected.evaluate((element) => {
+                element.setAttribute("data-lodesta-inspection-focus", "true");
+                element.scrollIntoView({ block: "center", inline: "center" });
+              });
+              await page.addStyleTag({ content: `
+                [data-lodesta-inspection-focus="true"] {
+                  outline: 4px solid #1683ff !important;
+                  outline-offset: 3px !important;
+                  box-shadow: 0 0 0 7px rgba(22, 131, 255, .2) !important;
+                }
+              ` });
+              await page.waitForTimeout(75);
+              const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-focus.png`;
+              captures.push({
+                key,
+                route: route.path,
+                viewport: viewport.name,
+                stage: "settled",
+                frame: "focus",
+                focusSelector: input.focusSelector,
+                bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
+              });
+              focusedSelection = true;
+            } else {
+              routeFindings.push(finding(
+                "render.inspection_selection_missing",
+                `The selected element was not visible at ${viewport.name}; no focused screenshot was captured. Selector: ${input.focusSelector}.`,
+                route.path,
+                "render",
+                "warning"
+              ));
+            }
+          } catch (error) {
+            routeFindings.push(finding(
+              "render.inspection_selection_invalid",
+              `The selected element could not be focused at ${viewport.name}; no focused screenshot was captured. Selector: ${input.focusSelector}. ${error instanceof Error ? error.message : String(error)}`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+        } else if (authorScreenshot === "full" && input.focusSelector) {
           try {
             const selected = page.locator(input.focusSelector).first();
             if (await selected.count() && await selected.isVisible()) {
@@ -998,7 +1067,7 @@ async function runArtifactBrowserGateOnce(input: {
             ));
           }
         }
-        if (!focusedSelection) {
+        if (!focusedSelection && authorScreenshot !== "none" && authorScreenshot !== "focus") {
           // Functional navigation probes may restore keyboard focus to a
           // trigger. Retain that state only in the explicit navigation frame;
           // ordinary route frames represent a natural first load.
@@ -1006,34 +1075,39 @@ async function runArtifactBrowserGateOnce(input: {
             if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           });
           await page.waitForTimeout(50);
-          const retainExtendedEvidence = input.captureMode === "review"
-            || routeFindings.some(isTechnicalReleaseBlocker);
-          const frames = !retainExtendedEvidence || viewport.name === "tablet"
-            ? ["top"] as const
-            : ["top", "middle", "bottom"] as const;
-          const documentHeight = await page.evaluate(() => Math.max(
-            document.documentElement.scrollHeight,
-            document.body.scrollHeight
-          ));
-          for (const frame of frames) {
-            const maximumScroll = Math.max(0, documentHeight - viewport.height);
-            const position = frame === "top"
-              ? 0
-              : frame === "middle"
-                ? maximumScroll / 2
-                : maximumScroll;
-            await settleScrollPosition(page, position);
-            const pageState = await inspectCapturePageState(page);
-            const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-${frame}.png`;
-            captures.push({
-              key,
-              route: route.path,
-              viewport: viewport.name,
-              stage: "settled",
-              frame,
-              pageState,
-              bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
-            });
+          const captureDesktopTopOnly = authorScreenshot === "desktop-top";
+          if (captureDesktopTopOnly && viewport.name !== "desktop") {
+            // Measured text still runs on every viewport; only desktop top is photographed.
+          } else {
+            const retainExtendedEvidence = !captureDesktopTopOnly
+              && (input.captureMode === "review" || routeFindings.some(isTechnicalReleaseBlocker));
+            const frames = !retainExtendedEvidence || viewport.name === "tablet"
+              ? ["top"] as const
+              : ["top", "middle", "bottom"] as const;
+            const documentHeight = await page.evaluate(() => Math.max(
+              document.documentElement.scrollHeight,
+              document.body.scrollHeight
+            ));
+            for (const frame of frames) {
+              const maximumScroll = Math.max(0, documentHeight - viewport.height);
+              const position = frame === "top"
+                ? 0
+                : frame === "middle"
+                  ? maximumScroll / 2
+                  : maximumScroll;
+              await settleScrollPosition(page, position);
+              const pageState = await inspectCapturePageState(page);
+              const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-${frame}.png`;
+              captures.push({
+                key,
+                route: route.path,
+                viewport: viewport.name,
+                stage: "settled",
+                frame,
+                pageState,
+                bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
+              });
+            }
           }
         }
         await settleScrollPosition(page, 0);
@@ -1120,7 +1194,8 @@ async function verifyEveryPreparedRoute(
   return findings;
 }
 
-async function captureOpenNavigation(page: Page) {
+async function captureOpenNavigation(page: Page, options: { captureScreenshot?: boolean } = {}) {
+  const captureScreenshot = options.captureScreenshot !== false;
   await settleScrollPosition(page, 0);
   const toggles = page.locator([
     "[data-lodesta-menu-toggle]",
@@ -1217,7 +1292,9 @@ async function captureOpenNavigation(page: Page) {
         .map((element) => (element instanceof HTMLElement ? element.innerText : element.textContent ?? "").trim())
         .filter((label) => /^call(?=[(\d+])/i.test(label))
         .slice(0, 3));
-      const bytes = await page.screenshot({ fullPage: false, type: "png", animations: "disabled" });
+      const bytes = captureScreenshot
+        ? await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
+        : undefined;
       await closeBrowserNavigationTrigger(page, toggle);
       // Escape deliberately restores keyboard focus to the trigger. That is
       // correct runtime behavior, but leaving the synthetic review focus in
@@ -1511,6 +1588,8 @@ async function startHarness(input: {
 type BrowserPageMetrics = {
   horizontalOverflowPx: number;
   headingOverflowCount: number;
+  headingWordBreakCount: number;
+  headingWordBreakExamples: string[];
   brokenImages: number;
   h1Count: number;
   missingAriaReferenceCount: number;
@@ -3658,10 +3737,61 @@ const browserInspectionSource = String.raw`(() => {
       try { fragment = decodeURIComponent(rawFragment); } catch {}
       return !document.getElementById(fragment);
     });
+    // Mid-word wraps from overflow-wrap/word-break stay inside clientWidth, so
+    // scrollWidth overflow misses them. Measure rendered character line tops.
+    const headingWordBreaks = [...document.querySelectorAll("h1,h2,h3,h4,h5,h6")].flatMap((heading) => {
+      if (!colorTools.visible(heading) || intentionallyVisuallyHidden(heading)) return [];
+      const style = getComputedStyle(heading);
+      if (!style.writingMode.startsWith("horizontal")) return [];
+      const brokenWords = [];
+      const walker = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const value = node.textContent ?? "";
+        let word = "";
+        let wordStart = -1;
+        let wordLineTop = undefined;
+        let wordBroke = false;
+        const flush = () => {
+          if (wordBroke && word.length >= 4) brokenWords.push(word);
+          word = "";
+          wordStart = -1;
+          wordLineTop = undefined;
+          wordBroke = false;
+        };
+        for (let index = 0; index < value.length; index += 1) {
+          const character = value[index];
+          if (/\s/.test(character)) {
+            flush();
+            continue;
+          }
+          const range = document.createRange();
+          range.setStart(node, index);
+          range.setEnd(node, index + 1);
+          const rect = range.getClientRects()[0];
+          if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+          const lineTop = Math.round(rect.top / 2) * 2;
+          if (wordStart < 0) {
+            wordStart = index;
+            wordLineTop = lineTop;
+            word = character;
+            continue;
+          }
+          if (wordLineTop !== undefined && lineTop !== wordLineTop) wordBroke = true;
+          word += character;
+        }
+        flush();
+      }
+      if (!brokenWords.length) return [];
+      const text = colorTools.textFor(heading).slice(0, 80);
+      return [colorTools.selectorFor(heading) + ' "' + text + '" breaks '
+        + brokenWords.slice(0, 3).map((word) => '"' + word + '"').join(", ")];
+    });
     return {
       horizontalOverflowPx: Math.max(0, root.scrollWidth - root.clientWidth),
       headingOverflowCount: [...document.querySelectorAll("h1,h2,h3,h4,h5,h6")]
         .filter((heading) => !intentionallyVisuallyHidden(heading) && heading.scrollWidth - heading.clientWidth > 2).length,
+      headingWordBreakCount: headingWordBreaks.length,
+      headingWordBreakExamples: headingWordBreaks.slice(0, 3),
       brokenImages: [...document.images].filter((image) => !image.complete || image.naturalWidth === 0).length,
       h1Count: document.querySelectorAll("h1").length,
       missingAriaReferenceCount: missingAriaReferences.length,

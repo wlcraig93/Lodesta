@@ -52,6 +52,21 @@ export function rankSourceAssetCandidates(input: {
   );
 }
 
+export function sourcePhotoCountsByPagePath(input: {
+  resources: SourceSnapshotResource[];
+  pages: SourceSnapshotPage[];
+}) {
+  const pagesById = new Map(input.pages.map((page) => [page.id, page]));
+  const counts = new Map<string, number>();
+  for (const candidate of rankSourceAssetCandidates(input)) {
+    if (candidate.likelyKind !== "photo") continue;
+    const page = pagesById.get(candidate.sourcePageId);
+    if (!page) continue;
+    counts.set(page.path, (counts.get(page.path) ?? 0) + 1);
+  }
+  return counts;
+}
+
 export function sourceResourceIsAdoptableImage(resource: SourceSnapshotResource) {
   return resource.outcome === "fetched"
     && Boolean(resource.storageKey && resource.blobContentHash && resource.rawContentHash)

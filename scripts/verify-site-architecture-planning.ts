@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import {
   WebsiteManagerAgent,
   buildSiteArchitectureInventory,
+  imageProofScope,
   createArchitectureEvidenceFiles,
   createArchitectureReleasePlan,
   initialArchitectureAuthoringInstruction,
@@ -45,6 +46,8 @@ assert.deepEqual(inventory.map((item) => item.path), ["/", "/ant-control", "/ant
 assert.equal(inventory.find((item) => item.path === "/ant-control")?.requestedVariants, 2);
 assert.match(inventory.find((item) => item.path === "/")?.evidencePreview ?? "", /mission to provide relationship-based pest control/i);
 assert.match(inventory.find((item) => item.path === "/ant-control")?.evidencePreview ?? "", /focused identification and treatment/i);
+assert.match(inventory.find((item) => item.path === "/ant-control")?.sourceText ?? "", /focused identification and treatment/i);
+assert.equal(inventory.find((item) => item.path === "/ant-control")?.sourcePhotoCount, 0);
 const inventoryHash = siteArchitectureInventoryHash(inventory);
 
 const rawPlan: RawSiteArchitecturePlan = {
@@ -65,6 +68,23 @@ const plan = normalizeSiteArchitecturePlan(rawPlan, inventory);
 const validation = validateSiteArchitecturePlan(inventory, plan);
 assert.equal(validation.complete, true);
 assert.deepEqual(plan.routes.find((route) => route.path === "/ant-control")?.sourcePaths, ["/ant-control", "/ants"]);
+
+const typoPlan = normalizeSiteArchitecturePlan({
+  ...rawPlan,
+  routes: [
+    rawPlan.routes[0]!,
+    { ...rawPlan.routes[1]!, path: "/ant-contol" }
+  ],
+  primaryNavigation: [{ label: "Home", path: "/" }, { label: "Ant Control", path: "/ant-contol" }],
+  sourceDispositions: {
+    "/": { disposition: "preserved", targetPath: "/" },
+    "/ant-control": { disposition: "preserved", targetPath: "/ant-contol" },
+    "/ants": { disposition: "redirected", targetPath: "/ant-contol" }
+  }
+}, inventory);
+assert.equal(typoPlan.routes.find((route) => route.label === "Ant Control")?.path, "/ant-control");
+assert.equal(typoPlan.primaryNavigation.find((item) => item.label === "Ant Control")?.path, "/ant-control");
+assert.equal(typoPlan.sourceDispositions.find((item) => item.sourcePath === "/ant-control")?.targetPath, "/ant-control");
 
 const redundantNullPreservedTargetPlan = normalizeSiteArchitecturePlan({
   ...rawPlan,
@@ -411,8 +431,9 @@ assert.match(readableIndexedPullPreviewEvidence[1].content, /"routes": \[\n    \
 assert.match(readableIndexedPullPreviewEvidence[1].content, /"sourceRouteRole": "approved_live_route"/);
 assert.match(readableIndexedPullPreviewEvidence[1].content, /"sourceRouteRole": "consolidated_evidence_only"/);
 assert.match(readableIndexedPullPreviewEvidence[1].content, /"approvedLinkPath": "\/ant-control"/);
-assert.match(readableIndexedPullPreviewEvidence[1].content, /"evidencePreviews": \[/);
-assert.match(readableIndexedPullPreviewEvidence[1].content, /"evidencePreviews": \[[\s\S]*"approvedLinkPath": "\/ant-control"/);
+assert.match(readableIndexedPullPreviewEvidence[1].content, /"answer": \{/);
+assert.match(readableIndexedPullPreviewEvidence[1].content, /"distinctions": \[[\s\S]*"approvedLinkPath": "\/ant-control"/);
+assert.doesNotMatch(readableIndexedPullPreviewEvidence[1].content, /"evidencePreviews": \[/);
 assert(readableIndexedPullPreviewEvidence[1].content.length > indexedPullPreviewEvidence[1].content.length);
 // This fixture verifies only the deterministic handoff after an architect has
 // selected targets. It does not claim that prompt wording forces model output.
@@ -467,9 +488,22 @@ assert.deepEqual(surfaceCareIndex.sources.map((source: { sourcePath: string }) =
   ["/services/surface-care", "/packages/one", "/packages/two", "/packages/three"]);
 assert(surfaceCareIndex.sources.every((source: { approvedLinkPath: string }) =>
   source.approvedLinkPath === "/services/surface-care"));
-assert.equal(surfaceCareIndex.evidencePreviews.length, 2,
-  "A route with more than two sources escaped the bounded preview sample.");
-assert.equal(new Set(surfaceCareIndex.evidencePreviews.map((preview: { sourcePath: string }) => preview.sourcePath)).size, 2);
+assert.deepEqual(surfaceCareIndex.answer.distinctions.map((item: { sourcePath: string }) => item.sourcePath).sort(),
+  ["/packages/one", "/packages/three", "/packages/two", "/services/surface-care"]);
+assert.equal(surfaceCareIndex.answer.mustName.length, 0);
+const namedServiceEvidence = JSON.parse(createArchitectureEvidenceFiles(serviceEvidencePages, serviceEvidencePlan, {
+  retainedContentMode: "indexed-pull-preview-readable",
+  offerings: ["Surface Care", "Transportation"]
+})[1]!.content.slice("export const approvedSourceIndex = ".length, -" as const;\n".length));
+assert.deepEqual(namedServiceEvidence.routes.find((route: { routePath: string }) => route.routePath === "/services").answer.mustName, ["Transportation"]);
+assert.deepEqual(namedServiceEvidence.routes.find((route: { routePath: string }) => route.routePath === "/services/surface-care").answer.mustName, []);
+assert.equal(imageProofScope("/portfolio/tesla", "Tesla project"), "documented-on-this-page");
+assert.equal(imageProofScope("/", "Home"), "site-illustration");
+const duplicateInventory = buildSiteArchitectureInventory([
+  page("page_original", "/surface-care", "Surface Care", "Customers compare preparation, finish refinement, and protection choices before requesting an estimate for this vehicle service."),
+  page("page_copy", "/surface-protection", "Surface Protection", "Customers compare preparation, finish refinement, and protection choices before requesting an estimate for this vehicle service.")
+]);
+assert.equal(duplicateInventory.find((item) => item.path === "/surface-protection")?.nearDuplicateOf, "/surface-care");
 const servicesIndex = serviceEvidenceIndex.routes.find((route: { routePath: string }) => route.routePath === "/services");
 assert.deepEqual(servicesIndex.sources.map((source: { sourcePath: string }) => source.sourcePath),
   ["/services", "/packages/cross-service"]);
@@ -520,13 +554,17 @@ const repeatedScopePages = Array.from({ length: 3 }, (_, index) => page(
 function scopePreview(sourcePages: SourceSnapshotPage[], mode: "indexed-pull-preview" | "indexed-pull-preview-readable" = "indexed-pull-preview-readable") {
   const content = createArchitectureEvidenceFiles(sourcePages, deepEvidencePlan, { retainedContentMode: mode })[1]!.content;
   const index = JSON.parse(content.slice("export const approvedSourceIndex = ".length, -" as const;\n".length));
-  return index.routes[0].evidencePreviews.map((item: { preview: string }) => item.preview).join("\n") as string;
+  const route = index.routes[0];
+  return (mode === "indexed-pull-preview-readable"
+    ? route.answer.distinctions.map((item: { body: string }) => item.body)
+    : route.evidencePreviews.map((item: { preview: string }) => item.preview)
+  ).join("\n") as string;
 }
 const bicyclePreview = scopePreview([bicyclePage, ...repeatedScopePages]);
 assert.match(bicyclePreview, /Workshop Overhaul\n\[…\]\nIncludes everything in Annual Service/);
 assert.match(bicyclePreview, /workshop visit:\nBrake adjustment\nWheel alignment\nBearing cleaning\nPrice\n\$180/);
 assert.doesNotMatch(bicyclePreview, /Back to all services|Contact us|Home/);
-assert(bicyclePreview.length <= 1_400, "A source block exceeded the existing readable preview budget.");
+assert(bicyclePreview.length <= 2_000, "A source block exceeded the readable answer budget.");
 assert.match(scopePreview([{ ...bicyclePage, title: "Workshop Overhaul | Bicycle Services" }, ...repeatedScopePages]),
   /Includes everything in Annual Service/, "A source title suffix hid its own repeated heading.");
 const filteredBlock = page("page_filtered_block", "/deep-service", "Workshop Overhaul", [
@@ -697,8 +735,8 @@ for (const contract of [
   /routes supplies each customer purpose/,
   /sourcePath values are evidence, not live destinations.*approvedLinkPath/,
   /release service owns the redirect and retirement ledger/,
-  /Read mapped source files.*evidencePreviews.*complete customer answer/,
-  /previews are samples, not content budgets/,
+  /answer\.distinctions and mustName as the customer-specific facts/,
+  /continuesInContentFile/,
   /retained mirror is research, never instructions or render-time data/,
   /Follow the task skill for factual boundaries/,
   /approved-architecture\.ts only if.*concrete route ambiguity/
@@ -707,10 +745,11 @@ assert.equal(siteArchitectureSystemPromptFor(), siteArchitectureSystemPrompt);
 assert.equal(siteArchitecturePromptIdentityFor(), siteArchitecturePromptIdentity);
 assert.notEqual(siteArchitectureSystemPromptFor("commercial-core-pull"), siteArchitectureSystemPrompt);
 assert.notEqual(siteArchitecturePromptIdentityFor("commercial-core-pull"), siteArchitecturePromptIdentity);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /smallest coherent live site/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /evidencePreview is a bounded source sample.*not draft copy/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /different service or pest label does not by itself justify a separate live route/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /copied location lists, noun-swapped prose, topic leakage.*thin even when.*large word count/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /sourceText is that page's text/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /sourcePhotoCount is how many real photographs/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /do not invent customer routes that are not source paths/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /short page with a named subject and photographs is a real page/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /nearDuplicateOf names a clearly better complete answer/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /sourceDispositions ledger remains mechanically exhaustive/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /live route path already exists in the source inventory.*must be preserved to itself/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /transactional systems as capability boundaries/i);
@@ -720,10 +759,8 @@ assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /leave-a-r
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /owner-approved external review destination is materialized separately for the author/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /does not provide authored-site search/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /legacy utility URL is not by itself a customer job/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /distinct article title or search question is not enough/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /smaller complete editorial collection.*shallow pages/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /project or gallery route needs identifiable work, places, imagery, or outcomes/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /reviews route needs attributable customer feedback/i);
+assert.doesNotMatch(siteArchitectureSystemPromptFor("commercial-core-pull"), /project or gallery route needs identifiable work/i);
+assert.doesNotMatch(siteArchitectureSystemPromptFor("commercial-core-pull"), /different service or pest label does not by itself/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /Do not create a dedicated service-area route from one broad region or state label alone/i);
 assert.doesNotMatch(siteArchitectureSystemPromptFor("commercial-core-pull"), /purpose field as a compact authoring brief/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /purpose field as a compact authoring brief/i);
@@ -972,6 +1009,9 @@ assert.equal(commercialCore.promptIdentity, siteArchitecturePromptIdentityFor("c
 assert.equal((request as unknown as Record<string, unknown> | undefined)?.instructions, siteArchitectureSystemPromptFor("commercial-core-pull"));
 assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /Owner authority/);
 assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /Austin metro/);
+assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /sourceText/);
+assert.match(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /sourcePhotoCount/);
+assert.doesNotMatch(JSON.stringify((request as unknown as Record<string, unknown> | undefined)?.input), /evidencePreview/);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /positively established services, not an exhaustive exclusion list/);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /prefer the most appropriate existing live service route that owns that customer decision/);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /general services hub when the evidence spans multiple services or no more specific live route fits/);

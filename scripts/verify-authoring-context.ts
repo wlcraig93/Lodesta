@@ -172,7 +172,7 @@ const initialBuildSkill = taskSkillFor("initial_build").knowledge.join("\n");
 for (const contract of [
   /do not add, remove, merge, or redirect routes/,
   /authored TSX and CSS readable, structurally formatted/,
-  /customer purpose shape each page's composition, supporting copy and closing action/,
+  /customer purpose shape each page's composition/,
   /decorative numbers and diagrams are not proof/,
   /Preserve geographic qualifiers/,
   /primary action without an oversized headline crowding it out/,
@@ -183,7 +183,7 @@ for (const contract of [
   /LeadField label and control class props/,
   /LeadField adds no required\/optional decoration.*schema status visible through field labels or adjacent copy naming the required and optional fields/,
   /full-column controls/,
-  /opened phone navigation and the complete form/
+  /Correct each returned error and defect/
 ]) assert.match(initialBuildSkill, contract);
 
 const [contracts, workflow, sourcePreparation, repository, architecture, browserGate] = await Promise.all([

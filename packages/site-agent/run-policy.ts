@@ -29,6 +29,13 @@ export const siteAgentModelPricing = {
     inputUsdPerMillion: 5,
     cachedInputUsdPerMillion: 0.5,
     outputUsdPerMillion: 30
+  },
+  // OpenRouter list price checked September 21, 2026. Requests above 200K
+  // prompt tokens bill at double these rates; provider-reported cost wins.
+  "x-ai/grok-4.7": {
+    inputUsdPerMillion: 1.6,
+    cachedInputUsdPerMillion: 0.4,
+    outputUsdPerMillion: 4.8
   }
 } as const;
 

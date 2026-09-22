@@ -35,9 +35,9 @@ export class DeterministicManagerHistory {
   }
 
   activeTailItems(_requestIndex?: number) {
-    // A tool call does not prove that every preview was understood or is no
-    // longer needed. Keep labels and pixels together until provider compaction
-    // replaces their history, exactly as we retain other tool evidence.
+    // Asset and generated-image previews stay until provider compaction.
+    // Prior inspect_site/finish screenshots are stripped when a later tool
+    // result is recorded so the model is not re-billed for spent pixels.
     return [...this.tail];
   }
 
@@ -92,6 +92,7 @@ export class DeterministicManagerHistory {
         this.readHashes.set(file.path, file.contentHash);
       }
     }
+    this.stripSpentInspectionScreenshots();
     if (input.includeResponseItems !== false) this.appendResponseItems(input.responseItems);
     this.tail.push(input.functionOutput);
     this.pending.push(input.functionOutput);
@@ -152,6 +153,28 @@ export class DeterministicManagerHistory {
       return;
     }
     this.tail.push(...items);
+  }
+
+  private stripSpentInspectionScreenshots() {
+    const inspectionCallIds = new Set<string>();
+    for (const item of [...this.prefix, ...this.tail]) {
+      const record = objectValue(item);
+      if (record?.type !== "function_call" || typeof record.call_id !== "string") continue;
+      if (record.name === "inspect_site" || record.name === "finish") inspectionCallIds.add(record.call_id);
+    }
+    if (!inspectionCallIds.size) return;
+    const rewrite = (items: ResponseInputItem[]) => {
+      for (let index = 0; index < items.length; index += 1) {
+        const record = objectValue(items[index]);
+        if (record?.type !== "function_call_output" || typeof record.call_id !== "string") continue;
+        if (!inspectionCallIds.has(record.call_id)) continue;
+        const stripped = stripInputImages(record.output);
+        if (stripped === record.output) continue;
+        items[index] = { ...record, output: stripped } as ResponseInputItem;
+      }
+    };
+    rewrite(this.tail);
+    rewrite(this.pending);
   }
 }
 
@@ -214,6 +237,12 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
 
 function isCompactionItem(value: ResponseInputItem) {
   return objectValue(value)?.type === "compaction";
+}
+
+function stripInputImages(output: unknown) {
+  if (!Array.isArray(output)) return output;
+  const next = output.filter((item) => objectValue(item)?.type !== "input_image");
+  return next.length === output.length ? output : next;
 }
 
 function bytes(value: unknown) {

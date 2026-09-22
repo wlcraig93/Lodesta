@@ -1047,7 +1047,7 @@ function transientTransportError(error: unknown) {
   const status = error && typeof error === "object" ? (error as { status?: unknown }).status : undefined;
   if (typeof status === "number") return status === 408 || status === 409 || status === 429 || status >= 500;
   return error instanceof TypeError
-    || /timeout|timed out|connection|socket|network|unexpected end of json input|unterminated json|invalid json response/i.test(boundedError(error));
+    || /timeout|timed out|connection|socket|network|temporarily unavailable|unexpected end of json input|unterminated json|invalid json response/i.test(boundedError(error));
 }
 
 function guardrailsFor(input: ManagerRunRequest, override?: Partial<ManagerRunGuardrails>): ManagerRunGuardrails {
@@ -1496,7 +1496,7 @@ export const websiteManagerTools: Tool[] = [
       alt: { type: "string", minLength: 1, maxLength: 500 }
     }
   }),
-  tool("inspect_site", "Build the current workspace if needed, then inspect actual desktop, tablet, mobile, and opened mobile-navigation pixels in Lodesta's browser together with concrete render findings. For an initial build, pass null for the architecture-selected starting sample; passing '/' inspects only the homepage. Pass an exact route to investigate a finding, changed pixels, or distinct content and composition not represented by that sample. Route screenshots sample the page, not every section. To see an uncertain element close up, supply an exact route and its CSS selector; if visible, the first matching element is centered and outlined instead of the ordinary route frames. With selector null, preserve ordinary inspection behavior, including the owner's selected element when applicable; for an edit, route null uses the owner's selected route. This never runs hard release verification.", {
+  tool("inspect_site", "Build the current workspace if needed, then inspect the already-running pages in Lodesta's browser and return measured render findings as text. The default result is text only: it does not attach screenshots. For an initial build, pass null for the architecture-selected starting sample; passing '/' inspects only the homepage. Pass an exact route with selector null to attach one desktop top screenshot of that route. Pass an exact route and CSS selector to attach one focused screenshot of the first matching visible element. Route null keeps the representative measured sample without pictures. Use a route or selector screenshot only when measured text leaves a concrete visual uncertainty. This never runs hard release verification.", {
     type: "object", additionalProperties: false, properties: {
       route: { type: ["string", "null"], pattern: "^/", maxLength: 300 },
       selector: { type: ["string", "null"], minLength: 1, maxLength: 500 }

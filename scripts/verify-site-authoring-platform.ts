@@ -29,6 +29,7 @@ import {
 import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 import { isContinuousAvailabilityValue as sandboxAvailability } from "../workers/site-sandbox/scaffold/platform/presentation";
 import { sitemapXmlForSite } from "../packages/site-platform/public-site";
+import { executeWithFreshSandboxRecovery } from "../packages/site-platform/sandbox-recovery";
 import { retainedVisualInspectionRoutePaths, scopedVisualInspectionRoutePaths } from "../packages/site-platform/visual-inspection-scope";
 import { classifySourcePagePath } from "../packages/business-data/source-page-classification";
 import { sha256, stableJson } from "../packages/business-data/hash";
@@ -1898,6 +1899,47 @@ assert.deepEqual(
   },
   "Missing sandbox credentials are not classified as sandbox unavailability."
 );
+assert.equal(
+  classifySiteAuthoringFailure(new Error("Not Authorized")).retryableByOwner,
+  true
+);
+{
+  let attempts = 0;
+  let recycles = 0;
+  const recovered = await executeWithFreshSandboxRecovery({
+    attempt: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("tcp-proxy exec WebSocket connection failed.");
+      return "same-sandbox";
+    },
+    recycle: async () => { recycles += 1; },
+    isRepairable: () => false,
+    isInfrastructureFailure: () => false,
+    isTransportFailure: (error) => error instanceof Error && /WebSocket connection failed/.test(error.message),
+    recoveryReason: () => "transport_failure",
+    terminalError: (error) => error
+  });
+  assert.equal(recovered, "same-sandbox");
+  assert.equal(attempts, 2);
+  assert.equal(recycles, 0);
+  attempts = 0;
+  const replaced = await executeWithFreshSandboxRecovery({
+    attempt: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("machine");
+      return "fresh-sandbox";
+    },
+    recycle: async () => { recycles += 1; },
+    isRepairable: () => false,
+    isInfrastructureFailure: (error) => error instanceof Error && error.message === "machine",
+    isTransportFailure: () => false,
+    recoveryReason: () => "machine_failure",
+    terminalError: (error) => error
+  });
+  assert.equal(replaced, "fresh-sandbox");
+  assert.equal(recycles, 1);
+  assert.equal(attempts, 2);
+}
 assert.deepEqual(
   classifySiteAuthoringFailure(new Error("sandbox_destroy_retry_required")),
   {

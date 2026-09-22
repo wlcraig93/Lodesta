@@ -8,6 +8,11 @@ export const establishedOpenRouterAuthoringRoutes = {
     routeFamily: "openrouter_moonshot" as const,
     contextWindowTokens: 1_048_576,
     eligibleZdrUpstreams: ["moonshotai"] as const
+  },
+  "x-ai/grok-4.7": {
+    routeFamily: "openrouter_xai" as const,
+    contextWindowTokens: 500_000,
+    eligibleZdrUpstreams: ["xai"] as const
   }
 } as const;
 

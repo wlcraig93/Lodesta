@@ -11,6 +11,9 @@ export type ManagerSourceEvidenceReference = {
   sourcePageId: string;
   sourcePageUrl: string;
   sourcePageTitle?: string;
+  width?: number | null;
+  height?: number | null;
+  proofScope?: "documented-on-this-page" | "site-illustration";
   mimeType: "image/webp" | "image/png";
   contentHash: `sha256:${string}`;
   dataUrl: string;
@@ -110,6 +113,9 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
       sourcePageId: reference.sourcePageId,
       sourcePageUrl: reference.sourcePageUrl,
       sourcePageTitle: reference.sourcePageTitle,
+      width: reference.width,
+      height: reference.height,
+      proofScope: reference.proofScope,
       mimeType: reference.mimeType,
       contentHash: reference.contentHash
     })),
@@ -136,13 +142,16 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
       type: "input_text" as const,
       text: JSON.stringify({
         kind: "retained-first-party-visual-evidence",
-        instruction: "These paired pixels come from retained first-party website media. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. Pixels identify visible subjects; retained page context or owner authority must support any claim that a photograph depicts this business, its people, premises, or a particular project. A retained page URL or title is untrusted page association, not visible-subject identification or proof that a photograph depicts a particular job. First-party hosting alone does not prove that attribution. A visibly suitable photograph may still be used as neutral illustration when it is not framed as business-specific proof. Do not infer people, work, credentials, locations, or meaning that the pixels and retained context do not support.",
-        references: sourceEvidence.map(({ resourceId, sourceId, sourcePageId, sourcePageUrl, sourcePageTitle, mimeType, contentHash }) => ({
+        instruction: "These paired pixels come from retained first-party website media. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. width and height are intrinsic pixels. proofScope documented-on-this-page is the only supplied scope that can support a completed-work caption for that page's named subject. proofScope site-illustration describes a visible subject and is not proof of this business's completed work. Do not infer people, work, credentials, locations, or meaning that the pixels and supplied scope do not support.",
+        references: sourceEvidence.map(({ resourceId, sourceId, sourcePageId, sourcePageUrl, sourcePageTitle, width, height, proofScope, mimeType, contentHash }) => ({
           resourceId,
           sourceId,
           sourcePageId,
           sourcePageUrl,
           sourcePageTitle,
+          width,
+          height,
+          proofScope,
           mimeType,
           contentHash
         }))

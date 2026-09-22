@@ -365,7 +365,7 @@ async function readRevision(sandbox: Sandbox) {
 }
 
 async function readSourceFiles(sandbox: Sandbox, root = workspaceRoot) {
-  const listed = await exec(sandbox, `find ${root}/src -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.css' \\) -print | sort`, 20);
+  const listed = await exec(sandbox, `find ${root}/src -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.css' \\) ! -name '._*' -print | sort`, 20);
   if (listed.exitCode !== 0) throw requestError(sandbox.id, "source", 404, "source_unavailable", commandOutput(listed));
   const files: WorkspaceSourceFile[] = [];
   for (const absolutePath of listed.stdout.split("\n").map((line) => line.trim()).filter(Boolean)) {
@@ -425,7 +425,8 @@ function createScaffoldArchive() {
   const scaffold = join(process.cwd(), "workers/site-sandbox/scaffold");
   return new Promise<Uint8Array>((resolve, reject) => {
     const child = spawn("tar", ["-czf", "-", "-C", scaffold, "--exclude", "node_modules", "--exclude", "dist", "."], {
-      stdio: ["ignore", "pipe", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, COPYFILE_DISABLE: "1" }
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
@@ -462,7 +463,9 @@ async function sourceFilesFromSidecar(blobStore: ArtifactBlobStore, backupId: st
 }
 
 function canonicalFiles(files: WorkspaceSourceFile[]) {
-  return [...files].sort((left, right) => left.path.localeCompare(right.path));
+  return files
+    .filter((file) => !file.path.split("/").some((segment) => segment.startsWith("._")))
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function runtimeSeries(publicInputJson: string) {

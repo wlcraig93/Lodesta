@@ -67,7 +67,10 @@ export function classifySiteAuthoringFailure(error: unknown) {
   if (/workflow_deadline_exhausted|deadline_exhausted/i.test(message)) {
     return failure("deadline_exhausted", "budget", false, message);
   }
-  if (/fetch failed|network|timeout|timed out|econnreset|socket hang up|temporarily unavailable/i.test(message)) {
+  if (/not authorized/i.test(message)) {
+    return failure("sandbox_unavailable", "platform", true, message);
+  }
+  if (/fetch failed|network|timeout|timed out|econnreset|socket hang up|temporarily unavailable|websocket|connection failed/i.test(message)) {
     return failure("unknown_internal_failure", "platform", true, message);
   }
   if (/duplicate key value violates unique constraint|foreign key constraint|serialization failure|deadlock detected/i.test(message)) {
@@ -101,7 +104,7 @@ export function classifyModelProviderError(error: unknown): SiteAuthoringTermina
   if (status === 402 || /insufficient_quota|quota_exceeded|billing_hard_limit|insufficient_credits|\bno credits remaining\b/i.test(providerFailure)) {
     return new SiteAuthoringTerminalError("provider_quota_exhausted", "provider", false, message, { cause: error });
   }
-  if (status === 429 || (status !== undefined && status >= 500) || /rate.?limit|timeout|timed out|connection|socket|network/i.test(message)) {
+  if (status === 429 || (status !== undefined && status >= 500) || /rate.?limit|timeout|timed out|connection|socket|network|temporarily unavailable/i.test(message)) {
     return new SiteAuthoringTerminalError("provider_temporarily_unavailable", "provider", true, message, { cause: error });
   }
   return new SiteAuthoringTerminalError("unknown_internal_failure", "provider", false, message, { cause: error });

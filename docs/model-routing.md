@@ -52,7 +52,7 @@ The direct OpenAI authoring loop manually replays every response output, includi
 
 OpenRouter routes do not receive the OpenAI-only `context_management` field. They continue to use their established provider-specific reasoning replay and caching behavior. Programmatic Tool Calling and GPT-5.6 multi-agent mode are not enabled.
 
-The initial context includes bounded labeled contact sheets of retained source media and canonical assets, plus the asset index. The manager can inspect additional promising assets through `inspect_assets` and retained source-resource tools. Website inspection supplies native viewport frames; source-media sheets and rendered-site frames serve different purposes.
+The initial context includes bounded labeled contact sheets of retained source media and canonical assets, plus the asset index. The manager can inspect additional promising assets through `inspect_assets` and retained source-resource tools. Website inspection returns measured browser text by default and attaches at most one requested route or selector screenshot; source-media sheets and optional rendered-site frames serve different purposes.
 
 For a targeted edit, the manager proceeds directly to `finish` after the source change unless concrete visual uncertainty warrants `inspect_site`. `inspect_site` builds dirty source itself and automatically focuses the supplied owner selection when inspecting that route; `finish` independently builds and performs hard release verification. Neither `build_preview` nor visual inspection is a routine pre-finish ceremony.
 
@@ -60,6 +60,7 @@ OpenRouter authoring is restricted to route/transport pairs that Lodesta has pro
 
 - `anthropic/claude-opus-5` uses OpenRouter's native Anthropic Messages endpoint. Internal stable and rolling cache markers become native Anthropic `cache_control` blocks, strict tools use the Anthropic structured-output beta, and signed thinking blocks are replayed exactly.
 - `moonshotai/kimi-k3` uses OpenRouter's Responses endpoint and Moonshot's provider-managed prefix caching. Anthropic-only cache controls and headers are not sent.
+- `x-ai/grok-4.7` uses OpenRouter's Responses endpoint, `reasoning.effort=high`, and the `xai` zero-data-retention upstream. A September 21, 2026 probe accepted strict tools, low text verbosity, encrypted reasoning replay, provider-reported cost, and cached input tokens. It is an operator experiment route, not the canonical author. Architecture planning stays on Luna.
 
 Both routes:
 

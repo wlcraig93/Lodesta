@@ -1436,6 +1436,45 @@ assert(
   "A heading collapsed into one- and two-character mobile fragments escaped the functional readable-measure gate."
 );
 
+const midWordHeadingMarkup = '<section class="mid-word-heading"><h1>DETAILING</h1><p>Paint protection kept readable beside the title.</p></section>';
+const midWordHeadingPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</main>", `${midWordHeadingMarkup}</main>`) }
+    : route),
+  files: prepared.files.map((file) => {
+    if (file.path === "index.html") {
+      return { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${midWordHeadingMarkup}</main>`)) };
+    }
+    return file.path === "site.css"
+      ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.mid-word-heading{max-width:220px}.mid-word-heading h1{font-size:64px;line-height:1;overflow-wrap:anywhere;word-break:normal}`) }
+      : file;
+  })
+};
+const midWordHeadingBrowser = await runArtifactBrowserGate({
+  prepared: midWordHeadingPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-mid-word-heading",
+  routePaths: ["/"],
+  captureMode: "review",
+  authorScreenshot: "none",
+  viewports: [{ name: "desktop", width: 1280, height: 900 }]
+});
+const midWordHeadingFinding = midWordHeadingBrowser.findings.find((finding) => finding.id === "render.heading_word_break");
+assert(
+  midWordHeadingFinding?.severity === "error"
+    && midWordHeadingFinding.message.includes("DETAILING")
+    && isTechnicalReleaseBlocker(midWordHeadingFinding),
+  `A mid-word heading wrap must fail the candidate: ${midWordHeadingFinding?.message ?? "missing finding"}`
+);
+assert.equal(midWordHeadingBrowser.captures.length, 0, "Text-only author review must skip unused screenshot PNGs.");
+assert(
+  !midWordHeadingBrowser.findings.some((finding) =>
+    finding.id === "render.heading_overflow" && finding.message.includes("DETAILING")),
+  "scrollWidth heading overflow must not be required to catch mid-word wraps."
+);
+
 const fragmentedBodyMarkup = '<section class="fragmented-body"><h2>Wallpaper removal</h2><ol><li><strong>Protect the room.</strong> Cover floors and account for runoff before working on a wall.</li></ol></section>';
 const fragmentedBodyPrepared = {
   ...prepared,

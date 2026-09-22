@@ -274,6 +274,16 @@ function validateSiteStructure(input: {
       findings.push(gateFinding("route.orphan", "route", `Declared route ${route.path} has no inbound link from another site route.`, route.path, "warning"));
     }
   }
+  for (const route of input.routes) {
+    const mismatch = slugTokenMismatch(route.path, `${route.title} ${route.description} ${visibleBodyText(route.bodyHtml)}`);
+    if (!mismatch) continue;
+    findings.push(gateFinding(
+      "route.slug_mismatch",
+      "route",
+      `Route path token "${mismatch.token}" is one letter away from "${mismatch.word}" on this page. Correct that token in the route path. This is a spelling repair of the approved path, not a new route.`,
+      route.path
+    ));
+  }
   for (const similarity of input.similarities) {
     if (similarity.jaccard >= 0.9 || similarity.smallerPageContainment >= 0.95) {
       findings.push(gateFinding(
@@ -353,6 +363,41 @@ const textBoundaryTags = new Set([
   "td", "tfoot", "th", "thead", "tr", "ul"
 ]);
 const nonBodyTextTags = new Set(["script", "style", "svg", "noscript"]);
+
+function slugTokenMismatch(path: string, corpus: string) {
+  const words = corpus.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 6);
+  const segment = path.split("/").filter(Boolean).at(-1) ?? "";
+  for (const token of segment.split("-")) {
+    if (token.length < 6 || words.includes(token) || /\d/.test(token)) continue;
+    const word = words.find((candidate) => oneCharacterApart(token, candidate));
+    if (word) return { token, word };
+  }
+  return undefined;
+}
+
+function oneCharacterApart(left: string, right: string) {
+  if (left === right || Math.abs(left.length - right.length) > 1) return false;
+  if (left.length === right.length) {
+    let differences = 0;
+    for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) differences += 1;
+    return differences === 1;
+  }
+  const [shorter, longer] = left.length < right.length ? [left, right] : [right, left];
+  let shortIndex = 0;
+  let longIndex = 0;
+  let skips = 0;
+  while (shortIndex < shorter.length && longIndex < longer.length) {
+    if (shorter[shortIndex] === longer[longIndex]) {
+      shortIndex += 1;
+      longIndex += 1;
+    } else {
+      skips += 1;
+      longIndex += 1;
+      if (skips > 1) return false;
+    }
+  }
+  return skips + (longer.length - longIndex) <= 1;
+}
 
 function visibleBodyText(html: string) {
   // textContent concatenates adjacent cells and paragraphs ("NameDescription"),

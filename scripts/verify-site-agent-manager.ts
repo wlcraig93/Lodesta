@@ -218,7 +218,10 @@ for (const contract of [
   /approvedSourceIndex\.liveRoutePaths.*exact internal-route set/i,
   /do not add, remove, merge, or redirect routes/i,
   /sourcePath values are evidence, not destinations.*approvedLinkPath/i,
-  /approvedSourceIndex\.routeSourceFiles.*previews.*complete page/i,
+  /answer\.distinctions and mustName.*customer-specific facts/i,
+  /continuesInContentFile/i,
+  /proofScope documented-on-this-page.*named subject/i,
+  /proofScope site-illustration.*must not be captioned as this business's completed work/i,
   /approvedSourceIndex\.sourceSensitiveDocuments.*complete substantive source body/i,
   /provisions, numerals, durations, and meaning exact/i,
   /semantic headers.*keyboard-reachable scroll wrapper/i,
@@ -250,12 +253,16 @@ for (const contract of [
   /body and form text.*16px.*utility text.*12px.*essential controls.*48px/i,
   /readable focused route, content, legal, and shared-shell modules/i,
   /inspect_site with route: null.*route: '\/' inspects only home/i,
-  /critical or serious accessibility failures/i,
-  /Advisory IA similarity is evidence, not a score/i,
-  /default sample is a starting point, not whole-site approval/i,
-  /Choose additional routes.*distinct content or composition.*material uncertainty/i,
-  /Reinspect affected routes when changed pixels remain uncertain/i
+  /Correct each returned error and defect/i,
+  /When the returned list has none, finish/i,
+  /Do not inspect more routes to review composition, copy, photo choice, or advisories that were not returned/i,
+  /default sample returns measured browser text, not pictures/i,
+  /Pass an exact route for one desktop top screenshot.*focused element screenshot/i,
+  /Full release verification still runs at finish/i
 ]) assert.match(initialGuidance, contract);
+assert.doesNotMatch(initialGuidance, /Reinspect affected routes until warnings are zero|reinspect until warnings/i);
+assert.doesNotMatch(initialGuidance, /Judge the supplied pixels/i);
+assert.doesNotMatch(initialGuidance, /whole-site approval|Advisory IA similarity|Choose additional routes/i);
 assert.doesNotMatch(taskSkills.edit.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
 assert.doesNotMatch(taskSkills.rebase.knowledge.join(" "), /blank initial build|design grammar|approved-architecture/i);
 assert.match(taskSkills.edit.knowledge.join(" "), /Preserve every existing workspace source file unconditionally/i);
@@ -294,9 +301,10 @@ const inspectionTool = websiteManagerTools.find(
   (tool) => tool.type === "function" && tool.name === "inspect_site"
 );
 assert(inspectionTool?.type === "function");
+assert.match(inspectionTool.description!, /default result is text only.*does not attach screenshots/i);
 assert.match(inspectionTool.description!, /initial build, pass null.*starting sample.*passing '\/' inspects only the homepage/i);
-assert.match(inspectionTool.description!, /exact route.*distinct content and composition not represented/i);
-assert.match(inspectionTool.description!, /exact route and its CSS selector/);
+assert.match(inspectionTool.description!, /exact route with selector null.*one desktop top screenshot/i);
+assert.match(inspectionTool.description!, /exact route and CSS selector.*one focused screenshot/i);
 assert(inspectionTool.parameters);
 assert.deepEqual(inspectionTool.parameters.required, ["route", "selector"]);
 const finishTool = websiteManagerTools.find(
@@ -611,16 +619,23 @@ const modelFeedback = JSON.parse(String(combinedFeedback.modelOutput[0].text));
 assert.equal(modelFeedback.ok, false);
 assert.equal(modelFeedback.blockingFindings, undefined);
 assert.equal(modelFeedback.advisoryFindings, undefined);
-assert.equal(modelFeedback.findings.length, 5);
-assert.equal(modelFeedback.returnedFindingCount, 5);
+assert.equal(modelFeedback.findings.length, 2);
+assert.equal(modelFeedback.returnedFindingCount, 2);
 assert.deepEqual(modelFeedback.findings.map((finding: { id: string }) => finding.id).sort(),
-  [mechanicalBlocker.id, sharedWarning.id, sharedWarning.id, mechanicalWarning.id, visualError.id].sort());
-assert(modelFeedback.findings.some((finding: { sourceId?: string }) => finding.sourceId === differentSourceWarning.sourceId));
+  [mechanicalBlocker.id, visualError.id].sort());
+assert(modelFeedback.findings.every((finding: { id: string }) =>
+  finding.id === mechanicalBlocker.id || finding.id === visualError.id));
+assert(!modelFeedback.findings.some((finding: { id: string }) =>
+  finding.id === sharedWarning.id || finding.id === mechanicalWarning.id));
 assert(modelFeedback.findings.every((finding: { message: string; exampleMessages?: string[] }) =>
   !finding.exampleMessages?.includes(finding.message)), "Primary messages were duplicated as their own examples.");
 assert.deepEqual(combinedFeedback.modelOutput.slice(1), [image]);
 assert.deepEqual(combinedFeedback.diagnosticOutput.findings, [sharedWarning, visualError]);
 assert(Array.isArray(combinedFeedback.diagnosticOutput.blockingFindings));
+assert(Array.isArray(combinedFeedback.diagnosticOutput.advisoryFindings));
+assert(combinedFeedback.diagnosticOutput.advisoryFindings.some((finding: { id?: string }) => finding.id === sharedWarning.id)
+  || combinedFeedback.diagnosticOutput.advisoryFindings.length >= 1,
+  "Diagnostics must retain advisories omitted from the quality-led model list.");
 assert.equal(modelFeedback.visualScope, "targeted");
 assert.equal(modelFeedback.mechanicalScope, "all-routes");
 
@@ -632,31 +647,48 @@ assert.equal(canonicalAuthoringProfile("initial_build").architectureMode, "comme
 const qualityLedFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
   findings: [
     { id: "render.internal_provenance_copy", severity: "warning", area: "render", message: "retained source", route: "/about" },
-    { id: "render.form_text", severity: "warning", area: "render", message: "labels below 16px", route: "/contact" }
+    { id: "render.form_text", severity: "warning", area: "render", message: "labels below 16px", route: "/contact" },
+    { id: "render.tiny_text", severity: "warning", area: "render", message: "utility text below 12px", route: "/" },
+    { id: "accessibility.axe.complete", severity: "error", area: "accessibility", message: "Serious contrast failure.", route: "/" },
+    { id: "advisory.claim_evidence", severity: "warning", area: "claim", message: "Check a claim in source context.", route: "/about" },
+    { id: "advisory.ia_repetition", severity: "warning", area: "content", message: "Routes share structural signals.", route: "/services" },
+    { id: "advisory.asset_reuse", severity: "warning", area: "asset", message: "Asset reused across routes.", route: "/" }
   ],
-  routes: ["/about", "/contact"],
-  inspectedRoutes: ["/about", "/contact"]
+  routes: ["/", "/about", "/contact", "/services"],
+  inspectedRoutes: ["/", "/about", "/contact", "/services"]
 });
-assert.match(String(qualityLedFeedback.feedbackGuidance), /Correct every error.*grouped warnings.*canonical declaration/i);
-assert.match(String(qualityLedFeedback.feedbackGuidance), /Readability, contrast, form text, essential target size/i);
-assert.match(String(qualityLedFeedback.feedbackGuidance), /Preserve the approved route ledger.*IA similarity as evidence, not a score/i);
-assert.match(String(qualityLedFeedback.feedbackGuidance), /Remove internal research language.*task skill/i);
-assert.deepEqual(qualityLedFeedback.findings.map((item) => item.id).sort(), ["render.form_text", "render.internal_provenance_copy"]);
-assert.equal(qualityLedFeedback.findingsTruncated, false, "Concise feedback must not discard mechanical evidence.");
+assert.match(String(qualityLedFeedback.feedbackGuidance), /Correct each returned error and defect.*Repair a shared cause once.*Reinspect that one exact route only if the measurement is still unclear, then finish/i);
+assert.doesNotMatch(String(qualityLedFeedback.feedbackGuidance), /whole-site approval|Compare the inspected routes|IA similarity/i);
+assert.deepEqual(qualityLedFeedback.findings.map((item) => item.id).sort(), [
+  "accessibility.axe.complete",
+  "render.form_text",
+  "render.tiny_text"
+]);
+assert(qualityLedFeedback.findings.some((item) => item.severity === "error"));
+assert(qualityLedFeedback.findings.some((item) => item.id === "render.tiny_text" || item.id === "render.form_text"));
+assert(!qualityLedFeedback.findings.some((item) =>
+  item.id === "advisory.claim_evidence" || item.id === "advisory.ia_repetition" || item.id === "advisory.asset_reuse"
+    || item.id === "render.internal_provenance_copy"));
+assert.equal(qualityLedFeedback.evaluationFindingCount, 7);
+assert.equal(qualityLedFeedback.returnedFindingCount, 3);
 const proseEvidenceFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
   findings: [
     { id: "advisory.claim_evidence", severity: "warning", area: "claim", message: "Check insurer advice in source context.", route: "/guide" },
     { id: "advisory.claim_evidence", severity: "warning", area: "claim", message: "Check a negated guarantee in source context.", route: "/case-study" },
     { id: "advisory.metadata_claim_evidence", severity: "warning", area: "claim", message: "Check the offer wording in its context.", route: "/" },
-    { id: "fact.sdk_value_mismatch", severity: "error", area: "claim", message: "Phone differs from the exact bound fact.", route: "/contact" }
+    { id: "fact.sdk_value_mismatch", severity: "error", area: "claim", message: "Phone differs from the exact bound fact.", route: "/contact" },
+    { id: "render.contrast", severity: "warning", area: "render", message: "Low contrast text.", route: "/" }
   ],
   routes: ["/", "/guide", "/case-study", "/contact"],
   inspectedRoutes: ["/", "/guide", "/case-study", "/contact"]
 });
-assert.equal(proseEvidenceFeedback.findings.filter((finding) => finding.severity === "warning").length, 3,
-  "Prose advisories were dropped, merged across different evidence topics, or promoted to errors.");
+assert.equal(proseEvidenceFeedback.findings.filter((finding) => finding.severity === "warning").length, 1,
+  "Quality-led prose advisories were returned to the author.");
 assert.equal(proseEvidenceFeedback.findings.filter((finding) => finding.severity === "error").length, 1,
-  "An exact fact mismatch was downgraded with prose advisories.");
+  "An exact fact mismatch was dropped from the quality-led author list.");
+assert.deepEqual(proseEvidenceFeedback.findings.map((item) => item.id).sort(), ["fact.sdk_value_mismatch", "render.contrast"]);
+assert(!proseEvidenceFeedback.findings.some((finding) =>
+  finding.id === "advisory.claim_evidence" || finding.id === "advisory.metadata_claim_evidence"));
 const iaHeuristicOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
   findings: [
     { id: "advisory.ia_repetition", severity: "warning", area: "content", message: "Service routes share structural signals.", route: "/services" }
@@ -664,11 +696,57 @@ const iaHeuristicOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSu
   routes: ["/", "/services", "/contact"],
   inspectedRoutes: ["/", "/services", "/contact"]
 });
+assert.equal(iaHeuristicOnlyFeedback.findings.length, 0);
 assert.match(
   String(iaHeuristicOnlyFeedback.feedbackGuidance),
-  /IA similarity as evidence, not a score.*Do not edit merely to make an advisory disappear.*Finish when no concrete material problem remains/i,
-  "A lone IA heuristic still instructed the author to chase a numerical zero."
+  /Finish\. Do not inspect more routes to review composition, copy, photo choice, or advisories that were not returned.*Full release verification still runs at finish/i,
+  "A lone IA heuristic still instructed the author to chase composition or advisories."
 );
+const finishFailureRuntime = new WorkspaceManagerRuntime<string>({
+  kind: "initial_build",
+  publicBuildInputId: "input_finish_failure_filter",
+  toolchainVersion: "toolchain-test",
+  sandboxImageDigest: `sha256:${"a".repeat(64)}`,
+  initialSandboxRevision: "finish_fail_0",
+  initialFiles: [
+    { path: "src/site.tsx", content: validMutationSite },
+    { path: "src/styles.css", content: "body { color: #123; }" }
+  ],
+  applyBuild: async () => ({ revision: "finish_fail_1", buildDurationMs: 0, previewPath: "/preview" }),
+  inspect: async () => ({
+    passed: false,
+    inspectionHash: `sha256:${"a".repeat(64)}`,
+    modelSummary: {
+      blockers: [
+        { id: "accessibility.axe.complete", severity: "error", area: "accessibility", route: "/", message: "Serious contrast failure." },
+        { id: "fact.sdk_value_mismatch", severity: "error", area: "fact", route: "/contact", message: "Phone mismatch." }
+      ],
+      advisories: [
+        { id: "advisory.claim_evidence", severity: "warning", area: "claim", route: "/", message: "Check claim evidence." },
+        { id: "advisory.ia_repetition", severity: "warning", area: "content", route: "/services", message: "Shared structure." }
+      ]
+    },
+    diagnosticSummary: { findings: [{ id: "advisory.claim_evidence", severity: "warning" }] },
+    checkpoint: undefined
+  })
+});
+const finishFailure = await finishFailureRuntime.execute({
+  callId: "finish-errors-only",
+  name: "finish",
+  arguments: { ownerMessage: "Done" }
+});
+assert.equal(finishFailure.diagnosticOutput.ok, false);
+assert.equal(finishFailure.diagnosticOutput.error, "finish_verification_failed");
+const finishFailureModel = JSON.parse(String(finishFailure.modelOutput));
+assert.equal(finishFailureModel.advisories, undefined);
+assert.equal(finishFailureModel.advisoryCount, 0);
+assert(Array.isArray(finishFailureModel.blockers));
+assert(finishFailureModel.blockers.some((finding: { id: string }) => finding.id === "accessibility.axe.complete"),
+  "A failed finish must still surface accessibility errors to the model.");
+assert(!JSON.stringify(finishFailureModel).includes("advisory.claim_evidence"));
+assert(Array.isArray(finishFailure.diagnosticOutput.advisories));
+assert(finishFailure.diagnosticOutput.advisories.some((finding: { id?: string }) => finding.id === "advisory.claim_evidence"),
+  "Finish-failure advisories must remain on diagnostics.");
 const bootstrapRuntime = new WorkspaceManagerRuntime<string>({
   kind: "initial_build",
   publicBuildInputId: "input_materialized_authority",
@@ -811,6 +889,11 @@ for (const status of [429, 503]) {
   assert.equal(transient.code, "provider_temporarily_unavailable");
   assert.equal(transient.retryableByOwner, true);
 }
+const unnamedProviderOutage = classifyModelProviderError(new Error("Service temporarily unavailable. The model did not respond to this request."));
+assert.equal(unnamedProviderOutage.code, "provider_temporarily_unavailable");
+assert.equal(unnamedProviderOutage.retryableByOwner, true);
+const websocketOutage = classifySiteAuthoringFailure(new Error("tcp-proxy exec WebSocket connection failed."));
+assert.equal(websocketOutage.retryableByOwner, true);
 const transientPlatformFailure = classifySiteAuthoringFailure(new TypeError("fetch failed"));
 assert.equal(transientPlatformFailure.code, "unknown_internal_failure");
 assert.equal(transientPlatformFailure.category, "platform");
@@ -953,6 +1036,68 @@ assert.doesNotMatch(JSON.stringify(visualHistory.activeTailItems()), /data:image
   "Provider compaction remains the canonical boundary for older visual evidence.");
 assert.equal(visualHistory.compactionCount(), 1);
 
+const inspectionScreenshotHistory = new DeterministicManagerHistory([
+  { role: "user", type: "message", content: [{ type: "input_image", image_url: "data:image/png;base64,cHJlZml4", detail: "low" }] } as never
+]);
+const siteScreenshot = { type: "input_image", image_url: "data:image/png;base64,c2l0ZQ==", detail: "high" } as const;
+const createdImage = { type: "input_image", image_url: "data:image/png;base64,Y3JlYXRlZA==", detail: "high" } as const;
+inspectionScreenshotHistory.noteTool({
+  responseItems: [{ type: "function_call", call_id: "call_inspect_shot", name: "inspect_site", arguments: "{\"route\":\"/\",\"selector\":null}" }] as never,
+  functionOutput: {
+    type: "function_call_output",
+    call_id: "call_inspect_shot",
+    output: [{ type: "input_text", text: "{\"ok\":true}" }, siteScreenshot]
+  } as never,
+  responseIndex: 1,
+  callId: "call_inspect_shot",
+  toolName: "inspect_site",
+  status: "succeeded",
+  arguments: { route: "/", selector: null },
+  diagnostic: { ok: true },
+  workspaceMutated: false
+});
+inspectionScreenshotHistory.noteTool({
+  responseItems: [{ type: "function_call", call_id: "call_create_image", name: "create_image", arguments: "{}" }] as never,
+  functionOutput: {
+    type: "function_call_output",
+    call_id: "call_create_image",
+    output: [{ type: "input_text", text: "{\"ok\":true}" }, createdImage]
+  } as never,
+  responseIndex: 2,
+  callId: "call_create_image",
+  toolName: "create_image",
+  status: "succeeded",
+  arguments: {},
+  diagnostic: { ok: true },
+  workspaceMutated: false
+});
+const afterCreateImage = JSON.stringify(inspectionScreenshotHistory.requestItems());
+assert.doesNotMatch(afterCreateImage, /c2l0ZQ==/,
+  "A later tool result must drop prior inspect_site screenshots from history.");
+assert.match(afterCreateImage, /Y3JlYXRlZA==/,
+  "create_image pixels must remain available after a follow-up tool.");
+assert.match(JSON.stringify(inspectionScreenshotHistory.prefixItems()), /cHJlZml4/,
+  "Stable prompt-prefix images must not be stripped with spent inspection screenshots.");
+inspectionScreenshotHistory.noteTool({
+  responseItems: [{ type: "function_call", call_id: "call_assets_again", name: "inspect_assets", arguments: "{}" }] as never,
+  functionOutput: {
+    type: "function_call_output",
+    call_id: "call_assets_again",
+    output: visualPreviews
+  } as never,
+  responseIndex: 3,
+  callId: "call_assets_again",
+  toolName: "inspect_assets",
+  status: "succeeded",
+  arguments: {},
+  diagnostic: { ok: true },
+  workspaceMutated: false
+});
+assert.match(JSON.stringify(inspectionScreenshotHistory.activeTailItems()), /Y3JlYXRlZA==/,
+  "create_image evidence must survive a later inspect_assets call.");
+assert.match(JSON.stringify(inspectionScreenshotHistory.activeTailItems()), /source_resource_cut_wood/,
+  "inspect_assets previews must remain after follow-up tools.");
+
 const openAiCapabilities = providerAuthoringCapabilities("openai", "gpt-5.6-sol", 1_050_000);
 assert.equal(openAiCapabilities.requestFields.context_management, "accepted");
 assert.equal(openAiCapabilities.contextCompaction.mechanism, "request_parameter");
@@ -1016,6 +1161,17 @@ assert.equal(usageForModel("gpt-5.6-luna", {
 const openRouterCapabilities = providerAuthoringCapabilities("openrouter", "moonshotai/kimi-k3", 1_048_576);
 assert.equal(openRouterCapabilities.requestFields.context_management, "stripped");
 assert.equal(openRouterCapabilities.contextCompaction.mechanism, "unsupported");
+const grokCapabilities = providerAuthoringCapabilities("openrouter", "x-ai/grok-4.7", 500_000);
+assert.equal(grokCapabilities.routeFamily, "openrouter_xai");
+assert.equal(grokCapabilities.transport, "openrouter_responses");
+assert.equal(grokCapabilities.cacheStrategy, "xai_reported_prefix_cache");
+assert.deepEqual(grokCapabilities.eligibleZdrUpstreams, ["xai"]);
+assert.equal(usageForModel("x-ai/grok-4.7", {
+  input_tokens: 1_000_000,
+  input_tokens_details: { cached_tokens: 250_000 },
+  output_tokens: 100_000,
+  cost: 1.23
+}, 0).costUsd, 1.23);
 
 const requests: Parameters<ManagerResponsesClient["create"]>[0][] = [];
 const responses = [
@@ -1265,11 +1421,9 @@ assert.deepEqual(deliveredSourceEvidence.references[0], {
   mimeType: "image/webp",
   contentHash: `sha256:${"d".repeat(64)}`
 });
-assert.match(deliveredSourceEvidence.instruction, /Pixels identify visible subjects/i);
-assert.match(deliveredSourceEvidence.instruction, /retained page context or owner authority must support any claim/i);
-assert.match(deliveredSourceEvidence.instruction, /untrusted page association.*not visible-subject identification.*particular job/i);
-assert.match(deliveredSourceEvidence.instruction, /First-party hosting alone does not prove that attribution/i);
-assert.match(deliveredSourceEvidence.instruction, /neutral illustration.*not framed as business-specific proof/i);
+assert.match(deliveredSourceEvidence.instruction, /width and height are intrinsic pixels/i);
+assert.match(deliveredSourceEvidence.instruction, /proofScope documented-on-this-page is the only supplied scope/i);
+assert.match(deliveredSourceEvidence.instruction, /site-illustration describes a visible subject and is not proof/i);
 const sourceProfile = {
   ...canonicalAuthoringProfile("initial_build"),
   sourceEvidenceReferences: [{

@@ -364,7 +364,7 @@ let visualBuilds = 0;
 let visualInspections = 0;
 let visualMechanicalInspections = 0;
 let visualReleaseVerifications = 0;
-let inspectedTarget: { route?: string; selector?: string; label?: string } | undefined;
+let inspectedTarget: { route?: string; selector?: string; label?: string; authorScreenshot?: "none" | "desktop-top" | "focus" } | undefined;
 const visualRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
   visualInspectionFeedback: "component-diagnostic-route-family-quality-led",
@@ -385,21 +385,38 @@ const visualRuntime = new WorkspaceManagerRuntime<string>({
   inspectVisual: async (_files, _sandboxRevision, target) => {
     visualInspections += 1;
     inspectedTarget = target;
+    const images = target.authorScreenshot === "none"
+      ? undefined
+      : [
+          { type: "input_image" as const, image_url: "data:image/png;base64,AA==", detail: "high" as const },
+          ...(target.authorScreenshot === "desktop-top"
+            ? []
+            : [{ type: "input_image" as const, image_url: "data:image/png;base64,AQ==", detail: "high" as const }])
+        ];
     return {
       inspectionHash: `sha256:${"c".repeat(64)}`,
       modelSummary: {
-        requestedRoute: target.route, requestedSelector: target.selector, selectionLabel: target.label, routes: ["/", "/services"],
-        visualEvidenceRoutes: ["/"],
-        visualEvidenceFrames: [
-          { imageIndex: 1, route: "/", viewport: "tablet", frame: "focus", width: 768, height: 1024 },
-          { imageIndex: 2, route: "/", viewport: "mobile", frame: "navigation", width: 390, height: 844 }
-        ]
+        requestedRoute: target.route,
+        requestedSelector: target.selector,
+        selectionLabel: target.label,
+        authorScreenshot: target.authorScreenshot,
+        routes: ["/", "/services"],
+        visualEvidenceRoutes: images?.length ? ["/"] : [],
+        visualEvidenceFrames: images?.length
+          ? [
+              {
+                imageIndex: 1,
+                route: "/",
+                viewport: target.authorScreenshot === "focus" ? "desktop" : "desktop",
+                frame: target.authorScreenshot === "focus" ? "focus" : "top",
+                width: 1280,
+                height: 900
+              }
+            ]
+          : []
       },
       diagnosticSummary: {},
-      images: [
-        { type: "input_image", image_url: "data:image/png;base64,AA==", detail: "high" },
-        { type: "input_image", image_url: "data:image/png;base64,AQ==", detail: "high" }
-      ]
+      images
     };
   },
   inspect: async () => {
@@ -433,21 +450,19 @@ const selectedInspection = await visualRuntime.execute({
   arguments: { route: null }
 });
 assert.equal(selectedInspection.diagnosticOutput.ok, true);
-assert(Array.isArray(selectedInspection.modelOutput));
-const nativeOutput = selectedInspection.modelOutput as Array<Record<string, unknown>>;
-const nativeSummary = JSON.parse(String(nativeOutput[0].text));
-assert.match(nativeSummary.feedbackGuidance, /For an initial build, choose additional routes.*not whole-site approval/);
-assert.match(nativeSummary.feedbackGuidance, /For an owner edit, keep review within the requested change/);
-assert.equal(nativeSummary.visualEvidenceFrames[0].viewport, "tablet");
-assert.equal(nativeSummary.visualEvidenceFrames[1].imageIndex, 2);
-assert.deepEqual(nativeOutput.slice(1).map((item) => [item.image_url, item.detail]), [
-  ["data:image/png;base64,AA==", "high"], ["data:image/png;base64,AQ==", "high"]
-], "Quality-led feedback must preserve indexed native frames and their original ordering.");
+assert.equal(typeof selectedInspection.modelOutput, "string", "route null must return measured text without screenshots.");
+const nativeSummary = JSON.parse(String(selectedInspection.modelOutput));
+assert.match(nativeSummary.feedbackGuidance, /Finish\. Do not inspect more routes to review composition, copy, photo choice, or advisories that were not returned/);
+assert.match(nativeSummary.feedbackGuidance, /Full release verification still runs at finish/);
+assert.doesNotMatch(nativeSummary.feedbackGuidance, /whole-site approval|Compare the inspected routes/);
+assert.deepEqual(nativeSummary.findings ?? [], []);
+assert.deepEqual(nativeSummary.visualEvidenceFrames, []);
 assert.equal(selectedInspection.diagnosticOutput.buildPerformed, true);
 assert.deepEqual(inspectedTarget, {
   route: "/",
-  selector: "section.hero > h1",
-  label: "Hero heading"
+  selector: undefined,
+  label: "Hero heading",
+  authorScreenshot: "none"
 });
 assert.equal(visualBuilds, 1, "Selection inspection did not build dirty source exactly once.");
 assert.equal(visualInspections, 1, "Selection inspection did not capture visual evidence exactly once.");
@@ -508,7 +523,7 @@ assert.equal(cachedInspectionFinish.diagnosticOutput.buildPerformed, false);
 assert.equal(visualBuilds, 2, "Finish rebuilt a workspace whose exact hash already had a valid preview build.");
 assert.equal(visualMechanicalInspections, 2, "Finish repeated the mechanical sweep for an unchanged workspace hash.");
 assert.equal(visualReleaseVerifications, 1, "Finish did not run the exhaustive release verification after a mechanical inspection.");
-let initialBuildTarget: { route?: string; selector?: string; label?: string } | undefined;
+let initialBuildTarget: { route?: string; selector?: string; label?: string; authorScreenshot?: "none" | "desktop-top" | "focus" } | undefined;
 let initialVisualCalls = 0;
 let initialBuildCalls = 0;
 let initialMechanicalCalls = 0;
@@ -536,7 +551,12 @@ const initialBuildVisualRuntime = new WorkspaceManagerRuntime<string>({
     initialBuildTarget = target;
     return {
       inspectionHash: `sha256:${"f".repeat(64)}`,
-      modelSummary: { requestedRoute: target.route, requestedSelector: target.selector, routes: ["/", "/services", "/contact"] },
+      modelSummary: {
+        requestedRoute: target.route,
+        requestedSelector: target.selector,
+        authorScreenshot: target.authorScreenshot,
+        routes: ["/", "/services", "/contact"]
+      },
       diagnosticSummary: {}
     };
   },
@@ -568,13 +588,14 @@ assert.equal(initialBuildInspection.diagnosticOutput.ok, true);
 assert.deepEqual(initialBuildTarget, {
   route: undefined,
   selector: undefined,
-  label: undefined
+  label: undefined,
+  authorScreenshot: "none"
 }, "An initial-build inspection was incorrectly narrowed to the editor's homepage selection.");
 const initialFilesBeforeFocus = initialBuildVisualRuntime.currentFiles();
 const focusCall = { callId: "inspect-author-form", name: "inspect_site" as const, arguments: { route: "/contact", selector: "form" } };
 const authorFocus = await initialBuildVisualRuntime.execute(focusCall);
 assert.equal(authorFocus.diagnosticOutput.ok, true);
-assert.deepEqual(initialBuildTarget, { route: "/contact", selector: "form", label: undefined });
+assert.deepEqual(initialBuildTarget, { route: "/contact", selector: "form", label: undefined, authorScreenshot: "focus" });
 assert.equal(initialVisualCalls, 2);
 const cachedAuthorFocus = await initialBuildVisualRuntime.execute({ ...focusCall, callId: "inspect-author-form-cached" });
 assert.equal(cachedAuthorFocus.diagnosticOutput.cached, true);
@@ -583,24 +604,29 @@ await initialBuildVisualRuntime.execute({ ...focusCall, callId: "inspect-author-
 assert.equal(initialVisualCalls, 3, "Changing the focus selector reused stale visual evidence.");
 await initialBuildVisualRuntime.execute({ ...focusCall, callId: "inspect-author-route", arguments: { route: "/contact", selector: null } });
 assert.equal(initialVisualCalls, 4, "A focused capture was reused as whole-route evidence.");
-assert.deepEqual(initialBuildTarget, { route: "/contact", selector: undefined, label: undefined });
+assert.deepEqual(initialBuildTarget, { route: "/contact", selector: undefined, label: undefined, authorScreenshot: "desktop-top" });
 assert.equal(initialBuildCalls, 1, "Changing only the focus target rebuilt unchanged source.");
 assert.equal(initialMechanicalCalls, 1, "Changing only the focus target repeated the mechanical pass.");
 assert.deepEqual(initialBuildVisualRuntime.currentFiles(), initialFilesBeforeFocus);
 assert.throws(() => managerToolArguments.inspect_site.parse({ route: "/contact", selector: "  " }));
 assert.throws(() => managerToolArguments.inspect_site.parse({ route: "/contact", selector: "x".repeat(501) }));
 await visualRuntime.execute({ callId: "inspect-override-owner-selection", name: "inspect_site", arguments: { route: "/", selector: "form" } });
-assert.deepEqual(inspectedTarget, { route: "/", selector: "form", label: undefined }, "An explicit focus target inherited the unrelated owner selection label.");
+assert.deepEqual(inspectedTarget, { route: "/", selector: "form", label: undefined, authorScreenshot: "focus" }, "An explicit focus target inherited the unrelated owner selection label.");
 await visualRuntime.execute({ callId: "inspect-return-owner-selection", name: "inspect_site", arguments: { route: null, selector: null } });
-assert.deepEqual(inspectedTarget, { route: "/", selector: "section.hero > h1", label: "Hero heading" });
+assert.deepEqual(inspectedTarget, { route: "/", selector: undefined, label: "Hero heading", authorScreenshot: "none" });
 const beforeSameSelectorOverride = visualInspections;
 const sameSelectorOverride = await visualRuntime.execute({ callId: "inspect-same-owner-selector-explicit", name: "inspect_site", arguments: { route: "/", selector: "section.hero > h1" } });
 assert.equal(sameSelectorOverride.diagnosticOutput.cached, false);
 assert.equal(visualInspections, beforeSameSelectorOverride + 1);
-assert.deepEqual(inspectedTarget, { route: "/", selector: "section.hero > h1", label: undefined });
+assert.deepEqual(inspectedTarget, { route: "/", selector: "section.hero > h1", label: undefined, authorScreenshot: "focus" });
 await visualRuntime.execute({ callId: "inspect-same-selector-owner-again", name: "inspect_site", arguments: { route: null, selector: null } });
 assert.equal(visualInspections, beforeSameSelectorOverride + 2);
-assert.deepEqual(inspectedTarget, { route: "/", selector: "section.hero > h1", label: "Hero heading" });
+assert.deepEqual(inspectedTarget, { route: "/", selector: undefined, label: "Hero heading", authorScreenshot: "none" });
+const routeDesktopTop = await visualRuntime.execute({ callId: "inspect-route-desktop-top", name: "inspect_site", arguments: { route: "/", selector: null } });
+assert.equal(typeof routeDesktopTop.modelOutput === "object" && Array.isArray(routeDesktopTop.modelOutput), true);
+assert.deepEqual(inspectedTarget, { route: "/", selector: undefined, label: undefined, authorScreenshot: "desktop-top" });
+const routeDesktopOutput = routeDesktopTop.modelOutput as Array<Record<string, unknown>>;
+assert.deepEqual(routeDesktopOutput.slice(1).map((item) => item.image_url), ["data:image/png;base64,AA=="]);
 const routeNormalizationRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
   publicBuildInputId: "input_route_normalization",

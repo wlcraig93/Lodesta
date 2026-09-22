@@ -21,13 +21,14 @@ export type ProviderAuthoringCapabilities = {
   probeIdentity: `sha256:${string}`;
   apiProvider: SiteAgentApiProvider;
   modelId: string;
-  routeFamily: "openai" | "openrouter_anthropic" | "openrouter_moonshot";
+  routeFamily: "openai" | "openrouter_anthropic" | "openrouter_moonshot" | "openrouter_xai";
   transport: "openai_responses" | "openrouter_responses" | "openrouter_anthropic_messages";
   contextWindowTokens: number;
   cacheStrategy:
     | "openai_implicit_explicit"
     | "anthropic_explicit"
-    | "moonshot_provider_implicit";
+    | "moonshot_provider_implicit"
+    | "xai_reported_prefix_cache";
   strictToolStrategy: "responses_strict_tools" | "anthropic_beta_strict_tools";
   eligibleZdrUpstreams: string[];
   serialToolExecution: CapabilityEvidence;
@@ -158,13 +159,14 @@ function declaredCapabilities(
   if (!isEstablishedOpenRouterAuthoringRoute(modelId)) throw capabilitiesMissing(apiProvider, modelId);
   const route = establishedOpenRouterAuthoringRoutes[modelId];
   const anthropic = route.routeFamily === "openrouter_anthropic";
+  const xai = route.routeFamily === "openrouter_xai";
   return {
     apiProvider,
     modelId,
     routeFamily: route.routeFamily,
     transport: anthropic ? "openrouter_anthropic_messages" : "openrouter_responses",
     contextWindowTokens,
-    cacheStrategy: anthropic ? "anthropic_explicit" : "moonshot_provider_implicit",
+    cacheStrategy: anthropic ? "anthropic_explicit" : xai ? "xai_reported_prefix_cache" : "moonshot_provider_implicit",
     strictToolStrategy: anthropic ? "anthropic_beta_strict_tools" : "responses_strict_tools",
     eligibleZdrUpstreams: [...route.eligibleZdrUpstreams],
     serialToolExecution: {
@@ -181,7 +183,9 @@ function declaredCapabilities(
       mechanism: "retained_probe",
       detail: anthropic
         ? "strict tools with the Anthropic structured-output beta header"
-        : "strict tools accepted by the Moonshot Responses route"
+        : xai
+          ? "strict tools and tool_choice=required accepted by the xAI Responses route"
+          : "strict tools accepted by the Moonshot Responses route"
     },
     costTelemetry: {
       mechanism: "runtime_usage_validation",
@@ -196,10 +200,15 @@ function declaredCapabilities(
           mechanism: "retained_probe",
           detail: "Internal prompt_cache_breakpoint markers are translated to native Anthropic Messages cache_control blocks"
         }
-      : {
-          mechanism: "documented_provider_guarantee",
-          detail: "Moonshot automatic prefix caching; no explicit Anthropic controls"
-        },
+      : xai
+        ? {
+            mechanism: "retained_probe",
+            detail: "OpenRouter reported cached input on a stateless high-reasoning Responses replay; no explicit breakpoint is sent"
+          }
+        : {
+            mechanism: "documented_provider_guarantee",
+            detail: "Moonshot automatic prefix caching; no explicit Anthropic controls"
+          },
     reasoningControls: {
       mechanism: "request_parameter",
       detail: "reasoning.effort=high"
@@ -257,7 +266,9 @@ function probeEvidence(
     upstreams: descriptor.eligibleZdrUpstreams,
     outcome: modelId === "anthropic/claude-opus-5"
       ? "established_with_anthropic_messages_transport"
-      : "established_with_provider_implicit_caching",
+      : modelId === "x-ai/grok-4.7"
+        ? "established_with_xai_responses_high_reasoning"
+        : "established_with_provider_implicit_caching",
     observedControls: modelId === "anthropic/claude-opus-5"
       ? [
           "anthropic_messages_transport",
@@ -271,16 +282,31 @@ function probeEvidence(
           "native_cache_control_write_and_read",
           "x-anthropic-beta"
         ]
-      : [
-          "tools",
-          "tool_choice=required",
-          "parallel_tool_calls=false",
-          "store=false",
-          "reasoning=high",
-          "usage.cost",
-          "openrouter_metadata",
-          "provider_implicit_cache"
-        ],
+      : modelId === "x-ai/grok-4.7"
+        ? [
+            "responses_transport",
+            "strict_tools",
+            "tool_choice=required",
+            "parallel_tool_calls=false",
+            "store=false",
+            "text.verbosity=low",
+            "reasoning.effort=high",
+            "encrypted_reasoning_replay",
+            "usage.cost",
+            "cached_input_tokens",
+            "provider.zdr",
+            "provider.only=xai"
+          ]
+        : [
+            "tools",
+            "tool_choice=required",
+            "parallel_tool_calls=false",
+            "store=false",
+            "reasoning=high",
+            "usage.cost",
+            "openrouter_metadata",
+            "provider_implicit_cache"
+          ],
     rejectedControls: modelId === "anthropic/claude-opus-5"
       ? [
           "OpenRouter Responses provider.require_parameters with tools",

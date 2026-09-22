@@ -128,6 +128,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       route?: string;
       selector?: string;
       label?: string;
+      authorScreenshot: "none" | "desktop-top" | "focus";
     }, signal?: AbortSignal, onPhase?: (phase: RuntimeInspectionPhase, durationMs?: number) => void): Promise<RuntimeVisualInspection>;
     visualInspectionFeedback?: "prioritized-homepage" | "blockers-only-homepage" | "material-only-homepage" | "component-diagnostic-homepage" | "component-diagnostic-route-family" | "component-diagnostic-route-family-shared-first" | "component-diagnostic-route-family-quality-led" | "component-diagnostic-route-family-material-only" | "component-diagnostic-route-family-material-copy" | "component-diagnostic-route-family-balanced" | "component-diagnostic-route-family-component-evidence";
     configureLeadForm?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
@@ -636,10 +637,15 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (parsed.selector && !parsed.route) {
       return result({ ok: false, error: "inspection_selector_requires_route", message: "Supply an exact route with selector, or use selector: null for the ordinary inspection." });
     }
+    const authorScreenshot = parsed.selector
+      ? "focus" as const
+      : parsed.route
+        ? "desktop-top" as const
+        : "none" as const;
     const route = parsed.route ?? (this.options.kind === "initial_build" ? undefined : this.options.selection?.route);
     const selection = this.options.selection?.route === route ? this.options.selection : undefined;
-    const selector = parsed.selector ?? selection?.selector;
-    const label = parsed.selector ? undefined : selection?.label;
+    const selector = authorScreenshot === "focus" ? parsed.selector ?? undefined : undefined;
+    const label = authorScreenshot === "none" ? selection?.label : undefined;
     let buildPerformed = false;
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
       setPhase("build");
@@ -674,6 +680,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       && this.visualInspection.modelSummary.requestedRoute === route
       && this.visualInspection.modelSummary.requestedSelector === selector
       && this.visualInspection.modelSummary.selectionLabel === label
+      && this.visualInspection.modelSummary.authorScreenshot === authorScreenshot
     );
     if (!cached) {
       this.inspections += 1;
@@ -681,7 +688,8 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       this.visualInspection = await this.options.inspectVisual(this.currentFiles(), this.sandboxRevision, {
         route,
         selector,
-        label
+        label,
+        authorScreenshot
       }, signal, (phase, durationMs) => {
         setPhase(phase);
         if (durationMs === undefined) return;
@@ -824,6 +832,28 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   }
 }
 
+/** Concrete defects the live quality-led author profile returns alongside errors. */
+const qualityLedConcreteDefectIds = new Set([
+  "render.heading_overflow",
+  "render.heading_word_break",
+  "render.horizontal_overflow",
+  "render.contrast",
+  "render.primary_logo_surface_contrast",
+  "render.tiny_text",
+  "render.form_text",
+  "render.target_size",
+  "render.clipping_overlap",
+  "render.text_clipping",
+  "render.empty_control",
+  "render.missing_glyph",
+  "functional.navigation_toggle"
+]);
+
+function isQualityLedModelFacingFinding(finding: Record<string, unknown>) {
+  if (finding.severity === "error") return true;
+  return finding.severity === "warning" && qualityLedConcreteDefectIds.has(String(finding.id ?? ""));
+}
+
 function visualInspectionResult(
   inspection: RuntimeVisualInspection,
   cached: boolean,
@@ -833,6 +863,7 @@ function visualInspectionResult(
   mechanicalCached = false,
   previewPath?: string
 ): ManagerToolExecution {
+  const qualityLed = feedback === "component-diagnostic-route-family-quality-led";
   const modelSummary = feedback === "component-diagnostic-route-family-component-evidence"
     ? componentDiagnosticRouteFamilyComponentEvidenceVisualSummary(inspection.modelSummary)
     : feedback === "component-diagnostic-route-family-balanced"
@@ -841,7 +872,7 @@ function visualInspectionResult(
     ? componentDiagnosticRouteFamilyMaterialCopyVisualSummary(inspection.modelSummary)
     : feedback === "component-diagnostic-route-family-material-only"
     ? componentDiagnosticRouteFamilyMaterialOnlyVisualSummary(inspection.modelSummary)
-    : feedback === "component-diagnostic-route-family-quality-led"
+    : qualityLed
     ? componentDiagnosticRouteFamilyQualityLedVisualSummary(inspection.modelSummary)
     : feedback === "component-diagnostic-route-family-shared-first"
     ? componentDiagnosticRouteFamilySharedFirstVisualSummary(inspection.modelSummary)
@@ -856,24 +887,29 @@ function visualInspectionResult(
     : feedback === "prioritized-homepage"
       ? prioritizedHomepageVisualSummary(inspection.modelSummary)
       : inspection.modelSummary;
+  const rawVisualFindings = Array.isArray(inspection.modelSummary.findings)
+    ? inspection.modelSummary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
+    : [];
   const visualFindings = Array.isArray(modelSummary.findings)
     ? modelSummary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
     : [];
   const mechanicalSummary = mechanicalInspection ? compactInspectionSummary(mechanicalInspection.modelSummary) : undefined;
   const mechanicalBlockers = mechanicalSummary && Array.isArray(mechanicalSummary.blockers) ? mechanicalSummary.blockers : [];
   const mechanicalAdvisories = mechanicalSummary && Array.isArray(mechanicalSummary.advisories) ? mechanicalSummary.advisories : [];
+  // Diagnostics keep the full visual catalog; the model-facing list may be narrower.
   const blockingFindings = groupVerificationFindings([
     ...mechanicalBlockers,
-    ...visualFindings.filter((finding) => finding.severity === "error")
+    ...rawVisualFindings.filter((finding) => finding.severity === "error")
   ]);
   const advisoryFindings = groupVerificationFindings([
     ...mechanicalAdvisories,
-    ...visualFindings.filter((finding) => finding.severity === "warning")
+    ...rawVisualFindings.filter((finding) => finding.severity === "warning")
   ]);
   // One model-facing list, not a visual list repeated in separate blocker and
   // advisory lists. Keep raw diagnostics and the actual inspection unchanged.
   const visualEvidence = visualFindings;
-  const findings = [...visualEvidence, ...[...mechanicalBlockers, ...mechanicalAdvisories].filter((finding) =>
+  const mechanicalForModel = qualityLed ? mechanicalBlockers : [...mechanicalBlockers, ...mechanicalAdvisories];
+  const findings = [...visualEvidence, ...mechanicalForModel.filter((finding) =>
     // Drop only a complete subset of an existing visual record. A different
     // message, source, selector or affected-route set remains separate evidence.
     !finding || typeof finding !== "object" || Array.isArray(finding)
@@ -887,7 +923,10 @@ function visualInspectionResult(
     if (!Array.isArray(exampleMessages)) return finding;
     const additional = exampleMessages.filter((message) => message !== rest.message);
     return additional.length ? { ...rest, exampleMessages: additional } : rest;
-  });
+  }).filter((finding) =>
+    !qualityLed
+      || (finding && typeof finding === "object" && !Array.isArray(finding) && isQualityLedModelFacingFinding(finding as Record<string, unknown>))
+  );
   const summary = {
     ...modelSummary,
     ok: mechanicalInspection?.passed !== false,
@@ -1018,8 +1057,40 @@ export function componentDiagnosticRouteFamilySharedFirstVisualSummary(summary: 
   return homepageVisualSummary(summary, "component-diagnostic-route-family-shared-first");
 }
 
+/**
+ * Live author feedback: return every severity error plus a narrow set of
+ * concrete visual/interaction defects. Broader advisories remain on diagnostics
+ * and the release gate; they are not author repair targets.
+ */
 export function componentDiagnosticRouteFamilyQualityLedVisualSummary(summary: Record<string, unknown>) {
-  return homepageVisualSummary(summary, "component-diagnostic-route-family-quality-led");
+  const findings = Array.isArray(summary.findings)
+    ? summary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
+    : [];
+  const errors = findings.filter((finding) => finding.severity === "error");
+  const defects = findings.filter((finding) =>
+    finding.severity === "warning" && qualityLedConcreteDefectIds.has(String(finding.id ?? ""))
+  );
+  const summarized = homepageVisualSummary(
+    { ...summary, findings: [...errors, ...defects] },
+    "component-diagnostic-route-family"
+  );
+  const returned = Array.isArray(summarized.findings)
+    ? summarized.findings.filter((finding) => Boolean(finding && typeof finding === "object" && !Array.isArray(finding))) as Array<Record<string, unknown>>
+    : [];
+  const selected = returned.filter(isQualityLedModelFacingFinding);
+  return {
+    ...summarized,
+    evaluationFindingCount: findings.length,
+    advisoryFindingCount: findings.filter((finding) => finding.severity === "warning").length,
+    actionableFindingCount: errors.length + defects.length,
+    returnedFindingCount: selected.length,
+    findingsTruncated: errors.length + defects.length > selected.length,
+    findings: selected,
+    authorFeedbackPolicy: "route-family-quality-led",
+    feedbackGuidance: selected.length
+      ? "Correct each returned error and defect. Repair a shared cause once. Reinspect that one exact route only if the measurement is still unclear, then finish."
+      : "Finish. Do not inspect more routes to review composition, copy, photo choice, or advisories that were not returned. Full release verification still runs at finish."
+  };
 }
 
 /**
@@ -1150,6 +1221,8 @@ function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "
     ["render.contrast", 3],
     ["render.missing_glyph", 3],
     ["render.empty_control", 3],
+    ["render.heading_word_break", 4],
+    ["route.slug_mismatch", 4],
     ["render.horizontal_overflow", 4],
     ["render.clipping_overlap", 5],
     ["render.primary_geometry", 6],
@@ -1195,19 +1268,21 @@ function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "
   const { findings: _findings, ...rest } = summary;
   const baseFeedbackGuidance = [
     actionable.length
-      ? "Correct every error. Use grouped warnings and their exampleMessages with the supplied pixels and source evidence to identify material defects; repair shared causes at the canonical declaration. Readability, contrast, form text, essential target size, hidden content, and broken interaction need concrete attention, not unrelated redesign."
+      ? "Correct every error. Use grouped warnings and their exampleMessages with the measured browser text and any supplied screenshot to identify material defects; repair shared causes at the canonical declaration. Readability, contrast, form text, essential target size, hidden content, and broken interaction need concrete attention, not unrelated redesign."
       : "The inspected technical checks are clean; this is not a judgment of the complete site's quality.",
     "Preserve the approved route ledger and working behavior. Assess IA similarity as evidence, not a score to clear: repair genuinely thin or interchangeable answers, but keep appropriate shared structures. Do not edit merely to make an advisory disappear.",
     qualityLed
-      ? "Compare the supplied routes, their copy, and relevant source material. Check customer-purpose hierarchy, concrete route-specific answers, accurate proof and imagery, responsive composition, opened phone navigation, and the complete form. Remove internal research language from customer copy. Follow the task skill for design and content judgment."
-      : "Judge the supplied screenshots for material content, identity, accessibility, or functional defects.",
-    "For an initial build, choose additional routes when their distinct content or composition leaves a material uncertainty; this sample is not whole-site approval. For an owner edit, keep review within the requested change. Reinspect affected routes when changed pixels remain uncertain. Finish when no concrete material problem remains; full release verification still checks the complete approved site."
+      ? "Compare the inspected routes, their copy, and relevant source material. Check customer-purpose hierarchy, concrete route-specific answers, accurate proof and imagery, responsive composition, opened phone navigation, and the complete form. Remove internal research language from customer copy. Follow the task skill for design and content judgment. When a screenshot is attached, judge those pixels; otherwise rely on the measured text findings."
+      : "When a screenshot is attached, judge those pixels for material content, identity, accessibility, or functional defects; otherwise rely on the measured text findings.",
+    "For an initial build, choose additional routes when their distinct content or composition leaves a material uncertainty; this sample is not whole-site approval. For an owner edit, keep review within the requested change. Ask for one route or one selector screenshot only when measured text leaves a concrete visual uncertainty. Finish when no concrete material problem remains; full release verification still checks the complete approved site."
   ].join(" ");
   const scopeGuidance = builtRoutes.length > inspectedRoutes.length
     ? `Fresh browser evidence in this pass covers only ${inspectedRoutes.join(", ")} (${inspectedRoutes.length} of ${builtRoutes.length} built routes). Do not treat it as current evidence for the other ${builtRoutes.length - inspectedRoutes.length} routes.`
     : visualEvidenceRoutes.length > 0 && inspectedRoutes.length > visualEvidenceRoutes.length
-      ? `Fresh deterministic browser findings cover ${inspectedRoutes.length} routes, while the supplied native frames cover ${visualEvidenceRoutes.length}: ${visualEvidenceRoutes.join(", ")}. Match images to the one-based visualEvidenceFrames index. Do not infer visual review for routes or states absent from those frames.`
-      : "";
+      ? `Fresh deterministic browser findings cover ${inspectedRoutes.length} routes, while the supplied native frame covers ${visualEvidenceRoutes.join(", ")}. Match the image to the one-based visualEvidenceFrames index. Do not infer visual review for routes or states absent from that frame.`
+      : visualEvidenceRoutes.length === 0
+        ? "This inspection returned measured browser text only. Pass an exact route for one desktop top screenshot, or an exact route plus CSS selector for one focused element screenshot."
+        : "";
   const feedbackGuidance = [scopeGuidance, baseFeedbackGuidance].filter(Boolean).join(" ");
   return {
     ...rest,
@@ -1345,8 +1420,19 @@ function inspectionResult<Checkpoint>(inspection: RuntimeInspection<Checkpoint>,
     ? "Edit every affected occurrence of each grouped root cause before running the release check again. When one cause spans routes or modules, prefer one coherent apply_patch or file rewrite."
     : undefined;
   const compactSummary = compactInspectionSummary(inspection.modelSummary);
+  // Failed finish shows the model only severity-error blockers. Advisories stay
+  // on diagnostics; accessibility errors remain visible as blockers.
+  const modelFacingSummary = inspection.passed
+    ? compactSummary
+    : (() => {
+        const { advisories: _advisories, advisoriesTruncated: _advisoriesTruncated, ...rest } = compactSummary;
+        return {
+          ...rest,
+          advisoryCount: 0
+        };
+      })();
   const summary = {
-    ...compactSummary,
+    ...modelFacingSummary,
     ok: inspection.passed,
     cached,
     ...(error ? { error } : {}),
@@ -1365,6 +1451,9 @@ function inspectionResult<Checkpoint>(inspection: RuntimeInspection<Checkpoint>,
       ...inspection.diagnosticSummary,
       ok: inspection.passed,
       cached,
+      advisories: compactSummary.advisories,
+      advisoryCount: compactSummary.advisoryCount,
+      blockers: compactSummary.blockers,
       ...(failureFingerprint ? { failureFingerprint } : {}),
       ...(error ? { error } : {}),
       ...(guidance ? { guidance } : {})

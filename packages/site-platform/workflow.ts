@@ -39,6 +39,7 @@ import {
   createArchitectureReleasePlan,
   canonicalAuthoringProfile,
   canonicalAuthoringProfileId,
+  imageProofScope,
   initialArchitectureAuthoringInstruction,
   isSiteAuthoringTerminalError,
   mergeArchitectureEvidenceFiles,
@@ -64,6 +65,7 @@ import {
   type ManagerRunRequest,
   type ManagerAssetEvidenceReference,
   type ManagerSourceEvidenceReference,
+  type RouteAnswerImage,
   type WorkspaceSourceFile
 } from "@/packages/site-agent";
 import {
@@ -150,6 +152,7 @@ import {
 } from "@/packages/website-assessment/route-selection";
 import {
   rankSourceAssetCandidates,
+  sourcePhotoCountsByPagePath,
   sourceResourceIsAdoptableImage
 } from "./source-resource-ranking";
 import {
@@ -1031,18 +1034,23 @@ export class SiteAuthoringWorkflow {
           try {
             sandboxRevision = (await restoreAttempt()).revision;
           } catch (error) {
-            if (!isSandboxInfrastructureFailure(error)) throw platformTerminalError(error);
-            const destroyed = await this.destroySessionSandbox(sandboxState.session, {
-              reason: `restore_recovery:${sandboxRecoveryReason(error)}`,
-              currentWorkspaceRevisionId: sandboxState.session.currentWorkspaceRevisionId
-            });
-            if (!destroyed.destroyed) throw sandboxCleanupPendingError();
-            sandboxState = await this.ensureSandbox(run, destroyed.session, buildInput);
-            sandboxRevision = sandboxState.revision;
-            try {
+            if (sandboxConnectionFailure(error)) {
               sandboxRevision = (await restoreAttempt()).revision;
-            } catch (recoveryError) {
-              throw platformTerminalError(recoveryError);
+            } else if (isSandboxMachineFailure(error)) {
+              const destroyed = await this.destroySessionSandbox(sandboxState.session, {
+                reason: `restore_recovery:${sandboxRecoveryReason(error)}`,
+                currentWorkspaceRevisionId: sandboxState.session.currentWorkspaceRevisionId
+              });
+              if (!destroyed.destroyed) throw sandboxCleanupPendingError();
+              sandboxState = await this.ensureSandbox(run, destroyed.session, buildInput);
+              sandboxRevision = sandboxState.revision;
+              try {
+                sandboxRevision = (await restoreAttempt()).revision;
+              } catch (recoveryError) {
+                throw platformTerminalError(recoveryError);
+              }
+            } else {
+              throw platformTerminalError(error);
             }
           }
         }
@@ -1130,7 +1138,11 @@ export class SiteAuthoringWorkflow {
         if (preparedArchitecture.architecture) {
           const evidenceFiles = createArchitectureEvidenceFiles(websitePages, preparedArchitecture.architecture.plan, {
             retainedContentMode: retainedContentModeForAuthoringProfile(initialBuildProfile),
-            approvedDocuments: authoringContext.ownerAuthority.approvedDocuments
+            approvedDocuments: authoringContext.ownerAuthority.approvedDocuments,
+            offerings: buildInput.business.offerings
+              .filter((offering) => offering.status === "confirmed" && offering.visibility === "public")
+              .map((offering) => offering.name),
+            routeImages: await this.routeAnswerImages(snapshots, websitePages)
           });
           currentFiles = mergeArchitectureEvidenceFiles(currentFiles, evidenceFiles);
           releasePlan = createArchitectureReleasePlan(preparedArchitecture.architecture.plan, {
@@ -1345,7 +1357,9 @@ export class SiteAuthoringWorkflow {
           failure = { ...failure, retryableByOwner: true };
         }
       }
-      if (!cleanupPending) await this.destroySandboxAfterRunFailure(latest).catch(() => undefined);
+      if (!cleanupPending && !sandboxConnectionFailure(error)) {
+        await this.destroySandboxAfterRunFailure(latest).catch(() => undefined);
+      }
       await this.queueTerminalRunFailure(latest, failure).catch(() => undefined);
       const failed = await this.updateRun(latest, {
         status: "failed",
@@ -1598,7 +1612,14 @@ export class SiteAuthoringWorkflow {
     architectureMode?: "commercial-core-pull" | "commercial-core-message-target";
     signal: AbortSignal;
   }): Promise<{ run: SiteAgentRun; architecture?: NonNullable<SiteAgentRun["architecture"]> }> {
-    const inventory = buildSiteArchitectureInventory(input.pages);
+    const sourceIds = [...new Set(input.pages.map((page) => page.sourceSnapshotId))];
+    const resources = (await Promise.all(sourceIds.map((sourceId) =>
+      this.repository.listSourceSnapshotResources(sourceId)
+    ))).flat();
+    const inventory = buildSiteArchitectureInventory(
+      input.pages,
+      sourcePhotoCountsByPagePath({ resources, pages: input.pages })
+    );
     if (!inventory.length) return { run: input.run };
     const sourceInventoryHash = siteArchitectureInventoryHash(inventory);
     const retained = input.run.architecture;
@@ -2086,11 +2107,14 @@ export class SiteAuthoringWorkflow {
   }) {
     let run = await this.updateRun(input.run, { stage: "authoring" });
     const authoringProfile = liveAuthoringProfile(run.authoringProfileId, input.kind);
+    const approvedArchitecture = input.currentFiles.find((file) => file.path === "src/approved-architecture.ts");
+    const approvedPlan = approvedArchitecture ? parseApprovedArchitectureModule(approvedArchitecture.content) : undefined;
     const sourceEvidenceReferences = await this.createOperatorVisualEvidence(
       input.snapshots,
       input.sourcePages,
       authoringProfile.sourceEvidenceLimit,
-      authoringProfile.sourceEvidencePresentation
+      authoringProfile.sourceEvidencePresentation,
+      approvedPlan?.routes.flatMap((route) => route.sourcePaths)
     );
     const assetEvidenceReferences = await this.createOperatorAssetEvidence(
       input.buildInput,
@@ -2281,8 +2305,15 @@ export class SiteAuthoringWorkflow {
           activeSandboxRevision = rebased.revision;
           sandboxPublicBuildInputId = effectiveBuildInput.id;
         } catch (error) {
-          if (!isSandboxInfrastructureFailure(error)) throw error;
-          await recycleSandbox("rebase_transport_failure");
+          if (sandboxConnectionFailure(error)) {
+            const rebased = await this.sandbox.rebase(activeSession.sandboxId!, activeSandboxRevision, effectiveBuildInput);
+            activeSandboxRevision = rebased.revision;
+            sandboxPublicBuildInputId = effectiveBuildInput.id;
+          } else if (isSandboxMachineFailure(error)) {
+            await recycleSandbox("rebase_machine_failure");
+          } else {
+            throw error;
+          }
         }
       }
     };
@@ -2691,7 +2722,8 @@ export class SiteAuthoringWorkflow {
           attempt: applyAttempt,
           recycle: recycleSandbox,
           isRepairable: isRepairableSandboxBuildError,
-          isInfrastructureFailure: isSandboxInfrastructureFailure,
+          isInfrastructureFailure: isSandboxMachineFailure,
+          isTransportFailure: isSandboxTransportFailure,
           recoveryReason: sandboxRecoveryReason,
           terminalError: platformTerminalError
         });
@@ -2721,6 +2753,7 @@ export class SiteAuthoringWorkflow {
         imageDetail: activeAuthoringProfile?.visualInspectionImageDetail,
         selector: target.selector,
         selectionLabel: target.label,
+        authorScreenshot: target.authorScreenshot,
         signal: combineAbortSignals(input.signal, inspectionSignal),
         onPhase
       }),
@@ -3241,7 +3274,8 @@ export class SiteAuthoringWorkflow {
           activeSandboxRevision = recovered.revision;
         },
         isRepairable: () => false,
-        isInfrastructureFailure: isSandboxInfrastructureFailure,
+        isInfrastructureFailure: isSandboxMachineFailure,
+        isTransportFailure: isSandboxTransportFailure,
         recoveryReason: sandboxRecoveryReason,
         terminalError: platformTerminalError
       });
@@ -3476,6 +3510,7 @@ export class SiteAuthoringWorkflow {
     imageDetail?: "high";
     selector?: string;
     selectionLabel?: string;
+    authorScreenshot?: "none" | "desktop-top" | "focus";
     signal?: AbortSignal;
     onPhase?: (phase: "browser_navigation_capture" | "visual_evidence_preparation" | "persistence", durationMs?: number) => void;
   }) {
@@ -3521,6 +3556,7 @@ export class SiteAuthoringWorkflow {
       // The broader gate still verifies all architecture-derived routes.
       preferredRouteLimit: 5
     });
+    const authorScreenshot = input.authorScreenshot ?? "none";
     const selectedRoutes = (retainedScope.length
       ? retainedScope
       : representativeRoutes).slice(
@@ -3535,8 +3571,9 @@ export class SiteAuthoringWorkflow {
       blobStore: this.blobStore,
       capturePrefix,
       routePaths: selectedRoutes,
-      focusSelector: input.selector,
+      focusSelector: authorScreenshot === "focus" ? input.selector : undefined,
       captureMode: "review",
+      authorScreenshot,
       signal: input.signal,
       runtimeSource
     });
@@ -3545,10 +3582,9 @@ export class SiteAuthoringWorkflow {
     input.onPhase?.("browser_navigation_capture", browserCaptureMs);
     const visualEvidenceStartedAt = Date.now();
     input.onPhase?.("visual_evidence_preparation");
-    const visualFrames = await createArtifactVisualFrames(
-      browserGate.captures,
-      selectedRoutes
-    );
+    const visualFrames = browserGate.captures.length
+      ? await createArtifactVisualFrames(browserGate.captures, selectedRoutes)
+      : [];
     const visualEvidencePreparationMs = Date.now() - visualEvidenceStartedAt;
     input.onPhase?.("visual_evidence_preparation", visualEvidencePreparationMs);
     input.onPhase?.("persistence");
@@ -3570,7 +3606,8 @@ export class SiteAuthoringWorkflow {
         requestedRoute: input.route,
         requestedSelector: input.selector,
         selectionLabel: input.selectionLabel,
-        focusedSelection: Boolean(input.selector),
+        authorScreenshot,
+        focusedSelection: authorScreenshot === "focus" && Boolean(input.selector),
         inspectedRoutes: selectedRoutes,
         routes: prepared.routes.map((route) => route.path),
         findings: inspectionFindings,
@@ -3587,6 +3624,7 @@ export class SiteAuthoringWorkflow {
         inspectionHash,
         requestedRoute: input.route,
         requestedSelector: input.selector,
+        authorScreenshot,
         inspectedRoutes: selectedRoutes,
         visualEvidenceFrames: visualFrames.map((frame) => frame.evidence),
         visualEvidenceBytes: visualFrames.reduce((sum, frame) => sum + frame.bytes.byteLength, 0),
@@ -4123,15 +4161,14 @@ export class SiteAuthoringWorkflow {
         // The desired teardown state is already true; retain local provenance
         // and clear the live binding below just as after a successful destroy.
       } else {
-        const rotating = siteAgentSessionSchema.parse({
+        const retained = siteAgentSessionSchema.parse({
           ...session,
-          status: "rotating",
+          status: session.status === "rotating" ? "checkpointed" : session.status,
           sandboxDestroyAttempts: session.sandboxDestroyAttempts + 1,
           currentWorkspaceRevisionId: input.currentWorkspaceRevisionId ?? session.currentWorkspaceRevisionId,
-          leaseExpiresAt: now,
           updatedAt: now
         });
-        await this.repository.saveAgentSession(rotating);
+        await this.repository.saveAgentSession(retained);
         const existing = (await this.repository.listOperatorQueue()).some((item) =>
           item.reason === "maintenance_failure"
           && item.siteId === session.siteId
@@ -4152,7 +4189,7 @@ export class SiteAuthoringWorkflow {
             updatedAt: now
           }));
         }
-        return { destroyed: false as const, session: rotating };
+        return { destroyed: false as const, session: retained };
       }
     }
     const checkpointed = siteAgentSessionSchema.parse({
@@ -4252,10 +4289,21 @@ export class SiteAuthoringWorkflow {
       current = result.session;
     }
     if (current.sandboxId) {
-      const diagnostics = await this.sandbox.diagnostics(current.sandboxId).catch(() => undefined);
-      const source = diagnostics?.ok && diagnostics.revision !== "uninitialized"
-        ? await this.sandbox.getSource(current.sandboxId).catch(() => undefined)
-        : undefined;
+      let diagnostics: Awaited<ReturnType<AuthoringSandbox["diagnostics"]>> | undefined;
+      try {
+        diagnostics = await this.sandbox.diagnostics(current.sandboxId);
+      } catch (error) {
+        if (sandboxConnectionFailure(error)) throw retryableSandboxConnectionError(error);
+        if (!isConfirmedSandboxAbsent(error)) diagnostics = undefined;
+      }
+      let source: Awaited<ReturnType<AuthoringSandbox["getSource"]>> | undefined;
+      if (diagnostics?.ok && diagnostics.revision !== "uninitialized") {
+        try {
+          source = await this.sandbox.getSource(current.sandboxId);
+        } catch (error) {
+          if (sandboxConnectionFailure(error)) throw retryableSandboxConnectionError(error);
+        }
+      }
       const sourceHash = source ? sha256(stableJson(source.files
         .map((file) => workspaceSourceFileSchema.parse(file))
         .sort((left, right) => left.path.localeCompare(right.path)))) : undefined;
@@ -4345,36 +4393,41 @@ export class SiteAuthoringWorkflow {
       try {
         revision = await bootstrapAndRestore(starting);
       } catch (error) {
-        if (!isSandboxInfrastructureFailure(error)) throw error;
-        const destroyed = await this.destroySessionSandbox(starting, {
-          reason: `sandbox_start_recovery:${sandboxRecoveryReason(error)}`,
-          currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
-        });
-        if (!destroyed.destroyed) throw sandboxCleanupPendingError();
-        const restartedAt = new Date().toISOString();
-        starting = siteAgentSessionSchema.parse({
-          ...destroyed.session,
-          status: "active",
-          currentWorkspaceRevisionId: run.exactParentRevisionId,
-          publicBuildInputId: buildInput.id,
-          sandboxDeploymentId: run.sandboxDeploymentId,
-          sandboxId: await this.provisionSandboxId(),
-          sandboxLastStartedAt: restartedAt,
-          leaseExpiresAt: executionLeaseExpiresAt,
-          updatedAt: restartedAt
-        });
-        await this.saveSessionForExecution(run, starting);
-        revision = await bootstrapAndRestore(starting);
+        if (sandboxConnectionFailure(error)) {
+          revision = await bootstrapAndRestore(starting);
+        } else if (isSandboxMachineFailure(error)) {
+          const destroyed = await this.destroySessionSandbox(starting, {
+            reason: `sandbox_start_recovery:${sandboxRecoveryReason(error)}`,
+            currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
+          });
+          if (!destroyed.destroyed) throw sandboxCleanupPendingError();
+          const restartedAt = new Date().toISOString();
+          starting = siteAgentSessionSchema.parse({
+            ...destroyed.session,
+            status: "active",
+            currentWorkspaceRevisionId: run.exactParentRevisionId,
+            publicBuildInputId: buildInput.id,
+            sandboxDeploymentId: run.sandboxDeploymentId,
+            sandboxId: await this.provisionSandboxId(),
+            sandboxLastStartedAt: restartedAt,
+            leaseExpiresAt: executionLeaseExpiresAt,
+            updatedAt: restartedAt
+          });
+          await this.saveSessionForExecution(run, starting);
+          revision = await bootstrapAndRestore(starting);
+        } else {
+          throw error;
+        }
       }
     } catch (error) {
-      if (!isSandboxCleanupPendingError(error)) {
+      if (!isSandboxCleanupPendingError(error) && !sandboxConnectionFailure(error)) {
         await this.destroySessionSandbox(starting, {
           reason: "sandbox_start_failed",
           currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
         });
       }
       if (isSiteAuthoringTerminalError(error)) throw error;
-      const retryable = isSandboxInfrastructureFailure(error);
+      const retryable = isSandboxInfrastructureFailure(error) || isRailwayAuthorizationFailure(error);
       throw new SiteAuthoringTerminalError(
         "sandbox_unavailable",
         "platform",
@@ -4547,11 +4600,59 @@ export class SiteAuthoringWorkflow {
     }
   }
 
+  private async routeAnswerImages(
+    snapshots: SourceSnapshot[],
+    pages: SourceSnapshotPage[]
+  ): Promise<RouteAnswerImage[]> {
+    const websiteSourceIds = new Set(snapshots
+      .filter((snapshot) => websiteSourceSnapshotPayloadSchema.safeParse(snapshot.payload).success)
+      .map((snapshot) => snapshot.id));
+    const candidates = (await Promise.all([...websiteSourceIds].map(async (sourceId) => {
+      const resources = await this.repository.listSourceSnapshotResources(sourceId);
+      return rankSourceAssetCandidates({
+        resources,
+        pages: pages.filter((page) => page.sourceSnapshotId === sourceId)
+      });
+    }))).flat().filter((candidate) => candidate.likelyKind === "photo")
+      .sort((left, right) => right.relevanceScore - left.relevanceScore || left.resource.id.localeCompare(right.resource.id));
+    const selected = [] as typeof candidates;
+    const perPage = new Map<string, number>();
+    for (const candidate of candidates) {
+      const count = perPage.get(candidate.sourcePageId) ?? 0;
+      if (count >= 4) continue;
+      perPage.set(candidate.sourcePageId, count + 1);
+      selected.push(candidate);
+      if (selected.length === 48) break;
+    }
+    const images: RouteAnswerImage[] = [];
+    for (const candidate of selected) {
+      const page = pages.find((item) => item.id === candidate.sourcePageId);
+      if (!page) continue;
+      const storageKey = candidate.resource.storageKey;
+      if (!storageKey) continue;
+      const blob = await this.blobStore.get(storageKey).catch(() => undefined);
+      if (!blob || candidate.resource.blobContentHash && sha256(blob.bytes) !== candidate.resource.blobContentHash) continue;
+      const metadata = await sharp(blob.bytes, { limitInputPixels: 80_000_000, animated: false }).metadata().catch(() => undefined);
+      images.push({
+        resourceId: candidate.resource.id,
+        sourcePageId: candidate.sourcePageId,
+        sourcePath: page.path,
+        sourcePageUrl: candidate.sourcePageUrl,
+        ...(page.title ? { sourcePageTitle: page.title } : {}),
+        width: metadata?.width ?? null,
+        height: metadata?.height ?? null,
+        proofScope: imageProofScope(page.path, page.title)
+      });
+    }
+    return images;
+  }
+
   private async createOperatorVisualEvidence(
     snapshots: SourceSnapshot[],
     pages: SourceSnapshotPage[],
     limit: 2 | 4 | 8,
-    presentation: "individual" | "contact-sheet" = "individual"
+    presentation: "individual" | "contact-sheet" = "individual",
+    preferredSourcePaths: readonly string[] = []
   ): Promise<ManagerSourceEvidenceReference[]> {
     const websiteSourceIds = new Set(snapshots
       .filter((snapshot) => websiteSourceSnapshotPayloadSchema.safeParse(snapshot.payload).success)
@@ -4573,12 +4674,27 @@ export class SiteAuthoringWorkflow {
     ];
     const selected = [] as typeof candidates;
     const contentHashes = new Set<string>();
-    for (const candidate of ordered) {
+    const preferredPaths = new Set(preferredSourcePaths.map((path) => path.split("?")[0]?.replace(/\/+$/, "") || "/"));
+    const seenPreferredPages = new Set<string>();
+    const take = (candidate: (typeof ordered)[number]) => {
       const identity = candidate.resource.rawContentHash ?? candidate.resource.id;
-      if (contentHashes.has(identity)) continue;
+      if (contentHashes.has(identity)) return false;
       contentHashes.add(identity);
       selected.push(candidate);
-      if (selected.length === limit) break;
+      return selected.length === limit;
+    };
+    for (const candidate of ordered) {
+      if (candidate.likelyKind !== "photo") continue;
+      const page = pages.find((item) => item.id === candidate.sourcePageId && item.sourceSnapshotId === candidate.resource.sourceSnapshotId);
+      const path = page?.path.split("?")[0]?.replace(/\/+$/, "") || "";
+      if (!path || path === "/" && !preferredPaths.has("/") || !preferredPaths.has(path) || seenPreferredPages.has(path)) continue;
+      seenPreferredPages.add(path);
+      if (take(candidate)) break;
+    }
+    if (selected.length < limit) {
+      for (const candidate of ordered) {
+        if (take(candidate)) break;
+      }
     }
     const references: ManagerSourceEvidenceReference[] = [];
     const sheetResources: Array<{ resourceId: string; likelyKind: "photo" | "logo" | "icon" | "other"; bytes: Buffer }> = [];
@@ -4593,6 +4709,7 @@ export class SiteAuthoringWorkflow {
       const blob = await this.blobStore.get(storageKey).catch(() => undefined);
       if (!blob || candidate.resource.blobContentHash && sha256(blob.bytes) !== candidate.resource.blobContentHash) continue;
       const evidenceBytes = blob.bytes;
+      const metadata = await sharp(evidenceBytes, { limitInputPixels: 80_000_000, animated: false }).metadata().catch(() => undefined);
       const preview = await sharp(evidenceBytes, { limitInputPixels: 80_000_000, animated: false })
         .rotate()
         .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
@@ -4608,6 +4725,9 @@ export class SiteAuthoringWorkflow {
         sourcePageId: candidate.sourcePageId,
         sourcePageUrl: candidate.sourcePageUrl,
         ...(sourcePage?.title ? { sourcePageTitle: sourcePage.title } : {}),
+        width: metadata?.width ?? null,
+        height: metadata?.height ?? null,
+        proofScope: imageProofScope(sourcePage?.path ?? candidate.sourcePageUrl, sourcePage?.title),
         mimeType: "image/webp",
         contentHash: sha256(preview),
         dataUrl: `data:image/webp;base64,${preview.toString("base64")}`
@@ -5371,7 +5491,7 @@ export class SiteAuthoringWorkflow {
     const prepared = await createSiteRuntimePatch({
       id: id("runtime_patch"),
       seriesId: runtimeSeriesId,
-      sourceRevision: process.env.LODESTA_RELEASE_GIT_SHA ?? process.env.RAILWAY_GIT_COMMIT_SHA ?? "working-tree",
+      sourceRevision: process.env.LODESTA_RELEASE_GIT_SHA?.trim() || process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || "working-tree",
       builderVersion: "trusted-runtime-builder@sha256:31d24faf0bf5265f2af840b87c7c5f2e2b6811780b68e949086e5b55da80cf61",
       securityStatus: "audited",
       compatibilityStatus: "passed"
@@ -5997,13 +6117,37 @@ function isRepairableSandboxBuildError(error: unknown) {
     && (error.providerCode === "build_failed" || error.providerCode === "source_policy_violation");
 }
 
-function isTransientSandboxTransportError(error: unknown) {
+function isSandboxTransportFailure(error: unknown) {
+  if (isRailwayAuthorizationFailure(error)) return false;
   if (error instanceof SiteSandboxRequestError) {
-    return error.status === 408 || error.status === 429 || error.status >= 500;
+    return error.status === 408 || error.status === 429 || error.status === 502 || error.status === 503 || error.status === 504;
   }
-  return /(?:fetch failed|network|timeout|timed out|econnreset|socket hang up|temporarily unavailable)/i.test(
+  return /(?:fetch failed|network|timeout|timed out|econnreset|socket hang up|temporarily unavailable|websocket|connection failed)/i.test(
     error instanceof Error ? error.message : String(error)
   );
+}
+
+function isRailwayAuthorizationFailure(error: unknown) {
+  return (error instanceof Error && error.name === "RailwayAuthError")
+    || /not authorized/i.test(error instanceof Error ? error.message : String(error));
+}
+
+function sandboxConnectionFailure(error: unknown) {
+  return isSandboxTransportFailure(error) || isRailwayAuthorizationFailure(error);
+}
+
+function retryableSandboxConnectionError(error: unknown) {
+  return new SiteAuthoringTerminalError(
+    "sandbox_unavailable",
+    "platform",
+    true,
+    failureMessage(error),
+    { cause: error }
+  );
+}
+
+function isTransientSandboxTransportError(error: unknown) {
+  return isSandboxTransportFailure(error);
 }
 
 async function retryTransientAuthoringPersistence<T>(
@@ -6038,9 +6182,12 @@ async function retryTransientAuthoringPersistence<T>(
   throw lastError;
 }
 
-function isSandboxInfrastructureFailure(error: unknown) {
-  if (isUninitializedSandboxRevision(error) || isTransientSandboxTransportError(error)) return true;
-  return error instanceof SiteSandboxRequestError && [
+function isSandboxMachineFailure(error: unknown) {
+  if (isSandboxTransportFailure(error) || isRailwayAuthorizationFailure(error)) return false;
+  if (isUninitializedSandboxRevision(error) || isConfirmedSandboxAbsent(error)) return true;
+  if (!(error instanceof SiteSandboxRequestError)) return false;
+  if (error.status >= 500) return true;
+  return [
     "active_generation_invalid",
     "build_timeout",
     "candidate_cleanup_failed",
@@ -6049,6 +6196,10 @@ function isSandboxInfrastructureFailure(error: unknown) {
     "revision_conflict",
     "sandbox_operation_failed"
   ].includes(error.providerCode ?? "");
+}
+
+function isSandboxInfrastructureFailure(error: unknown) {
+  return isSandboxTransportFailure(error) || isSandboxMachineFailure(error);
 }
 
 function sandboxRecoveryReason(error: unknown) {
@@ -6119,15 +6270,7 @@ function platformTerminalError(error: unknown): SiteAuthoringTerminalError {
       && isSandboxInfrastructureFailure(error);
     return new SiteAuthoringTerminalError(code, "platform", retryable, error.message, { cause: error });
   }
-  if (isTransientSandboxTransportError(error)) {
-    return new SiteAuthoringTerminalError(
-      "sandbox_unavailable",
-      "platform",
-      true,
-      failureMessage(error),
-      { cause: error }
-    );
-  }
+  if (sandboxConnectionFailure(error)) return retryableSandboxConnectionError(error);
   if (/^(?:workflow_)?deadline_exhausted$/i.test(failureMessage(error))) {
     return new SiteAuthoringTerminalError("deadline_exhausted", "budget", false, failureMessage(error), { cause: error });
   }

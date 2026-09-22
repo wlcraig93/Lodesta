@@ -162,11 +162,12 @@ assert(workflow.includes("preferredRouteLimit: 5")
   && workflow.includes("defaultRoutes: input.releasePlan?.visualReviewRoutePaths")
   && workflow.includes("createArtifactVisualFrames")
   && workflow.includes("visualEvidenceFrames: visualFrames.map")
+  && workflow.includes("authorScreenshot")
   && !workflow.includes("createArtifactRouteFamilyContactSheets")
   && workflow.includes("browserRoutePaths: input.releasePlan?.browserRoutePaths")
   && !workflow.includes("all-representative-routes")
   && !authoringProfile.includes("all-representative-routes"),
-"The authoring loop must retain its all-route mechanical pass while returning labeled native frames for the architecture-selected review routes.");
+"The authoring loop must retain its all-route mechanical pass, return measured text by default, and attach at most one requested screenshot.");
 assert.match(compilerPolicy, /runtimeSeriesId !== "site-runtime-v4"[\s\S]*only site-runtime-v4 is canonical/);
 assert.match(sdkPackage, /"#lodesta-sdk": "\.\/platform\/sdk-canonical\.tsx"/);
 assert.doesNotMatch(sdkPackage, /sdk-native\.tsx/);

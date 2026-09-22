@@ -53,6 +53,7 @@ try {
   const source = await sandbox.getSource(firstId);
   assert.equal(source.revision, bootstrapped.revision);
   assert.ok(source.files.some((file) => file.path === "src/required-destinations.tsx"));
+  assert.ok(source.files.every((file) => !file.path.split("/").some((segment) => segment.startsWith("._"))));
   const diagnostics = await sandbox.diagnostics(firstId);
   assert.equal(diagnostics.ok, true);
   assert.equal(diagnostics.sandboxManifest.kind, "site-sandbox-manifest");

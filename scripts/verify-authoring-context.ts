@@ -172,10 +172,10 @@ const initialBuildSkill = taskSkillFor("initial_build").knowledge.join("\n");
 for (const contract of [
   /do not add, remove, merge, or redirect routes/,
   /authored TSX and CSS readable, structurally formatted/,
-  /customer purpose shape each page's composition/,
-  /decorative numbers and diagrams are not proof/,
+  /take the palette from the logo and the strongest photographs/,
+  /Avoid the generic generated-site look/,
   /Preserve geographic qualifiers/,
-  /primary action without an oversized headline crowding it out/,
+  /headlines at a comfortable size/,
   /Give a form its purpose and essential safety context first, not a backlog of secondary reference details/,
   /direct quotation presented as attributed speech.*exact contiguous excerpt of supplied source or exact owner-provided wording.*exact supported attribution/,
   /one clear role rather than repeating adjacent versions of the same phone number/,

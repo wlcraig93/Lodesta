@@ -3764,6 +3764,12 @@ const browserInspectionSource = String.raw`(() => {
             flush();
             continue;
           }
+          // Hyphens, dashes and slashes are ordinary line-break opportunities:
+          // "F-150" wrapping after its hyphen is not a mid-word break.
+          if (/[-\u2010\u2013\u2014\/]/.test(character)) {
+            flush();
+            continue;
+          }
           const range = document.createRange();
           range.setStart(node, index);
           range.setEnd(node, index + 1);

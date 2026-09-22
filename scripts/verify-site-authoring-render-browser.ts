@@ -1475,6 +1475,36 @@ assert(
   "scrollWidth heading overflow must not be required to catch mid-word wraps."
 );
 
+const hyphenHeadingMarkup = '<section class="hyphen-heading"><h1>Mercedes-Benz F-150 Carrera-GT</h1><p>Hyphenated names may wrap after their hyphens.</p></section>';
+const hyphenHeadingPrepared = {
+  ...prepared,
+  routes: prepared.routes.map((route) => route.path === "/"
+    ? { ...route, html: route.html.replace("</main>", `${hyphenHeadingMarkup}</main>`) }
+    : route),
+  files: prepared.files.map((file) => {
+    if (file.path === "index.html") {
+      return { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${hyphenHeadingMarkup}</main>`)) };
+    }
+    return file.path === "site.css"
+      ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.hyphen-heading{max-width:240px}.hyphen-heading h1{font-size:44px;line-height:1.1;overflow-wrap:normal;word-break:normal}`) }
+      : file;
+  })
+};
+const hyphenHeadingBrowser = await runArtifactBrowserGate({
+  prepared: hyphenHeadingPrepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-hyphen-heading",
+  routePaths: ["/"],
+  captureMode: "review",
+  authorScreenshot: "none",
+  viewports: [{ name: "desktop", width: 1280, height: 900 }]
+});
+assert(
+  !hyphenHeadingBrowser.findings.some((finding) => finding.id === "render.heading_word_break" && finding.message.includes("Mercedes")),
+  "A heading that wraps only after its hyphens was reported as a mid-word break."
+);
+
 const fragmentedBodyMarkup = '<section class="fragmented-body"><h2>Wallpaper removal</h2><ol><li><strong>Protect the room.</strong> Cover floors and account for runoff before working on a wall.</li></ol></section>';
 const fragmentedBodyPrepared = {
   ...prepared,

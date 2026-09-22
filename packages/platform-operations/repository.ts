@@ -1,3 +1,4 @@
+import { withLocalFileLock } from "@/packages/local-file-lock";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import {
@@ -717,7 +718,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     return { ...emptyState(), ...JSON.parse(raw) as Partial<LocalState> };
   }
   private write(operation: (state: LocalState) => void | Promise<void>) {
-    const next = this.queue.then(async () => { const state = await this.read(); await operation(state); await mkdir(dirname(this.path), { recursive: true }); const temp = `${this.path}.${process.pid}.tmp`; await writeFile(temp, `${JSON.stringify(state, null, 2)}\n`); await rename(temp, this.path); });
+    const next = this.queue.then(() => withLocalFileLock(this.path, async () => { const state = await this.read(); await operation(state); await mkdir(dirname(this.path), { recursive: true }); const temp = `${this.path}.${process.pid}.tmp`; await writeFile(temp, `${JSON.stringify(state, null, 2)}\n`); await rename(temp, this.path); }));
     this.queue = next.catch(() => undefined); return next;
   }
 }

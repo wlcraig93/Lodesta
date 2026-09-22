@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { assertHostedExecutionAuthority, configuredRepositoryMode } from "@/packages/execution-environment";
+import { withLocalFileLock } from "@/packages/local-file-lock";
 import {
   businessStateSchema,
   assetRevisionSchema,
@@ -2120,7 +2121,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
   }
 
   private write<T>(operation: (state: LocalState) => T | Promise<T>) {
-    const next = this.queue.then(async () => {
+    const next = this.queue.then(() => withLocalFileLock(this.path, async () => {
       const state = await this.read();
       const result = await operation(state);
       await mkdir(dirname(this.path), { recursive: true });
@@ -2128,7 +2129,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
       await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`);
       await rename(temporary, this.path);
       return result;
-    });
+    }));
     this.queue = next.catch(() => undefined);
     return next;
   }

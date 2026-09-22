@@ -253,12 +253,9 @@ for (const contract of [
   /body and form text.*16px.*utility text.*12px.*essential controls.*48px/i,
   /readable focused route, content, legal, and shared-shell modules/i,
   /inspect_site with route: null.*route: '\/' inspects only home/i,
-  /Correct each returned error and defect/i,
-  /When the returned list has none, finish/i,
-  /Do not inspect more routes to review composition, copy, photo choice, or advisories that were not returned/i,
-  /default sample returns measured browser text, not pictures/i,
-  /Pass an exact route for one desktop top screenshot.*focused element screenshot/i,
-  /Full release verification still runs at finish/i
+  /desktop, tablet, phone and opened-menu screenshots/i,
+  /Correct each returned error/i,
+  /finish runs full release verification/i
 ]) assert.match(initialGuidance, contract);
 assert.doesNotMatch(initialGuidance, /Reinspect affected routes until warnings are zero|reinspect until warnings/i);
 assert.doesNotMatch(initialGuidance, /Judge the supplied pixels/i);
@@ -301,10 +298,9 @@ const inspectionTool = websiteManagerTools.find(
   (tool) => tool.type === "function" && tool.name === "inspect_site"
 );
 assert(inspectionTool?.type === "function");
-assert.match(inspectionTool.description!, /default result is text only.*does not attach screenshots/i);
-assert.match(inspectionTool.description!, /initial build, pass null.*starting sample.*passing '\/' inspects only the homepage/i);
-assert.match(inspectionTool.description!, /exact route with selector null.*one desktop top screenshot/i);
-assert.match(inspectionTool.description!, /exact route and CSS selector.*one focused screenshot/i);
+assert.match(inspectionTool.description!, /desktop, tablet, phone and opened mobile-navigation screenshots/i);
+assert.match(inspectionTool.description!, /initial build, pass null.*representative sample.*passing '\/' inspects only the homepage/i);
+assert.match(inspectionTool.description!, /exact route and CSS selector.*close up/i);
 assert(inspectionTool.parameters);
 assert.deepEqual(inspectionTool.parameters.required, ["route", "selector"]);
 const finishTool = websiteManagerTools.find(
@@ -699,8 +695,8 @@ const iaHeuristicOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSu
 assert.equal(iaHeuristicOnlyFeedback.findings.length, 0);
 assert.match(
   String(iaHeuristicOnlyFeedback.feedbackGuidance),
-  /Finish\. Do not inspect more routes to review composition, copy, photo choice, or advisories that were not returned.*Full release verification still runs at finish/i,
-  "A lone IA heuristic still instructed the author to chase composition or advisories."
+  /No measured defects\. Judge the attached screenshots/i,
+  "A lone IA heuristic was returned to the author instead of the screenshot review guidance."
 );
 const finishFailureRuntime = new WorkspaceManagerRuntime<string>({
   kind: "initial_build",

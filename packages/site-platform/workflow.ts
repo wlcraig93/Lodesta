@@ -3514,7 +3514,7 @@ export class SiteAuthoringWorkflow {
     imageDetail?: "high";
     selector?: string;
     selectionLabel?: string;
-    authorScreenshot?: "none" | "desktop-top" | "focus";
+    authorScreenshot?: "full" | "focus";
     signal?: AbortSignal;
     onPhase?: (phase: "browser_navigation_capture" | "visual_evidence_preparation" | "persistence", durationMs?: number) => void;
   }) {
@@ -3560,7 +3560,7 @@ export class SiteAuthoringWorkflow {
       // The broader gate still verifies all architecture-derived routes.
       preferredRouteLimit: 5
     });
-    const authorScreenshot = input.authorScreenshot ?? "none";
+    const authorScreenshot = input.authorScreenshot ?? "full";
     const selectedRoutes = (retainedScope.length
       ? retainedScope
       : representativeRoutes).slice(
@@ -3570,8 +3570,8 @@ export class SiteAuthoringWorkflow {
           : 5
       );
     // Every inspection runs the release browser checks on every route, so the
-    // author sees each blocker finish would report. A requested route or
-    // close-up additionally captures that one page's pictures.
+    // author sees each blocker finish would report, and captures screenshots of
+    // the representative sample (or the requested route or close-up).
     const releaseGate = await runArtifactBrowserGate({
       prepared,
       buildInput: input.buildInput,
@@ -3583,7 +3583,7 @@ export class SiteAuthoringWorkflow {
       signal: input.signal,
       runtimeSource
     });
-    const browserGate = authorScreenshot === "none" ? undefined : await runArtifactBrowserGate({
+    const browserGate = await runArtifactBrowserGate({
       prepared,
       buildInput: input.buildInput,
       blobStore: this.blobStore,
@@ -3599,13 +3599,13 @@ export class SiteAuthoringWorkflow {
     const inspectionFindings = [
       ...prepared.findings,
       ...releaseGate.findings,
-      ...(browserGate?.findings ?? []).filter((finding) => !releaseFindingKeys.has(findingIdentityKey(finding)))
+      ...browserGate.findings.filter((finding) => !releaseFindingKeys.has(findingIdentityKey(finding)))
     ];
     const browserCaptureMs = Date.now() - browserStartedAt;
     input.onPhase?.("browser_navigation_capture", browserCaptureMs);
     const visualEvidenceStartedAt = Date.now();
     input.onPhase?.("visual_evidence_preparation");
-    const visualFrames = browserGate?.captures.length
+    const visualFrames = browserGate.captures.length
       ? await createArtifactVisualFrames(browserGate.captures, selectedRoutes)
       : [];
     const visualEvidencePreparationMs = Date.now() - visualEvidenceStartedAt;
@@ -3618,7 +3618,7 @@ export class SiteAuthoringWorkflow {
         sandboxRevision: input.sandboxRevision
       },
       findings: inspectionFindings,
-      captures: browserGate?.captures ?? []
+      captures: browserGate.captures
     });
     input.onPhase?.("persistence", 0);
     return {
@@ -3636,11 +3636,11 @@ export class SiteAuthoringWorkflow {
         findings: inspectionFindings,
         staticFindingCount: prepared.findings.length,
         browserFindingCount: inspectionFindings.length - prepared.findings.length,
-        screenshotCount: browserGate?.captures.length ?? 0,
+        screenshotCount: browserGate.captures.length,
         visualEvidenceRoutes: [...new Set(visualFrames.map((frame) => frame.evidence.route))],
         visualEvidenceFrames: visualFrames.map((frame) => frame.evidence),
         visualEvidenceFrameCount: visualFrames.length,
-        focusedScreenshotCount: (browserGate?.captures ?? []).filter((capture) => capture.frame === "focus").length
+        focusedScreenshotCount: browserGate.captures.filter((capture) => capture.frame === "focus").length
       },
       diagnosticSummary: {
         visualOnly: true,

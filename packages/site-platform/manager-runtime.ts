@@ -128,7 +128,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       route?: string;
       selector?: string;
       label?: string;
-      authorScreenshot: "none" | "desktop-top" | "focus";
+      authorScreenshot: "full" | "focus";
     }, signal?: AbortSignal, onPhase?: (phase: RuntimeInspectionPhase, durationMs?: number) => void): Promise<RuntimeVisualInspection>;
     visualInspectionFeedback?: "prioritized-homepage" | "blockers-only-homepage" | "material-only-homepage" | "component-diagnostic-homepage" | "component-diagnostic-route-family" | "component-diagnostic-route-family-shared-first" | "component-diagnostic-route-family-quality-led" | "component-diagnostic-route-family-material-only" | "component-diagnostic-route-family-material-copy" | "component-diagnostic-route-family-balanced" | "component-diagnostic-route-family-component-evidence";
     configureLeadForm?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
@@ -637,15 +637,11 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (parsed.selector && !parsed.route) {
       return result({ ok: false, error: "inspection_selector_requires_route", message: "Supply an exact route with selector, or use selector: null for the ordinary inspection." });
     }
-    const authorScreenshot = parsed.selector
-      ? "focus" as const
-      : parsed.route
-        ? "desktop-top" as const
-        : "none" as const;
+    const authorScreenshot = parsed.selector ? "focus" as const : "full" as const;
     const route = parsed.route ?? (this.options.kind === "initial_build" ? undefined : this.options.selection?.route);
     const selection = this.options.selection?.route === route ? this.options.selection : undefined;
     const selector = authorScreenshot === "focus" ? parsed.selector ?? undefined : undefined;
-    const label = authorScreenshot === "none" ? selection?.label : undefined;
+    const label = authorScreenshot === "full" ? selection?.label : undefined;
     let buildPerformed = false;
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
       setPhase("build");
@@ -1089,7 +1085,7 @@ export function componentDiagnosticRouteFamilyQualityLedVisualSummary(summary: R
     authorFeedbackPolicy: "route-family-quality-led",
     feedbackGuidance: selected.length
       ? "Correct each returned error and defect. Repair a shared cause once. Reinspect that one exact route only if the measurement is still unclear, then finish."
-      : "Finish. Do not inspect more routes to review composition, copy, photo choice, or advisories that were not returned. Full release verification still runs at finish."
+      : "No measured defects. Judge the attached screenshots; fix any material visual, photo, or phone-layout problem you see, then finish."
   };
 }
 

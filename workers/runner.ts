@@ -58,7 +58,8 @@ async function main() {
       batchLimit: limit,
       releaseSha: process.env.LODESTA_RELEASE_GIT_SHA ?? null
     }));
-    const maxInFlight = Math.min(limit, 4);
+    const configuredInFlight = Number.parseInt(process.env.LODESTA_WORKER_MAX_IN_FLIGHT?.trim() ?? "", 10);
+    const maxInFlight = Math.min(limit, Number.isInteger(configuredInFlight) && configuredInFlight > 0 ? configuredInFlight : 4);
     const inFlight = new Set<Promise<void>>();
     let fatalError: unknown;
     let backoffMs = idleMs;

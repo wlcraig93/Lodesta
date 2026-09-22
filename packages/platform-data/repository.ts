@@ -426,6 +426,14 @@ const emptyLocalState = (): LocalState => ({
   runtimePatches: {}, runtimeSeries: {}, sandboxDeployments: {}, workspaceCheckpoints: {}, sessions: {}, runs: {}, runEvents: {}, maintenanceLeases: {}, messages: {}, controlPlaneChanges: {}, operatorQueue: {}, finalizations: {}, bootstrapRequests: {}, continuationHeads: {}, continuationSegments: {}
 });
 
+// Hosted enforces three concurrent projects per owner in the database. Local
+// experiments run many sites under one test owner, so the local store allows an
+// explicit higher limit.
+function localOwnerRunLimit() {
+  const configured = Number.parseInt(process.env.LODESTA_LOCAL_OWNER_RUN_LIMIT?.trim() ?? "", 10);
+  return Number.isInteger(configured) && configured > 0 ? configured : 3;
+}
+
 export class LocalSitePlatformRepository implements SitePlatformRepository {
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -1699,7 +1707,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         candidate.requestedBy === value.requestedBy
         && ["queued", "running"].includes(candidate.status)
       ).length;
-      if (active >= 3) throw new Error("concurrent_project_limit");
+      if (active >= localOwnerRunLimit()) throw new Error("concurrent_project_limit");
       state.runs[value.id] = value;
       return value;
     });
@@ -1730,7 +1738,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         return candidateSite?.ownerUserId === site.ownerUserId
           && ["queued", "running"].includes(candidate.status);
       }).length;
-      if (site.ownerUserId && active >= 3) throw new Error("concurrent_project_limit");
+      if (site.ownerUserId && active >= localOwnerRunLimit()) throw new Error("concurrent_project_limit");
       state.runs[run.id] = run;
       state.messages[message.id] = message;
       return clone(run) as SiteAgentRun;

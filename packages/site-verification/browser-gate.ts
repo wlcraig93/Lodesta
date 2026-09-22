@@ -154,8 +154,9 @@ async function runArtifactBrowserGateOnce(input: {
     const findings = isAuthorReview
       ? []
       : await verifyEveryPreparedRoute(input.prepared, harness.origin, input.signal);
-    browser = await chromium.launch({ headless: true });
-    const browserVersion = browser.version();
+    const launched = await chromium.launch({ headless: true });
+    browser = launched;
+    const browserVersion = launched.version();
     const captures: BrowserGateCapture[] = [];
     let linksChecked = 0;
     const selectedPaths = input.routePaths?.length
@@ -179,941 +180,952 @@ async function runArtifactBrowserGateOnce(input: {
     const canonicalGeographyFactIds = new Set(input.buildInput.publicFacts
       .filter((fact) => fact.kind === "address" || fact.kind === "service_area")
       .map((fact) => fact.id));
-    for (const route of routes) {
-      // Tablet-specific shell failures are disproportionately likely between
-      // wide navigation and the phone disclosure breakpoint. Exercise that
-      // state once on the homepage during final verification without adding a
-      // third viewport to every representative route.
-      const routeViewports = !isAuthorReview && route.path === "/"
-        ? configuredViewports
-        : selectedViewports;
-      for (const viewport of routeViewports) {
-        if (input.signal?.aborted) throw new Error("workflow_deadline_exhausted");
-        const page = await browser.newPage({ viewport });
-        const consoleErrors: string[] = [];
-        const routeFindings: ArtifactGateFinding[] = [];
-        page.on("console", (message) => {
-          if (message.type() === "error") {
-            consoleErrors.push(message.text());
-            routeFindings.push(finding("render.console", `Console error: ${message.text()}`, route.path));
-          }
-        });
-        page.on("pageerror", (error) => {
-          consoleErrors.push(error.message);
-          routeFindings.push(finding("render.page_error", `Page error: ${error.message}`, route.path));
-        });
-        page.on("request", (request) => {
-          const requestUrl = new URL(request.url());
-          if (requestUrl.origin !== harness.origin) {
-            routeFindings.push(finding("render.network", `Final artifact attempted an external request to ${requestUrl.origin}.`, route.path));
-          }
-        });
-        if (viewport.name === "mobile" && !isAuthorReview) {
-          await preloadAutomatedAccessibility(page, {
-            attempt,
-            route: route.path,
-            browserVersion,
-            consoleErrors
+    // Routes are independent pages in one browser; verify a few at a time and
+    // merge per-route results in route order so findings stay deterministic.
+    const routeResults = await mapWithConcurrency(routes, browserGateRouteConcurrency, async (route) => {
+      const findings: ArtifactGateFinding[] = [];
+      const captures: BrowserGateCapture[] = [];
+      let linksChecked = 0;
+        // Tablet-specific shell failures are disproportionately likely between
+        // wide navigation and the phone disclosure breakpoint. Exercise that
+        // state once on the homepage during final verification without adding a
+        // third viewport to every representative route.
+        const routeViewports = !isAuthorReview && route.path === "/"
+          ? configuredViewports
+          : selectedViewports;
+        for (const viewport of routeViewports) {
+          if (input.signal?.aborted) throw new Error("workflow_deadline_exhausted");
+          const page = await launched.newPage({ viewport });
+          const consoleErrors: string[] = [];
+          const routeFindings: ArtifactGateFinding[] = [];
+          page.on("console", (message) => {
+            if (message.type() === "error") {
+              consoleErrors.push(message.text());
+              routeFindings.push(finding("render.console", `Console error: ${message.text()}`, route.path));
+            }
           });
-        }
-        const routeUrl = `${harness.origin}${route.path === "/" ? "/" : `${route.path}/`}`;
-        const response = await navigatePageWithRetry({
-          page,
-          url: routeUrl,
-          route: route.path,
-          viewport: viewport.name,
-          signal: input.signal
-        });
-        if (!response?.ok()) routeFindings.push(finding("route.response", `Route returned ${response?.status() ?? "no response"}.`, route.path));
-        const naturalMetrics = await inspectPage(page, activeLogoRevisionIds, ownerLogoRevisionIds);
-        if (authorScreenshot === "full" && input.captureMode === "review" && route.path === "/" && viewport.name !== "tablet") {
-          const naturalKey = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-natural.png`;
-          captures.push({
-            key: naturalKey,
+          page.on("pageerror", (error) => {
+            consoleErrors.push(error.message);
+            routeFindings.push(finding("render.page_error", `Page error: ${error.message}`, route.path));
+          });
+          page.on("request", (request) => {
+            const requestUrl = new URL(request.url());
+            if (requestUrl.origin !== harness.origin) {
+              routeFindings.push(finding("render.network", `Final artifact attempted an external request to ${requestUrl.origin}.`, route.path));
+            }
+          });
+          if (viewport.name === "mobile" && !isAuthorReview) {
+            await preloadAutomatedAccessibility(page, {
+              attempt,
+              route: route.path,
+              browserVersion,
+              consoleErrors
+            });
+          }
+          const routeUrl = `${harness.origin}${route.path === "/" ? "/" : `${route.path}/`}`;
+          const response = await navigatePageWithRetry({
+            page,
+            url: routeUrl,
             route: route.path,
             viewport: viewport.name,
-            stage: "natural",
-            frame: "top",
-            bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
+            signal: input.signal
           });
-        }
-        if (naturalMetrics.lazyAboveFoldImageCount > 0) {
-          routeFindings.push(finding(
-            "render.lazy_above_fold_image",
-            `${naturalMetrics.lazyAboveFoldImageCount} above-fold image(s) use loading="lazy" at ${viewport.name}. Examples: ${naturalMetrics.lazyAboveFoldImageExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        await settleImages(page);
-        const metrics = await inspectPage(page, activeLogoRevisionIds, ownerLogoRevisionIds);
-        const navigationReachability = await inspectNavigationReachability(page, {
-          canonicalLogoRevisionIds: [...activeLogoRevisionIds]
-        });
-        if (viewport.name === "mobile" && !isAuthorReview) {
-          routeFindings.push(...await inspectMobileCanonicalFunctionalLinks(page, input.buildInput, route.path));
-        }
-        // Retain one opened-state frame in final artifacts. Navigation
-        // presentation cannot be assessed honestly from the closed header,
-        // while capturing every route would add redundant evidence and cost.
-        if (viewport.name === "mobile" && (isAuthorReview || route.path === "/")) {
-          const openNavigation = await captureOpenNavigation(page, {
-            captureScreenshot: authorScreenshot === "full"
-          });
-          if (openNavigation) {
-            if (openNavigation.bytes) {
-              captures.push({
-                key: `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-navigation.png`,
-                route: route.path,
-                viewport: viewport.name,
-                stage: "settled",
-                frame: "navigation",
-                bytes: openNavigation.bytes
-              });
-            }
-            if (openNavigation.callActionLabelSpacingExamples.length > 0) {
-              routeFindings.push(finding(
-                "render.call_action_label_spacing",
-                `${openNavigation.callActionLabelSpacingExamples.length} visible call action(s) omit whitespace between “Call” and the phone number in the opened mobile navigation. Use a human-readable label such as “Call (804) 914-8120.” Examples: ${openNavigation.callActionLabelSpacingExamples.join("; ")}.`,
-                route.path,
-                "render",
-                "warning"
-              ));
-            }
-          }
-        }
-        if (viewport.name === "mobile" && navigationReachability.brokenToggles.length > 0) {
-          routeFindings.push(finding(
-            "functional.navigation_toggle",
-            `${navigationReachability.brokenToggles.length} of ${navigationReachability.toggleCount} visible mobile navigation toggle(s) did not reveal a hit-testable navigation link: ${navigationReachability.brokenToggles.join("; ")}.`,
-            route.path,
-            "render"
-          ));
-        }
-        if (viewport.name === "mobile" && navigationReachability.designWarnings.length > 0) {
-          routeFindings.push(finding(
-            "render.mobile_navigation_design",
-            `The opened mobile navigation is functional but lacks a readable, deliberate presentation: ${navigationReachability.designWarnings.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (navigationReachability.destinationCount > 0) {
-          routeFindings.push(finding(
-            "functional.navigation_reachability",
-            navigationReachability.unreachable.length
-              ? `${navigationReachability.unreachable.length} of ${navigationReachability.destinationCount} primary destination(s) were not reachable through a visible, hit-testable direct link or interactive disclosure at ${viewport.name}: ${navigationReachability.unreachable.join(", ")}.`
-              : `All ${navigationReachability.destinationCount} primary destination(s) were reachable through a visible, hit-testable path at ${viewport.name}.`,
-            route.path,
-            "render",
-            navigationReachability.unreachable.length ? "error" : "info"
-          ));
-        }
-        if (viewport.name === "desktop" && !isAuthorReview) {
-          routeFindings.push(...await inspectCanonicalFunctionalLinks(page, input.buildInput, route.path));
-        }
-        const telLinks = metrics.links.filter((href) => /^tel:/i.test(href));
-        const canonicalPhone = input.buildInput.business.contacts.phone;
-        const canonicalTelMatches = canonicalPhone
-          ? telLinks.filter((href) => comparablePhone(href.slice(4)) === comparablePhone(canonicalPhone)).length
-          : 0;
-        routeFindings.push(finding(
-          "render.tel_links",
-          `Tap-to-call links at ${viewport.name}: ${telLinks.length}; canonical-number matches: ${canonicalTelMatches}; canonical phone available: ${Boolean(canonicalPhone)}.`,
-          route.path,
-          "render",
-          "info"
-        ));
-        if (
-          route.path === "/"
-          && viewport.name === "desktop"
-          && canonicalGeographyFactIds.size > 0
-          && !metrics.renderedFactIds.some((factId) => canonicalGeographyFactIds.has(factId))
-        ) {
-          routeFindings.push(finding(
-            "render.local_presence_missing",
-            "The homepage has publishable canonical address or service-area evidence but renders none of it through a canonical fact binding. Give local customers one clear, honest locality, address/directions, or service-area cue; do not replace it with an unsupported map or radius graphic.",
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (viewport.name === "desktop" && !isAuthorReview) {
-          const leadFormCount = await page.locator("form[data-lodesta-form-id]").count();
-          routeFindings.push(...await verifyLeadFormSubmissions(page, route.path));
-          if (leadFormCount > 0) {
-            const resetResponse = await navigatePageWithRetry({
-              page,
-              url: routeUrl,
+          if (!response?.ok()) routeFindings.push(finding("route.response", `Route returned ${response?.status() ?? "no response"}.`, route.path));
+          const naturalMetrics = await inspectPage(page, activeLogoRevisionIds, ownerLogoRevisionIds);
+          if (authorScreenshot === "full" && input.captureMode === "review" && route.path === "/" && viewport.name !== "tablet") {
+            const naturalKey = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-natural.png`;
+            captures.push({
+              key: naturalKey,
               route: route.path,
               viewport: viewport.name,
-              signal: input.signal
+              stage: "natural",
+              frame: "top",
+              bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
             });
-            if (!resetResponse?.ok()) {
-              routeFindings.push(finding("route.response", `Route returned ${resetResponse?.status() ?? "no response"} while resetting visual evidence after form verification.`, route.path));
-            }
-            await settleImages(page);
           }
-        }
-        if (viewport.name === "mobile" && !isAuthorReview) {
-          routeFindings.push(...await inspectAutomatedAccessibility(page, {
-            attempt,
-            route: route.path,
-            browserVersion,
-            consoleErrors
-          }));
-        }
-        linksChecked += metrics.links.length;
-        if (metrics.horizontalOverflowPx > 2) {
-          routeFindings.push(finding(
-            "render.horizontal_overflow",
-            `Horizontal overflow is ${metrics.horizontalOverflowPx}px at ${viewport.name}.`,
-            route.path,
-            "render",
-            metrics.horizontalOverflowPx >= 16 ? "error" : "warning"
-          ));
-        }
-        if (metrics.headingOverflowCount > 0) {
-          routeFindings.push(finding("render.heading_overflow", `${metrics.headingOverflowCount} heading(s) overflow at ${viewport.name}.`, route.path, "render", "warning"));
-        }
-        if (metrics.headingWordBreakCount > 0) {
-          routeFindings.push(finding(
-            "render.heading_word_break",
-            `${metrics.headingWordBreakCount} heading(s) break a word across lines at ${viewport.name} (overflow-wrap/word-break mid-word wrap). Examples: ${metrics.headingWordBreakExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "error"
-          ));
-        }
-        if (metrics.brokenImages > 0) {
-          routeFindings.push(finding("render.broken_image", `${metrics.brokenImages} image(s) failed at ${viewport.name}.`, route.path));
-        }
-        if (metrics.h1Count !== 1) {
-          routeFindings.push(finding("accessibility.h1", `Route should have exactly one H1; found ${metrics.h1Count}.`, route.path, "accessibility", "warning"));
-        }
-        if (viewport.name === "desktop" && metrics.missingAriaReferenceCount > 0) {
-          routeFindings.push(finding(
-            "functional.aria_reference",
-            `${metrics.missingAriaReferenceCount} ARIA reference(s) point to missing element IDs. Examples: ${metrics.missingAriaReferenceExamples.join("; ")}.`,
-            route.path,
-            "accessibility"
-          ));
-        }
-        if (viewport.name === "desktop" && metrics.missingFragmentTargetCount > 0) {
-          routeFindings.push(finding(
-            "functional.fragment_target",
-            `${metrics.missingFragmentTargetCount} same-page link(s) point to missing fragment targets. Use a real element ID or a valid route instead. Examples: ${metrics.missingFragmentTargetExamples.join("; ")}.`,
-            route.path,
-            "link"
-          ));
-        }
-        if (metrics.minBodyFontPx < 16) {
-          const examples = metrics.smallBodyTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
-          const families = metrics.smallBodyTextFamilies.map((family) => `${family.selector} (${family.count} element${family.count === 1 ? "" : "s"}, min ${family.minFontSizePx}px)`).join("; ");
-          routeFindings.push(finding(
-            "render.body_font",
-            `${metrics.smallBodyTextCount} possible body-copy element(s) compute below 16px at ${viewport.name}. This is advisory: utility labels at 12px or above may be intentional. Judge text role and readability in the supplied pixels. For an owner edit, preserve presentation outside the requested scope, including other consumers of shared CSS. The examples are representative, not exhaustive. Affected families: ${families}. Examples: ${examples}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.smallDisclosureTextCount > 0) {
-          const examples = metrics.smallDisclosureTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
-          routeFindings.push(finding(
-            "render.disclosure_text",
-            `${metrics.smallDisclosureTextCount} FAQ or disclosure answer text element(s) compute below 16px at ${viewport.name}, including content hidden in the collapsed state. Fix these selectors: ${examples}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.smallFormTextCount > 0) {
-          const examples = metrics.smallFormTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
-          routeFindings.push(finding(
-            "render.form_text",
-            `${metrics.smallFormTextCount} form label, field, or submit-control text element(s) compute below 16px at ${viewport.name}. Fix these selectors: ${examples}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.oversizedSingleLineFieldCount > 0) {
-          routeFindings.push(finding(
-            "render.oversized_single_line_field",
-            `${metrics.oversizedSingleLineFieldCount} single-line form field(s) exceed 96px tall at ${viewport.name} and read visually like textareas. Keep ordinary input and select controls compact; reserve multi-line height for textarea controls. Examples: ${metrics.oversizedSingleLineFieldExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.tinyVisibleTextCount > 0) {
-          const examples = metrics.tinyTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
-          const families = metrics.tinyTextFamilies.map((family) => `${family.selector} (${family.count} element${family.count === 1 ? "" : "s"}, min ${family.minFontSizePx}px)`).join("; ");
-          routeFindings.push(finding(
-            "render.tiny_text",
-            `${metrics.tinyVisibleTextCount} visible text element(s) compute below 12px at ${viewport.name}. The examples are representative, not exhaustive; correct every affected shared family before reinspecting. Affected families: ${families}. Examples: ${examples}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.lowContrastExamples.length > 0) {
-          const examples = metrics.lowContrastExamples
-            .map((example) => `${example.selector} "${example.text}" (${example.foreground} on ${example.background}, ${example.ratio}:1; requires ${example.requiredRatio}:1)`)
-            .join("; ");
-          routeFindings.push(finding(
-            "render.contrast",
-            `${metrics.lowContrastCount} body-text or interactive-label element(s) fail deterministic contrast at ${viewport.name}. Examples: ${examples}.`,
-            route.path,
-            "accessibility",
-            "error"
-          ));
-        }
-        if (metrics.textSurfaceBoundaryCount > 0) {
-          routeFindings.push(finding(
-            "render.text_surface_boundary",
-            `${metrics.textSurfaceBoundaryCount} possible text/decorative-surface overlap(s) at ${viewport.name}. Inspect actual layering and readability: these geometry estimates do not resolve paint order or nearer backgrounds. Do not change readable content solely to clear this advisory. Examples: ${metrics.textSurfaceBoundaryExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.longLineCount > 0) {
-          routeFindings.push(finding(
-            "render.long_lines",
-            `${metrics.longLineCount} readable text block(s) exceeded 90 estimated characters per line at ${viewport.name}. Examples: ${metrics.longLineExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.smallTargetCount > 0) {
-          routeFindings.push(finding(
-            "render.target_size",
-            `${metrics.smallTargetCount} essential control(s) measured below 44×44px at ${viewport.name}. Examples: ${metrics.smallTargetExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.duplicateFieldLabelCount > 0) {
-          routeFindings.push(finding(
-            "render.duplicate_field_label",
-            `${metrics.duplicateFieldLabelCount} form field(s) render the same label more than once at ${viewport.name}. Examples: ${metrics.duplicateFieldLabelExamples.join("; ")}.`,
-            route.path,
-            "accessibility",
-            "warning"
-          ));
-        }
-        if (metrics.adjacentDuplicateTextCount > 0) {
-          routeFindings.push(finding(
-            "render.adjacent_duplicate_text",
-            `${metrics.adjacentDuplicateTextCount} compact visible text block(s) repeat an adjacent word at ${viewport.name}. This often means canonical fact text was manually suffixed with information it already contains. Remove only the redundant authored text and preserve the canonical binding. Examples: ${metrics.adjacentDuplicateTextExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.adjacentDuplicateContentBlockCount > 0) {
-          routeFindings.push(finding(
-            "functional.adjacent_duplicate_content",
-            `${metrics.adjacentDuplicateContentBlockCount} substantial adjacent content block pair(s) render the same customer-facing text at ${viewport.name}. Remove the accidental duplicate section instead of shipping repeated content. Examples: ${metrics.adjacentDuplicateContentBlockExamples.join("; ")}.`,
-            route.path,
-            "render"
-          ));
-        }
-        if (metrics.duplicateHeaderIdentityCount > 0) {
-          routeFindings.push(finding(
-            "identity.duplicate_header_identity",
-            `${metrics.duplicateHeaderIdentityCount} header identity group(s) render the same business name more than once at ${viewport.name}. Keep one visible brand identity per header state. Examples: ${metrics.duplicateHeaderIdentityExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "error"
-          ));
-        }
-        if (metrics.internalProvenanceCopyCount > 0) {
-          routeFindings.push(finding(
-            "render.internal_provenance_copy",
-            `${metrics.internalProvenanceCopyCount} customer-facing text block(s) expose internal source or evidence language at ${viewport.name}. State the supported business message naturally without mentioning retained pages, source pages, canonical context, or how the fact was obtained. Examples: ${metrics.internalProvenanceCopyExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.vagueProcessCopyCount > 0) {
-          routeFindings.push(finding(
-            "render.vague_process_copy",
-            `${metrics.vagueProcessCopyCount} customer-facing text block(s) use vague process language at ${viewport.name}. Name the actual customer action, preparation, decision, or outcome instead of phrases such as next step, starting point, service conversation, or clear path. Examples: ${metrics.vagueProcessCopyExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.clippedElementCount > 0 || metrics.hitTestFailureCount > 0) {
-          routeFindings.push(finding(
-            "render.clipping_overlap",
-            `${metrics.clippedElementCount} important element(s) were clipped and ${metrics.hitTestFailureCount} essential control(s) failed center-point hit-testing at ${viewport.name}. Examples: ${[...metrics.clippedElementExamples, ...metrics.hitTestFailureExamples].join("; ")}.`,
-            route.path,
-            "render"
-          ));
-        }
-        if (metrics.textClippingCount > 0) {
-          routeFindings.push(finding(
-            "render.text_clipping",
-            `${metrics.textClippingCount} visible text fragment(s) were materially clipped at ${viewport.name}. Examples: ${metrics.textClippingExamples.join("; ")}.`,
-            route.path,
-            "render"
-          ));
-        }
-        if (metrics.textOcclusionCount > 0) {
-          routeFindings.push(finding(
-            "render.text_occlusion",
-            `${metrics.textOcclusionCount} visible text collision(s) were detected at ${viewport.name}. Examples: ${metrics.textOcclusionExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.headerControlCollisionCount > 0) {
-          routeFindings.push(finding(
-            "functional.header_control_collision",
-            `${metrics.headerControlCollisionCount} distinct visible header-control pair(s) overlap at ${viewport.name}. Header navigation, phone, portal, and conversion controls must occupy separate hit areas. Examples: ${metrics.headerControlCollisionExamples.join("; ")}.`,
-            route.path,
-            "render"
-          ));
-        }
-        if (metrics.inlineLinkClusterCount > 0) {
-          routeFindings.push(finding(
-            "render.inline_link_spacing",
-            `${metrics.inlineLinkClusterCount} adjacent text-link pair(s) render with no perceptible separation at ${viewport.name}. Repair the shared parent CSS with an explicit row/column layout and gap or padding; do not insert slash, pipe, or bullet characters into markup as a substitute for spacing. Examples: ${metrics.inlineLinkClusterExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (viewport.name === "desktop" && metrics.unstructuredFooterGroupCount > 0) {
-          routeFindings.push(finding(
-            "render.footer_group_layout",
-            `${metrics.unstructuredFooterGroupCount} wide footer group container(s) fall back to a plain block stack at desktop. Give the named container an explicit grid, flex row, or deliberately proportioned column composition so multiple footer groups do not become an accidental tall single column. Examples: ${metrics.unstructuredFooterGroupExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (viewport.name === "mobile" && metrics.narrowMediaSplitCount > 0) {
-          routeFindings.push(finding(
-            "render.mobile_narrow_split",
-            `${metrics.narrowMediaSplitCount} heading composition(s) remain squeezed into narrow side-by-side phone columns. Recompose them vertically or give the text a readable measure. Examples: ${metrics.narrowMediaSplitExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (route.path === "/" && viewport.name === "mobile" && metrics.longMobileCardWallCount > 0) {
-          routeFindings.push(finding(
-            "render.mobile_inventory_wall",
-            `${metrics.longMobileCardWallCount} long full-width card inventory group(s) consume multiple phone viewports without a stronger hierarchy. Curate the homepage selection, group the inventory into compact scannable links, or use an honest disclosure while keeping the complete catalog reachable on its hub route. Examples: ${metrics.longMobileCardWallExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (viewport.name === "mobile" && metrics.fragmentedHeadingCount > 0) {
-          routeFindings.push(finding(
-            "functional.mobile_heading_measure",
-            `${metrics.fragmentedHeadingCount} heading(s) collapse into an unreadably narrow phone column. Stack or widen the responsive composition so meaningful words—not one- or two-character fragments—form each line. Examples: ${metrics.fragmentedHeadingExamples.join("; ")}.`,
-            route.path,
-            "render",
-            // This metric is deliberately limited to severe one- or two-character
-            // fragmentation. At that point customer content is functionally
-            // unreadable, rather than merely an advisory typography preference.
-            "error"
-          ));
-        }
-        if (metrics.fragmentedBodyTextCount > 0) {
-          routeFindings.push(finding(
-            "functional.text_measure",
-            `${metrics.fragmentedBodyTextCount} body-text block(s) collapse into an unreadably narrow column at ${viewport.name}. Stack, widen, or correct the grid placement so words remain readable. Examples: ${metrics.fragmentedBodyTextExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "error"
-          ));
-        }
-        if (metrics.mediaContainerOverflowCount > 0) {
-          routeFindings.push(finding(
-            "render.media_container_overflow",
-            `${metrics.mediaContainerOverflowCount} in-flow media element(s) escape their container and overlap adjacent content at ${viewport.name}. Give the media wrapper a definite responsive height, clip the overflow, or stack the composition cleanly. Examples: ${metrics.mediaContainerOverflowExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.headerBrandCollisionCount > 0) {
-          routeFindings.push(finding(
-            "render.header_brand_collision",
-            `${metrics.headerBrandCollisionCount} header brand image(s) escape the header and cover utility text at ${viewport.name}. Keep the official logo fully contained in its header row, or reserve deliberate space in the utility row so both remain readable. Examples: ${metrics.headerBrandCollisionExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.headerContentOcclusionCount > 0) {
-          routeFindings.push(finding(
-            "render.header_content_occlusion",
-            `${metrics.headerContentOcclusionCount} main-content text fragment(s) are covered by the header at ${viewport.name}. Reserve the rendered header height before customer content begins, or recompose the affected text below it. Examples: ${metrics.headerContentOcclusionExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.croppedTransparentGraphicCount > 0) {
-          routeFindings.push(finding(
-            "render.informational_graphic_crop",
-            `${metrics.croppedTransparentGraphicCount} transparent graphic(s) lose visible edge content through object-fit: cover at ${viewport.name}. Preserve complete labels, symbols, and illustrated categories with contain or a crop-free responsive frame; reserve cover crops for imagery whose omitted edges do not carry information. Examples: ${metrics.croppedTransparentGraphicExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.syntheticIdentityDeviceCount > 0) {
-          routeFindings.push(finding(
-            "render.synthetic_identity_device",
-            `${metrics.syntheticIdentityDeviceCount} CSS badge, seal, stamp, monogram, slogan-poster, or empty marker device(s) may compete with the official identity or add evidence-free visual filler at ${viewport.name}. Use a credible supplied official logo when available; otherwise present the bound business name with ordinary typography and no invented mark. Express other messages through supported section content. Examples: ${metrics.syntheticIdentityDeviceExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.geographyCircleDeviceCount > 0) {
-          routeFindings.push(finding(
-            "render.geography_circle",
-            `${metrics.geographyCircleDeviceCount} large circle or radius device(s) frame service-geography language at ${viewport.name}. Present supported areas as honest text or an ordinary address/directions treatment; do not imply a coverage radius, badge, or pseudo-map. Examples: ${metrics.geographyCircleDeviceExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.decorativeDiagramCount > 0) {
-          routeFindings.push(finding(
-            "render.decorative_diagram",
-            `${metrics.decorativeDiagramCount} large CSS-only orbit, radar, network, or concentric-circle graphic(s) imply a diagram without encoding supported information at ${viewport.name}. Replace decorative data language with authentic evidence, ordinary editorial composition, or a factual accessible diagram. Examples: ${metrics.decorativeDiagramExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.duplicateHeaderActionCount > 0) {
-          routeFindings.push(finding(
-            "render.duplicate_header_action",
-            `${metrics.duplicateHeaderActionCount} header action(s) repeat the same visible label and destination at ${viewport.name}. Keep one deliberate header treatment for the action instead of rendering both a navigation link and duplicate button. Examples: ${metrics.duplicateHeaderActionExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.callActionDestinationMismatchCount > 0) {
-          routeFindings.push(finding(
-            "render.call_action_destination",
-            `${metrics.callActionDestinationMismatchCount} visible action(s) labeled as a call do not use a tel: destination at ${viewport.name}. Make “Call” actions dial the canonical phone number; label form or section links as Contact, Request, or Get started instead. Examples: ${metrics.callActionDestinationMismatchExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.callActionLabelSpacingCount > 0) {
-          routeFindings.push(finding(
-            "render.call_action_label_spacing",
-            `${metrics.callActionLabelSpacingCount} visible call action(s) omit whitespace between “Call” and the phone number at ${viewport.name}. Use a human-readable label such as “Call (804) 914-8120.” Examples: ${metrics.callActionLabelSpacingExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.falseAffordanceCount > 0) {
-          routeFindings.push(finding(
-            "render.false_affordance",
-            `${metrics.falseAffordanceCount} repeated non-interactive row or card decoration(s) look like expand, disclosure, or navigation controls at ${viewport.name}. Remove the control symbol or make the whole treatment honestly interactive with an accessible destination or disclosure. Examples: ${metrics.falseAffordanceExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.noninteractiveControlCount > 0) {
-          routeFindings.push(finding(
-            "functional.noninteractive_control",
-            `${metrics.noninteractiveControlCount} visible field-like search or filter control(s) are not interactive at ${viewport.name}. Use a real supported control or style the approved destination itself as the action. Examples: ${metrics.noninteractiveControlExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "error"
-          ));
-        }
-        if (metrics.repeatedSourceImageCount > 0) {
-          routeFindings.push(finding(
-            "render.repeated_source_image",
-            `${metrics.repeatedSourceImageCount} non-logo image(s) repeat as major media across separate sections at ${viewport.name}. Use a scarce retained photograph once where it has the most impact instead of making multiple sections feel duplicated. Examples: ${metrics.repeatedSourceImageExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        const homepagePrimaryGeometryFailure = route.path === "/" && (
-          !metrics.primaryHeadingAboveFold
-          || !metrics.primaryActionAboveFold
-          || !metrics.primaryHeadingBeforeAction
-        );
-        const responsiveActionBeforeHeading = viewport.name !== "desktop"
-          && metrics.primaryActionAboveFold
-          && !metrics.primaryHeadingBeforeAction;
-        const primaryGeometryFailure = homepagePrimaryGeometryFailure || responsiveActionBeforeHeading;
-        routeFindings.push(finding(
-          "render.primary_geometry",
-          `Primary heading above fold: ${metrics.primaryHeadingAboveFold}; main primary action above fold: ${metrics.primaryActionAboveFold}; heading precedes main action: ${metrics.primaryHeadingBeforeAction}; viewport: ${viewport.name}.${homepagePrimaryGeometryFailure ? " Keep the homepage value proposition and its main conversion visible in the first natural viewport; inspect header and navigation layout before changing hero content." : ""}${responsiveActionBeforeHeading ? " Keep the page H1 and concise context before its primary conversion on smaller viewports; do not reorder a form or action above the page purpose." : ""}`,
-          route.path,
-          "render",
-          primaryGeometryFailure ? "warning" : "info"
-        ));
-        if (metrics.clippedManagedContentExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.managed_content_clipped",
-            `${metrics.clippedManagedContentCount} managed capability block(s) hide content through unintended overflow at ${viewport.name}. Examples: ${metrics.clippedManagedContentExamples.join("; ")}.`,
-            route.path,
-            "capability"
-          ));
-        }
-        if (metrics.constrainedManagedMapExamples.length > 0) {
-          routeFindings.push(finding(
-            "capability.map_layout",
-            `${metrics.constrainedManagedMapCount} retained managed location block(s) are unreadably compressed at ${viewport.name}. Examples: ${metrics.constrainedManagedMapExamples.join("; ")}.`,
-            route.path,
-            "capability"
-          ));
-        }
-        if (metrics.emptyControlExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.empty_control",
-            `${metrics.emptyControlCount} visible interactive control(s) have no visible text, icon, image, or CSS affordance at ${viewport.name}. Examples: ${metrics.emptyControlExamples.join("; ")}.`,
-            route.path,
-            "render"
-          ));
-        }
-        if (metrics.browserDefaultDocumentExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.browser_default_document",
-            `The rendered document retains coordinated browser-default body and link styling at ${viewport.name}; the authored visual system appears missing or catastrophically discarded. Examples: ${metrics.browserDefaultDocumentExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "error"
-          ));
-        }
-        if (metrics.browserDefaultControlExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.browser_default_control_chrome",
-            `${metrics.browserDefaultControlCount} visible action control(s) retain browser-default inset or outset borders at ${viewport.name}. Reset native border/appearance intentionally and carry the site's button treatment through without removing accessible focus styling. Examples: ${metrics.browserDefaultControlExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.imageAltQualityExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.image_alt_quality",
-            `${metrics.imageAltQualityCount} rendered image alt attribute(s) are missing, filename-like, generic, or keyword-stuffed at ${viewport.name}. Examples: ${metrics.imageAltQualityExamples.join("; ")}.`,
-            route.path,
-            "accessibility",
-            "warning"
-          ));
-        }
-        if (metrics.prominentRasterUpscaleExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.raster_image_upscale",
-            `${metrics.prominentRasterUpscaleCount} prominent raster image(s) render materially larger than their intrinsic pixels at ${viewport.name}. Pull a higher-resolution retained source or use a deliberate type-led composition instead of enlarging a thumbnail. Examples: ${metrics.prominentRasterUpscaleExamples.join("; ")}.`,
-            route.path,
-            "asset",
-            "warning"
-          ));
-        }
-        if (metrics.filteredRasterLogoExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.raster_logo_filter",
-            `${metrics.filteredRasterLogoCount} visible raster logo image(s) use a CSS filter at ${viewport.name}, which can erase or distort an opaque brand tile. Keep the raster mark unchanged on a compatible surface or omit the duplicate mark. Examples: ${metrics.filteredRasterLogoExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.oversizedFooterRasterLogoExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.footer_raster_logo_scale",
-            `${metrics.oversizedFooterRasterLogoCount} footer raster logo image(s) dominate their footer column as a large image tile at ${viewport.name}. Keep the exact prepared mark at its intrinsic aspect ratio on a compatible surface and choose an ordinary contained size that supports the footer hierarchy. Examples: ${metrics.oversizedFooterRasterLogoExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.undersizedPrimaryRasterLogoExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.raster_logo_content_scale",
-            `${metrics.undersizedPrimaryRasterLogoCount} canonical logo image(s) render with a mark that may be difficult to recognize at ${viewport.name}. Use the exact supplied asset at its intrinsic aspect ratio and choose an ordinary contained size appropriate to the header. Examples: ${metrics.undersizedPrimaryRasterLogoExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.lowContrastPrimaryLogoExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.primary_logo_surface_contrast",
-            `${metrics.lowContrastPrimaryLogoCount} primary logo image(s) visually recede into the header surface at ${viewport.name}. Keep the exact supplied mark unchanged, but place it on a quiet compatible light or dark surface so the complete identity is immediately legible; do not recolor it with CSS filters. Examples: ${metrics.lowContrastPrimaryLogoExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (
-          route.path === "/"
-          && viewport.name === "desktop"
-          && activeLogoRevisionIds.size > 0
-          && !metrics.renderedAssetRevisionIds.some((revisionId) => activeLogoRevisionIds.has(revisionId))
-        ) {
-          routeFindings.push(finding(
-            "render.primary_logo_missing",
-            `The retained business record supplies ${activeLogoRevisionIds.size} active logo-classified asset revision(s), but the homepage does not render any matching visible asset. Judge the asset by its pixels: use an exact credible business logo as the primary identity, but do not promote an association, certification, partner, or co-branded badge into the brand position merely because its metadata says logo. When no credible business logo exists, use a well-typeset canonical business name rather than inventing a mark.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (
-          viewport.name === "mobile"
-          && metrics.missingMobileNavigation
-        ) {
-          routeFindings.push(finding(
-            "render.mobile_navigation",
-            "Desktop navigation links are hidden on mobile without a visible navigation toggle or equivalent route access.",
-            route.path,
-            "render"
-          ));
-        }
-        if (viewport.name === "mobile" && metrics.indiscernibleMobileNavigationToggleExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.mobile_navigation_trigger",
-            `The primary mobile navigation control has a hit box but no visible label or icon, so sighted visitors cannot identify it. Examples: ${metrics.indiscernibleMobileNavigationToggleExamples.join("; ")}.`,
-            route.path,
-            "render"
-          ));
-        }
-        if (viewport.name === "mobile" && metrics.misalignedMobileNavigationToggleExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.mobile_navigation_toggle_alignment",
-            `The primary mobile navigation trigger is separated from the header's trailing action area. Review whether that placement is deliberate for this site's authored navigation pattern. Examples: ${metrics.misalignedMobileNavigationToggleExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (viewport.name === "mobile" && metrics.duplicateManagedNavigationIconExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.duplicate_navigation_icon",
-            `A mobile navigation trigger renders authored pseudo-element artwork on top of the built-in managed hamburger/X. Remove the trigger's ::before/::after icon artwork and style the supplied [data-lodesta-navigation-icon] only through color, size, or spacing. Examples: ${metrics.duplicateManagedNavigationIconExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (viewport.name === "mobile" && metrics.mobileNavigationOverflowExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.mobile_navigation_overflow",
-            `Primary navigation requires horizontal scrolling or places destinations outside the visible phone viewport. Use a visible menu control or another fully visible mobile navigation pattern. Examples: ${metrics.mobileNavigationOverflowExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (viewport.name === "desktop" && metrics.desktopDualNavigationExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.desktop_dual_navigation",
-            `A mobile navigation disclosure remains visible beside the complete desktop navigation. Examples: ${metrics.desktopDualNavigationExamples.join("; ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.escapedEntityExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.escaped_entity",
-            `Visible text contains escaped HTML entity source instead of punctuation: ${metrics.escapedEntityExamples.join(", ")}.`,
-            route.path,
-            "render",
-            "warning"
-          ));
-        }
-        if (metrics.escapedSequenceExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.escaped_sequence",
-            `Visible text contains literal escaped source characters instead of layout whitespace: ${metrics.escapedSequenceExamples.join(", ")}.`,
-            route.path,
-            "render"
-          ));
-        }
-        if (metrics.missingGlyphExamples.length > 0) {
-          routeFindings.push(finding(
-            "render.missing_glyph",
-            `Visible text is not portable under Lodesta's pinned managed fonts. Use ordinary supported text, or replace a decorative character with accessible authored inline SVG. Never silently remove owner-authoritative text. Examples: ${metrics.missingGlyphExamples.map((example) => `${example.selector} ${example.character} (${example.codepoint}) with ${example.family}: ${example.reason}`).join("; ")}.`,
-            route.path,
-            "render"
-          ));
-        }
-        for (const href of metrics.links) {
-          if (!validRenderedLink(href, route.path, new Set(input.prepared.routes.map((item) => item.path)))) {
+          if (naturalMetrics.lazyAboveFoldImageCount > 0) {
             routeFindings.push(finding(
-              "link.rendered",
-              renderedLinkFailureMessage(href, route.path, input.prepared.findings),
+              "render.lazy_above_fold_image",
+              `${naturalMetrics.lazyAboveFoldImageCount} above-fold image(s) use loading="lazy" at ${viewport.name}. Examples: ${naturalMetrics.lazyAboveFoldImageExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          await settleImages(page);
+          const metrics = await inspectPage(page, activeLogoRevisionIds, ownerLogoRevisionIds);
+          const navigationReachability = await inspectNavigationReachability(page, {
+            canonicalLogoRevisionIds: [...activeLogoRevisionIds]
+          });
+          if (viewport.name === "mobile" && !isAuthorReview) {
+            routeFindings.push(...await inspectMobileCanonicalFunctionalLinks(page, input.buildInput, route.path));
+          }
+          // Retain one opened-state frame in final artifacts. Navigation
+          // presentation cannot be assessed honestly from the closed header,
+          // while capturing every route would add redundant evidence and cost.
+          if (viewport.name === "mobile" && (isAuthorReview || route.path === "/")) {
+            const openNavigation = await captureOpenNavigation(page, {
+              captureScreenshot: authorScreenshot === "full"
+            });
+            if (openNavigation) {
+              if (openNavigation.bytes) {
+                captures.push({
+                  key: `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-navigation.png`,
+                  route: route.path,
+                  viewport: viewport.name,
+                  stage: "settled",
+                  frame: "navigation",
+                  bytes: openNavigation.bytes
+                });
+              }
+              if (openNavigation.callActionLabelSpacingExamples.length > 0) {
+                routeFindings.push(finding(
+                  "render.call_action_label_spacing",
+                  `${openNavigation.callActionLabelSpacingExamples.length} visible call action(s) omit whitespace between “Call” and the phone number in the opened mobile navigation. Use a human-readable label such as “Call (804) 914-8120.” Examples: ${openNavigation.callActionLabelSpacingExamples.join("; ")}.`,
+                  route.path,
+                  "render",
+                  "warning"
+                ));
+              }
+            }
+          }
+          if (viewport.name === "mobile" && navigationReachability.brokenToggles.length > 0) {
+            routeFindings.push(finding(
+              "functional.navigation_toggle",
+              `${navigationReachability.brokenToggles.length} of ${navigationReachability.toggleCount} visible mobile navigation toggle(s) did not reveal a hit-testable navigation link: ${navigationReachability.brokenToggles.join("; ")}.`,
+              route.path,
+              "render"
+            ));
+          }
+          if (viewport.name === "mobile" && navigationReachability.designWarnings.length > 0) {
+            routeFindings.push(finding(
+              "render.mobile_navigation_design",
+              `The opened mobile navigation is functional but lacks a readable, deliberate presentation: ${navigationReachability.designWarnings.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (navigationReachability.destinationCount > 0) {
+            routeFindings.push(finding(
+              "functional.navigation_reachability",
+              navigationReachability.unreachable.length
+                ? `${navigationReachability.unreachable.length} of ${navigationReachability.destinationCount} primary destination(s) were not reachable through a visible, hit-testable direct link or interactive disclosure at ${viewport.name}: ${navigationReachability.unreachable.join(", ")}.`
+                : `All ${navigationReachability.destinationCount} primary destination(s) were reachable through a visible, hit-testable path at ${viewport.name}.`,
+              route.path,
+              "render",
+              navigationReachability.unreachable.length ? "error" : "info"
+            ));
+          }
+          if (viewport.name === "desktop" && !isAuthorReview) {
+            routeFindings.push(...await inspectCanonicalFunctionalLinks(page, input.buildInput, route.path));
+          }
+          const telLinks = metrics.links.filter((href) => /^tel:/i.test(href));
+          const canonicalPhone = input.buildInput.business.contacts.phone;
+          const canonicalTelMatches = canonicalPhone
+            ? telLinks.filter((href) => comparablePhone(href.slice(4)) === comparablePhone(canonicalPhone)).length
+            : 0;
+          routeFindings.push(finding(
+            "render.tel_links",
+            `Tap-to-call links at ${viewport.name}: ${telLinks.length}; canonical-number matches: ${canonicalTelMatches}; canonical phone available: ${Boolean(canonicalPhone)}.`,
+            route.path,
+            "render",
+            "info"
+          ));
+          if (
+            route.path === "/"
+            && viewport.name === "desktop"
+            && canonicalGeographyFactIds.size > 0
+            && !metrics.renderedFactIds.some((factId) => canonicalGeographyFactIds.has(factId))
+          ) {
+            routeFindings.push(finding(
+              "render.local_presence_missing",
+              "The homepage has publishable canonical address or service-area evidence but renders none of it through a canonical fact binding. Give local customers one clear, honest locality, address/directions, or service-area cue; do not replace it with an unsupported map or radius graphic.",
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (viewport.name === "desktop" && !isAuthorReview) {
+            const leadFormCount = await page.locator("form[data-lodesta-form-id]").count();
+            routeFindings.push(...await verifyLeadFormSubmissions(page, route.path));
+            if (leadFormCount > 0) {
+              const resetResponse = await navigatePageWithRetry({
+                page,
+                url: routeUrl,
+                route: route.path,
+                viewport: viewport.name,
+                signal: input.signal
+              });
+              if (!resetResponse?.ok()) {
+                routeFindings.push(finding("route.response", `Route returned ${resetResponse?.status() ?? "no response"} while resetting visual evidence after form verification.`, route.path));
+              }
+              await settleImages(page);
+            }
+          }
+          if (viewport.name === "mobile" && !isAuthorReview) {
+            routeFindings.push(...await inspectAutomatedAccessibility(page, {
+              attempt,
+              route: route.path,
+              browserVersion,
+              consoleErrors
+            }));
+          }
+          linksChecked += metrics.links.length;
+          if (metrics.horizontalOverflowPx > 2) {
+            routeFindings.push(finding(
+              "render.horizontal_overflow",
+              `Horizontal overflow is ${metrics.horizontalOverflowPx}px at ${viewport.name}.`,
+              route.path,
+              "render",
+              metrics.horizontalOverflowPx >= 16 ? "error" : "warning"
+            ));
+          }
+          if (metrics.headingOverflowCount > 0) {
+            routeFindings.push(finding("render.heading_overflow", `${metrics.headingOverflowCount} heading(s) overflow at ${viewport.name}.`, route.path, "render", "warning"));
+          }
+          if (metrics.headingWordBreakCount > 0) {
+            routeFindings.push(finding(
+              "render.heading_word_break",
+              `${metrics.headingWordBreakCount} heading(s) break a word across lines at ${viewport.name} (overflow-wrap/word-break mid-word wrap). Examples: ${metrics.headingWordBreakExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "error"
+            ));
+          }
+          if (metrics.brokenImages > 0) {
+            routeFindings.push(finding("render.broken_image", `${metrics.brokenImages} image(s) failed at ${viewport.name}.`, route.path));
+          }
+          if (metrics.h1Count !== 1) {
+            routeFindings.push(finding("accessibility.h1", `Route should have exactly one H1; found ${metrics.h1Count}.`, route.path, "accessibility", "warning"));
+          }
+          if (viewport.name === "desktop" && metrics.missingAriaReferenceCount > 0) {
+            routeFindings.push(finding(
+              "functional.aria_reference",
+              `${metrics.missingAriaReferenceCount} ARIA reference(s) point to missing element IDs. Examples: ${metrics.missingAriaReferenceExamples.join("; ")}.`,
+              route.path,
+              "accessibility"
+            ));
+          }
+          if (viewport.name === "desktop" && metrics.missingFragmentTargetCount > 0) {
+            routeFindings.push(finding(
+              "functional.fragment_target",
+              `${metrics.missingFragmentTargetCount} same-page link(s) point to missing fragment targets. Use a real element ID or a valid route instead. Examples: ${metrics.missingFragmentTargetExamples.join("; ")}.`,
               route.path,
               "link"
             ));
           }
-        }
-        let focusedSelection = false;
-        if (authorScreenshot === "focus" && input.focusSelector && viewport.name === "desktop") {
-          try {
-            const selected = page.locator(input.focusSelector).first();
-            if (await selected.count() && await selected.isVisible()) {
-              await selected.evaluate((element) => {
-                element.setAttribute("data-lodesta-inspection-focus", "true");
-                element.scrollIntoView({ block: "center", inline: "center" });
-              });
-              await page.addStyleTag({ content: `
-                [data-lodesta-inspection-focus="true"] {
-                  outline: 4px solid #1683ff !important;
-                  outline-offset: 3px !important;
-                  box-shadow: 0 0 0 7px rgba(22, 131, 255, .2) !important;
-                }
-              ` });
-              await page.waitForTimeout(75);
-              const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-focus.png`;
-              captures.push({
-                key,
-                route: route.path,
-                viewport: viewport.name,
-                stage: "settled",
-                frame: "focus",
-                focusSelector: input.focusSelector,
-                bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
-              });
-              focusedSelection = true;
-            } else {
-              routeFindings.push(finding(
-                "render.inspection_selection_missing",
-                `The selected element was not visible at ${viewport.name}; no focused screenshot was captured. Selector: ${input.focusSelector}.`,
-                route.path,
-                "render",
-                "warning"
-              ));
-            }
-          } catch (error) {
+          if (metrics.minBodyFontPx < 16) {
+            const examples = metrics.smallBodyTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
+            const families = metrics.smallBodyTextFamilies.map((family) => `${family.selector} (${family.count} element${family.count === 1 ? "" : "s"}, min ${family.minFontSizePx}px)`).join("; ");
             routeFindings.push(finding(
-              "render.inspection_selection_invalid",
-              `The selected element could not be focused at ${viewport.name}; no focused screenshot was captured. Selector: ${input.focusSelector}. ${error instanceof Error ? error.message : String(error)}`,
+              "render.body_font",
+              `${metrics.smallBodyTextCount} possible body-copy element(s) compute below 16px at ${viewport.name}. This is advisory: utility labels at 12px or above may be intentional. Judge text role and readability in the supplied pixels. For an owner edit, preserve presentation outside the requested scope, including other consumers of shared CSS. The examples are representative, not exhaustive. Affected families: ${families}. Examples: ${examples}.`,
               route.path,
               "render",
               "warning"
             ));
           }
-        } else if (authorScreenshot === "full" && input.focusSelector) {
-          try {
-            const selected = page.locator(input.focusSelector).first();
-            if (await selected.count() && await selected.isVisible()) {
-              await selected.evaluate((element) => {
-                element.setAttribute("data-lodesta-inspection-focus", "true");
-                element.scrollIntoView({ block: "center", inline: "center" });
-              });
-              await page.addStyleTag({ content: `
-                [data-lodesta-inspection-focus="true"] {
-                  outline: 4px solid #1683ff !important;
-                  outline-offset: 3px !important;
-                  box-shadow: 0 0 0 7px rgba(22, 131, 255, .2) !important;
-                }
-              ` });
-              await page.waitForTimeout(75);
-              const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-focus.png`;
-              captures.push({
-                key,
-                route: route.path,
-                viewport: viewport.name,
-                stage: "settled",
-                frame: "focus",
-                focusSelector: input.focusSelector,
-                bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
-              });
-              focusedSelection = true;
-            } else {
-              routeFindings.push(finding(
-                "render.inspection_selection_missing",
-                `The selected element was not visible at ${viewport.name}; route-level visual evidence was captured instead. Selector: ${input.focusSelector}.`,
-                route.path,
-                "render",
-                "warning"
-              ));
-            }
-          } catch (error) {
+          if (metrics.smallDisclosureTextCount > 0) {
+            const examples = metrics.smallDisclosureTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
             routeFindings.push(finding(
-              "render.inspection_selection_invalid",
-              `The selected element could not be focused at ${viewport.name}; route-level visual evidence was captured instead. Selector: ${input.focusSelector}. ${error instanceof Error ? error.message : String(error)}`,
+              "render.disclosure_text",
+              `${metrics.smallDisclosureTextCount} FAQ or disclosure answer text element(s) compute below 16px at ${viewport.name}, including content hidden in the collapsed state. Fix these selectors: ${examples}.`,
               route.path,
               "render",
               "warning"
             ));
           }
-        }
-        if (!focusedSelection && authorScreenshot !== "none" && authorScreenshot !== "focus") {
-          // Functional navigation probes may restore keyboard focus to a
-          // trigger. Retain that state only in the explicit navigation frame;
-          // ordinary route frames represent a natural first load.
-          await page.evaluate(() => {
-            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-          });
-          await page.waitForTimeout(50);
-          const captureDesktopTopOnly = authorScreenshot === "desktop-top";
-          if (captureDesktopTopOnly && viewport.name !== "desktop") {
-            // Measured text still runs on every viewport; only desktop top is photographed.
-          } else {
-            const retainExtendedEvidence = !captureDesktopTopOnly
-              && (input.captureMode === "review" || routeFindings.some(isTechnicalReleaseBlocker));
-            const frames = !retainExtendedEvidence || viewport.name === "tablet"
-              ? ["top"] as const
-              : ["top", "middle", "bottom"] as const;
-            const documentHeight = await page.evaluate(() => Math.max(
-              document.documentElement.scrollHeight,
-              document.body.scrollHeight
+          if (metrics.smallFormTextCount > 0) {
+            const examples = metrics.smallFormTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
+            routeFindings.push(finding(
+              "render.form_text",
+              `${metrics.smallFormTextCount} form label, field, or submit-control text element(s) compute below 16px at ${viewport.name}. Fix these selectors: ${examples}.`,
+              route.path,
+              "render",
+              "warning"
             ));
-            for (const frame of frames) {
-              const maximumScroll = Math.max(0, documentHeight - viewport.height);
-              const position = frame === "top"
-                ? 0
-                : frame === "middle"
-                  ? maximumScroll / 2
-                  : maximumScroll;
-              await settleScrollPosition(page, position);
-              const pageState = await inspectCapturePageState(page);
-              const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-${frame}.png`;
-              captures.push({
-                key,
-                route: route.path,
-                viewport: viewport.name,
-                stage: "settled",
-                frame,
-                pageState,
-                bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
-              });
+          }
+          if (metrics.oversizedSingleLineFieldCount > 0) {
+            routeFindings.push(finding(
+              "render.oversized_single_line_field",
+              `${metrics.oversizedSingleLineFieldCount} single-line form field(s) exceed 96px tall at ${viewport.name} and read visually like textareas. Keep ordinary input and select controls compact; reserve multi-line height for textarea controls. Examples: ${metrics.oversizedSingleLineFieldExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.tinyVisibleTextCount > 0) {
+            const examples = metrics.tinyTextExamples.map((example) => `${example.selector} "${example.text}" (${example.fontSizePx}px)`).join("; ");
+            const families = metrics.tinyTextFamilies.map((family) => `${family.selector} (${family.count} element${family.count === 1 ? "" : "s"}, min ${family.minFontSizePx}px)`).join("; ");
+            routeFindings.push(finding(
+              "render.tiny_text",
+              `${metrics.tinyVisibleTextCount} visible text element(s) compute below 12px at ${viewport.name}. The examples are representative, not exhaustive; correct every affected shared family before reinspecting. Affected families: ${families}. Examples: ${examples}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.lowContrastExamples.length > 0) {
+            const examples = metrics.lowContrastExamples
+              .map((example) => `${example.selector} "${example.text}" (${example.foreground} on ${example.background}, ${example.ratio}:1; requires ${example.requiredRatio}:1)`)
+              .join("; ");
+            routeFindings.push(finding(
+              "render.contrast",
+              `${metrics.lowContrastCount} body-text or interactive-label element(s) fail deterministic contrast at ${viewport.name}. Examples: ${examples}.`,
+              route.path,
+              "accessibility",
+              "error"
+            ));
+          }
+          if (metrics.textSurfaceBoundaryCount > 0) {
+            routeFindings.push(finding(
+              "render.text_surface_boundary",
+              `${metrics.textSurfaceBoundaryCount} possible text/decorative-surface overlap(s) at ${viewport.name}. Inspect actual layering and readability: these geometry estimates do not resolve paint order or nearer backgrounds. Do not change readable content solely to clear this advisory. Examples: ${metrics.textSurfaceBoundaryExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.longLineCount > 0) {
+            routeFindings.push(finding(
+              "render.long_lines",
+              `${metrics.longLineCount} readable text block(s) exceeded 90 estimated characters per line at ${viewport.name}. Examples: ${metrics.longLineExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.smallTargetCount > 0) {
+            routeFindings.push(finding(
+              "render.target_size",
+              `${metrics.smallTargetCount} essential control(s) measured below 44×44px at ${viewport.name}. Examples: ${metrics.smallTargetExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.duplicateFieldLabelCount > 0) {
+            routeFindings.push(finding(
+              "render.duplicate_field_label",
+              `${metrics.duplicateFieldLabelCount} form field(s) render the same label more than once at ${viewport.name}. Examples: ${metrics.duplicateFieldLabelExamples.join("; ")}.`,
+              route.path,
+              "accessibility",
+              "warning"
+            ));
+          }
+          if (metrics.adjacentDuplicateTextCount > 0) {
+            routeFindings.push(finding(
+              "render.adjacent_duplicate_text",
+              `${metrics.adjacentDuplicateTextCount} compact visible text block(s) repeat an adjacent word at ${viewport.name}. This often means canonical fact text was manually suffixed with information it already contains. Remove only the redundant authored text and preserve the canonical binding. Examples: ${metrics.adjacentDuplicateTextExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.adjacentDuplicateContentBlockCount > 0) {
+            routeFindings.push(finding(
+              "functional.adjacent_duplicate_content",
+              `${metrics.adjacentDuplicateContentBlockCount} substantial adjacent content block pair(s) render the same customer-facing text at ${viewport.name}. Remove the accidental duplicate section instead of shipping repeated content. Examples: ${metrics.adjacentDuplicateContentBlockExamples.join("; ")}.`,
+              route.path,
+              "render"
+            ));
+          }
+          if (metrics.duplicateHeaderIdentityCount > 0) {
+            routeFindings.push(finding(
+              "identity.duplicate_header_identity",
+              `${metrics.duplicateHeaderIdentityCount} header identity group(s) render the same business name more than once at ${viewport.name}. Keep one visible brand identity per header state. Examples: ${metrics.duplicateHeaderIdentityExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "error"
+            ));
+          }
+          if (metrics.internalProvenanceCopyCount > 0) {
+            routeFindings.push(finding(
+              "render.internal_provenance_copy",
+              `${metrics.internalProvenanceCopyCount} customer-facing text block(s) expose internal source or evidence language at ${viewport.name}. State the supported business message naturally without mentioning retained pages, source pages, canonical context, or how the fact was obtained. Examples: ${metrics.internalProvenanceCopyExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.vagueProcessCopyCount > 0) {
+            routeFindings.push(finding(
+              "render.vague_process_copy",
+              `${metrics.vagueProcessCopyCount} customer-facing text block(s) use vague process language at ${viewport.name}. Name the actual customer action, preparation, decision, or outcome instead of phrases such as next step, starting point, service conversation, or clear path. Examples: ${metrics.vagueProcessCopyExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.clippedElementCount > 0 || metrics.hitTestFailureCount > 0) {
+            routeFindings.push(finding(
+              "render.clipping_overlap",
+              `${metrics.clippedElementCount} important element(s) were clipped and ${metrics.hitTestFailureCount} essential control(s) failed center-point hit-testing at ${viewport.name}. Examples: ${[...metrics.clippedElementExamples, ...metrics.hitTestFailureExamples].join("; ")}.`,
+              route.path,
+              "render"
+            ));
+          }
+          if (metrics.textClippingCount > 0) {
+            routeFindings.push(finding(
+              "render.text_clipping",
+              `${metrics.textClippingCount} visible text fragment(s) were materially clipped at ${viewport.name}. Examples: ${metrics.textClippingExamples.join("; ")}.`,
+              route.path,
+              "render"
+            ));
+          }
+          if (metrics.textOcclusionCount > 0) {
+            routeFindings.push(finding(
+              "render.text_occlusion",
+              `${metrics.textOcclusionCount} visible text collision(s) were detected at ${viewport.name}. Examples: ${metrics.textOcclusionExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.headerControlCollisionCount > 0) {
+            routeFindings.push(finding(
+              "functional.header_control_collision",
+              `${metrics.headerControlCollisionCount} distinct visible header-control pair(s) overlap at ${viewport.name}. Header navigation, phone, portal, and conversion controls must occupy separate hit areas. Examples: ${metrics.headerControlCollisionExamples.join("; ")}.`,
+              route.path,
+              "render"
+            ));
+          }
+          if (metrics.inlineLinkClusterCount > 0) {
+            routeFindings.push(finding(
+              "render.inline_link_spacing",
+              `${metrics.inlineLinkClusterCount} adjacent text-link pair(s) render with no perceptible separation at ${viewport.name}. Repair the shared parent CSS with an explicit row/column layout and gap or padding; do not insert slash, pipe, or bullet characters into markup as a substitute for spacing. Examples: ${metrics.inlineLinkClusterExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (viewport.name === "desktop" && metrics.unstructuredFooterGroupCount > 0) {
+            routeFindings.push(finding(
+              "render.footer_group_layout",
+              `${metrics.unstructuredFooterGroupCount} wide footer group container(s) fall back to a plain block stack at desktop. Give the named container an explicit grid, flex row, or deliberately proportioned column composition so multiple footer groups do not become an accidental tall single column. Examples: ${metrics.unstructuredFooterGroupExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (viewport.name === "mobile" && metrics.narrowMediaSplitCount > 0) {
+            routeFindings.push(finding(
+              "render.mobile_narrow_split",
+              `${metrics.narrowMediaSplitCount} heading composition(s) remain squeezed into narrow side-by-side phone columns. Recompose them vertically or give the text a readable measure. Examples: ${metrics.narrowMediaSplitExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (route.path === "/" && viewport.name === "mobile" && metrics.longMobileCardWallCount > 0) {
+            routeFindings.push(finding(
+              "render.mobile_inventory_wall",
+              `${metrics.longMobileCardWallCount} long full-width card inventory group(s) consume multiple phone viewports without a stronger hierarchy. Curate the homepage selection, group the inventory into compact scannable links, or use an honest disclosure while keeping the complete catalog reachable on its hub route. Examples: ${metrics.longMobileCardWallExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (viewport.name === "mobile" && metrics.fragmentedHeadingCount > 0) {
+            routeFindings.push(finding(
+              "functional.mobile_heading_measure",
+              `${metrics.fragmentedHeadingCount} heading(s) collapse into an unreadably narrow phone column. Stack or widen the responsive composition so meaningful words—not one- or two-character fragments—form each line. Examples: ${metrics.fragmentedHeadingExamples.join("; ")}.`,
+              route.path,
+              "render",
+              // This metric is deliberately limited to severe one- or two-character
+              // fragmentation. At that point customer content is functionally
+              // unreadable, rather than merely an advisory typography preference.
+              "error"
+            ));
+          }
+          if (metrics.fragmentedBodyTextCount > 0) {
+            routeFindings.push(finding(
+              "functional.text_measure",
+              `${metrics.fragmentedBodyTextCount} body-text block(s) collapse into an unreadably narrow column at ${viewport.name}. Stack, widen, or correct the grid placement so words remain readable. Examples: ${metrics.fragmentedBodyTextExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "error"
+            ));
+          }
+          if (metrics.mediaContainerOverflowCount > 0) {
+            routeFindings.push(finding(
+              "render.media_container_overflow",
+              `${metrics.mediaContainerOverflowCount} in-flow media element(s) escape their container and overlap adjacent content at ${viewport.name}. Give the media wrapper a definite responsive height, clip the overflow, or stack the composition cleanly. Examples: ${metrics.mediaContainerOverflowExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.headerBrandCollisionCount > 0) {
+            routeFindings.push(finding(
+              "render.header_brand_collision",
+              `${metrics.headerBrandCollisionCount} header brand image(s) escape the header and cover utility text at ${viewport.name}. Keep the official logo fully contained in its header row, or reserve deliberate space in the utility row so both remain readable. Examples: ${metrics.headerBrandCollisionExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.headerContentOcclusionCount > 0) {
+            routeFindings.push(finding(
+              "render.header_content_occlusion",
+              `${metrics.headerContentOcclusionCount} main-content text fragment(s) are covered by the header at ${viewport.name}. Reserve the rendered header height before customer content begins, or recompose the affected text below it. Examples: ${metrics.headerContentOcclusionExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.croppedTransparentGraphicCount > 0) {
+            routeFindings.push(finding(
+              "render.informational_graphic_crop",
+              `${metrics.croppedTransparentGraphicCount} transparent graphic(s) lose visible edge content through object-fit: cover at ${viewport.name}. Preserve complete labels, symbols, and illustrated categories with contain or a crop-free responsive frame; reserve cover crops for imagery whose omitted edges do not carry information. Examples: ${metrics.croppedTransparentGraphicExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.syntheticIdentityDeviceCount > 0) {
+            routeFindings.push(finding(
+              "render.synthetic_identity_device",
+              `${metrics.syntheticIdentityDeviceCount} CSS badge, seal, stamp, monogram, slogan-poster, or empty marker device(s) may compete with the official identity or add evidence-free visual filler at ${viewport.name}. Use a credible supplied official logo when available; otherwise present the bound business name with ordinary typography and no invented mark. Express other messages through supported section content. Examples: ${metrics.syntheticIdentityDeviceExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.geographyCircleDeviceCount > 0) {
+            routeFindings.push(finding(
+              "render.geography_circle",
+              `${metrics.geographyCircleDeviceCount} large circle or radius device(s) frame service-geography language at ${viewport.name}. Present supported areas as honest text or an ordinary address/directions treatment; do not imply a coverage radius, badge, or pseudo-map. Examples: ${metrics.geographyCircleDeviceExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.decorativeDiagramCount > 0) {
+            routeFindings.push(finding(
+              "render.decorative_diagram",
+              `${metrics.decorativeDiagramCount} large CSS-only orbit, radar, network, or concentric-circle graphic(s) imply a diagram without encoding supported information at ${viewport.name}. Replace decorative data language with authentic evidence, ordinary editorial composition, or a factual accessible diagram. Examples: ${metrics.decorativeDiagramExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.duplicateHeaderActionCount > 0) {
+            routeFindings.push(finding(
+              "render.duplicate_header_action",
+              `${metrics.duplicateHeaderActionCount} header action(s) repeat the same visible label and destination at ${viewport.name}. Keep one deliberate header treatment for the action instead of rendering both a navigation link and duplicate button. Examples: ${metrics.duplicateHeaderActionExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.callActionDestinationMismatchCount > 0) {
+            routeFindings.push(finding(
+              "render.call_action_destination",
+              `${metrics.callActionDestinationMismatchCount} visible action(s) labeled as a call do not use a tel: destination at ${viewport.name}. Make “Call” actions dial the canonical phone number; label form or section links as Contact, Request, or Get started instead. Examples: ${metrics.callActionDestinationMismatchExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.callActionLabelSpacingCount > 0) {
+            routeFindings.push(finding(
+              "render.call_action_label_spacing",
+              `${metrics.callActionLabelSpacingCount} visible call action(s) omit whitespace between “Call” and the phone number at ${viewport.name}. Use a human-readable label such as “Call (804) 914-8120.” Examples: ${metrics.callActionLabelSpacingExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.falseAffordanceCount > 0) {
+            routeFindings.push(finding(
+              "render.false_affordance",
+              `${metrics.falseAffordanceCount} repeated non-interactive row or card decoration(s) look like expand, disclosure, or navigation controls at ${viewport.name}. Remove the control symbol or make the whole treatment honestly interactive with an accessible destination or disclosure. Examples: ${metrics.falseAffordanceExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.noninteractiveControlCount > 0) {
+            routeFindings.push(finding(
+              "functional.noninteractive_control",
+              `${metrics.noninteractiveControlCount} visible field-like search or filter control(s) are not interactive at ${viewport.name}. Use a real supported control or style the approved destination itself as the action. Examples: ${metrics.noninteractiveControlExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "error"
+            ));
+          }
+          if (metrics.repeatedSourceImageCount > 0) {
+            routeFindings.push(finding(
+              "render.repeated_source_image",
+              `${metrics.repeatedSourceImageCount} non-logo image(s) repeat as major media across separate sections at ${viewport.name}. Use a scarce retained photograph once where it has the most impact instead of making multiple sections feel duplicated. Examples: ${metrics.repeatedSourceImageExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          const homepagePrimaryGeometryFailure = route.path === "/" && (
+            !metrics.primaryHeadingAboveFold
+            || !metrics.primaryActionAboveFold
+            || !metrics.primaryHeadingBeforeAction
+          );
+          const responsiveActionBeforeHeading = viewport.name !== "desktop"
+            && metrics.primaryActionAboveFold
+            && !metrics.primaryHeadingBeforeAction;
+          const primaryGeometryFailure = homepagePrimaryGeometryFailure || responsiveActionBeforeHeading;
+          routeFindings.push(finding(
+            "render.primary_geometry",
+            `Primary heading above fold: ${metrics.primaryHeadingAboveFold}; main primary action above fold: ${metrics.primaryActionAboveFold}; heading precedes main action: ${metrics.primaryHeadingBeforeAction}; viewport: ${viewport.name}.${homepagePrimaryGeometryFailure ? " Keep the homepage value proposition and its main conversion visible in the first natural viewport; inspect header and navigation layout before changing hero content." : ""}${responsiveActionBeforeHeading ? " Keep the page H1 and concise context before its primary conversion on smaller viewports; do not reorder a form or action above the page purpose." : ""}`,
+            route.path,
+            "render",
+            primaryGeometryFailure ? "warning" : "info"
+          ));
+          if (metrics.clippedManagedContentExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.managed_content_clipped",
+              `${metrics.clippedManagedContentCount} managed capability block(s) hide content through unintended overflow at ${viewport.name}. Examples: ${metrics.clippedManagedContentExamples.join("; ")}.`,
+              route.path,
+              "capability"
+            ));
+          }
+          if (metrics.constrainedManagedMapExamples.length > 0) {
+            routeFindings.push(finding(
+              "capability.map_layout",
+              `${metrics.constrainedManagedMapCount} retained managed location block(s) are unreadably compressed at ${viewport.name}. Examples: ${metrics.constrainedManagedMapExamples.join("; ")}.`,
+              route.path,
+              "capability"
+            ));
+          }
+          if (metrics.emptyControlExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.empty_control",
+              `${metrics.emptyControlCount} visible interactive control(s) have no visible text, icon, image, or CSS affordance at ${viewport.name}. Examples: ${metrics.emptyControlExamples.join("; ")}.`,
+              route.path,
+              "render"
+            ));
+          }
+          if (metrics.browserDefaultDocumentExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.browser_default_document",
+              `The rendered document retains coordinated browser-default body and link styling at ${viewport.name}; the authored visual system appears missing or catastrophically discarded. Examples: ${metrics.browserDefaultDocumentExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "error"
+            ));
+          }
+          if (metrics.browserDefaultControlExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.browser_default_control_chrome",
+              `${metrics.browserDefaultControlCount} visible action control(s) retain browser-default inset or outset borders at ${viewport.name}. Reset native border/appearance intentionally and carry the site's button treatment through without removing accessible focus styling. Examples: ${metrics.browserDefaultControlExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.imageAltQualityExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.image_alt_quality",
+              `${metrics.imageAltQualityCount} rendered image alt attribute(s) are missing, filename-like, generic, or keyword-stuffed at ${viewport.name}. Examples: ${metrics.imageAltQualityExamples.join("; ")}.`,
+              route.path,
+              "accessibility",
+              "warning"
+            ));
+          }
+          if (metrics.prominentRasterUpscaleExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.raster_image_upscale",
+              `${metrics.prominentRasterUpscaleCount} prominent raster image(s) render materially larger than their intrinsic pixels at ${viewport.name}. Pull a higher-resolution retained source or use a deliberate type-led composition instead of enlarging a thumbnail. Examples: ${metrics.prominentRasterUpscaleExamples.join("; ")}.`,
+              route.path,
+              "asset",
+              "warning"
+            ));
+          }
+          if (metrics.filteredRasterLogoExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.raster_logo_filter",
+              `${metrics.filteredRasterLogoCount} visible raster logo image(s) use a CSS filter at ${viewport.name}, which can erase or distort an opaque brand tile. Keep the raster mark unchanged on a compatible surface or omit the duplicate mark. Examples: ${metrics.filteredRasterLogoExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.oversizedFooterRasterLogoExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.footer_raster_logo_scale",
+              `${metrics.oversizedFooterRasterLogoCount} footer raster logo image(s) dominate their footer column as a large image tile at ${viewport.name}. Keep the exact prepared mark at its intrinsic aspect ratio on a compatible surface and choose an ordinary contained size that supports the footer hierarchy. Examples: ${metrics.oversizedFooterRasterLogoExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.undersizedPrimaryRasterLogoExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.raster_logo_content_scale",
+              `${metrics.undersizedPrimaryRasterLogoCount} canonical logo image(s) render with a mark that may be difficult to recognize at ${viewport.name}. Use the exact supplied asset at its intrinsic aspect ratio and choose an ordinary contained size appropriate to the header. Examples: ${metrics.undersizedPrimaryRasterLogoExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.lowContrastPrimaryLogoExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.primary_logo_surface_contrast",
+              `${metrics.lowContrastPrimaryLogoCount} primary logo image(s) visually recede into the header surface at ${viewport.name}. Keep the exact supplied mark unchanged, but place it on a quiet compatible light or dark surface so the complete identity is immediately legible; do not recolor it with CSS filters. Examples: ${metrics.lowContrastPrimaryLogoExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (
+            route.path === "/"
+            && viewport.name === "desktop"
+            && activeLogoRevisionIds.size > 0
+            && !metrics.renderedAssetRevisionIds.some((revisionId) => activeLogoRevisionIds.has(revisionId))
+          ) {
+            routeFindings.push(finding(
+              "render.primary_logo_missing",
+              `The retained business record supplies ${activeLogoRevisionIds.size} active logo-classified asset revision(s), but the homepage does not render any matching visible asset. Judge the asset by its pixels: use an exact credible business logo as the primary identity, but do not promote an association, certification, partner, or co-branded badge into the brand position merely because its metadata says logo. When no credible business logo exists, use a well-typeset canonical business name rather than inventing a mark.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (
+            viewport.name === "mobile"
+            && metrics.missingMobileNavigation
+          ) {
+            routeFindings.push(finding(
+              "render.mobile_navigation",
+              "Desktop navigation links are hidden on mobile without a visible navigation toggle or equivalent route access.",
+              route.path,
+              "render"
+            ));
+          }
+          if (viewport.name === "mobile" && metrics.indiscernibleMobileNavigationToggleExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.mobile_navigation_trigger",
+              `The primary mobile navigation control has a hit box but no visible label or icon, so sighted visitors cannot identify it. Examples: ${metrics.indiscernibleMobileNavigationToggleExamples.join("; ")}.`,
+              route.path,
+              "render"
+            ));
+          }
+          if (viewport.name === "mobile" && metrics.misalignedMobileNavigationToggleExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.mobile_navigation_toggle_alignment",
+              `The primary mobile navigation trigger is separated from the header's trailing action area. Review whether that placement is deliberate for this site's authored navigation pattern. Examples: ${metrics.misalignedMobileNavigationToggleExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (viewport.name === "mobile" && metrics.duplicateManagedNavigationIconExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.duplicate_navigation_icon",
+              `A mobile navigation trigger renders authored pseudo-element artwork on top of the built-in managed hamburger/X. Remove the trigger's ::before/::after icon artwork and style the supplied [data-lodesta-navigation-icon] only through color, size, or spacing. Examples: ${metrics.duplicateManagedNavigationIconExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (viewport.name === "mobile" && metrics.mobileNavigationOverflowExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.mobile_navigation_overflow",
+              `Primary navigation requires horizontal scrolling or places destinations outside the visible phone viewport. Use a visible menu control or another fully visible mobile navigation pattern. Examples: ${metrics.mobileNavigationOverflowExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (viewport.name === "desktop" && metrics.desktopDualNavigationExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.desktop_dual_navigation",
+              `A mobile navigation disclosure remains visible beside the complete desktop navigation. Examples: ${metrics.desktopDualNavigationExamples.join("; ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.escapedEntityExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.escaped_entity",
+              `Visible text contains escaped HTML entity source instead of punctuation: ${metrics.escapedEntityExamples.join(", ")}.`,
+              route.path,
+              "render",
+              "warning"
+            ));
+          }
+          if (metrics.escapedSequenceExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.escaped_sequence",
+              `Visible text contains literal escaped source characters instead of layout whitespace: ${metrics.escapedSequenceExamples.join(", ")}.`,
+              route.path,
+              "render"
+            ));
+          }
+          if (metrics.missingGlyphExamples.length > 0) {
+            routeFindings.push(finding(
+              "render.missing_glyph",
+              `Visible text is not portable under Lodesta's pinned managed fonts. Use ordinary supported text, or replace a decorative character with accessible authored inline SVG. Never silently remove owner-authoritative text. Examples: ${metrics.missingGlyphExamples.map((example) => `${example.selector} ${example.character} (${example.codepoint}) with ${example.family}: ${example.reason}`).join("; ")}.`,
+              route.path,
+              "render"
+            ));
+          }
+          for (const href of metrics.links) {
+            if (!validRenderedLink(href, route.path, new Set(input.prepared.routes.map((item) => item.path)))) {
+              routeFindings.push(finding(
+                "link.rendered",
+                renderedLinkFailureMessage(href, route.path, input.prepared.findings),
+                route.path,
+                "link"
+              ));
             }
           }
+          let focusedSelection = false;
+          if (authorScreenshot === "focus" && input.focusSelector && viewport.name === "desktop") {
+            try {
+              const selected = page.locator(input.focusSelector).first();
+              if (await selected.count() && await selected.isVisible()) {
+                await selected.evaluate((element) => {
+                  element.setAttribute("data-lodesta-inspection-focus", "true");
+                  element.scrollIntoView({ block: "center", inline: "center" });
+                });
+                await page.addStyleTag({ content: `
+                  [data-lodesta-inspection-focus="true"] {
+                    outline: 4px solid #1683ff !important;
+                    outline-offset: 3px !important;
+                    box-shadow: 0 0 0 7px rgba(22, 131, 255, .2) !important;
+                  }
+                ` });
+                await page.waitForTimeout(75);
+                const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-focus.png`;
+                captures.push({
+                  key,
+                  route: route.path,
+                  viewport: viewport.name,
+                  stage: "settled",
+                  frame: "focus",
+                  focusSelector: input.focusSelector,
+                  bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
+                });
+                focusedSelection = true;
+              } else {
+                routeFindings.push(finding(
+                  "render.inspection_selection_missing",
+                  `The selected element was not visible at ${viewport.name}; no focused screenshot was captured. Selector: ${input.focusSelector}.`,
+                  route.path,
+                  "render",
+                  "warning"
+                ));
+              }
+            } catch (error) {
+              routeFindings.push(finding(
+                "render.inspection_selection_invalid",
+                `The selected element could not be focused at ${viewport.name}; no focused screenshot was captured. Selector: ${input.focusSelector}. ${error instanceof Error ? error.message : String(error)}`,
+                route.path,
+                "render",
+                "warning"
+              ));
+            }
+          } else if (authorScreenshot === "full" && input.focusSelector) {
+            try {
+              const selected = page.locator(input.focusSelector).first();
+              if (await selected.count() && await selected.isVisible()) {
+                await selected.evaluate((element) => {
+                  element.setAttribute("data-lodesta-inspection-focus", "true");
+                  element.scrollIntoView({ block: "center", inline: "center" });
+                });
+                await page.addStyleTag({ content: `
+                  [data-lodesta-inspection-focus="true"] {
+                    outline: 4px solid #1683ff !important;
+                    outline-offset: 3px !important;
+                    box-shadow: 0 0 0 7px rgba(22, 131, 255, .2) !important;
+                  }
+                ` });
+                await page.waitForTimeout(75);
+                const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-focus.png`;
+                captures.push({
+                  key,
+                  route: route.path,
+                  viewport: viewport.name,
+                  stage: "settled",
+                  frame: "focus",
+                  focusSelector: input.focusSelector,
+                  bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
+                });
+                focusedSelection = true;
+              } else {
+                routeFindings.push(finding(
+                  "render.inspection_selection_missing",
+                  `The selected element was not visible at ${viewport.name}; route-level visual evidence was captured instead. Selector: ${input.focusSelector}.`,
+                  route.path,
+                  "render",
+                  "warning"
+                ));
+              }
+            } catch (error) {
+              routeFindings.push(finding(
+                "render.inspection_selection_invalid",
+                `The selected element could not be focused at ${viewport.name}; route-level visual evidence was captured instead. Selector: ${input.focusSelector}. ${error instanceof Error ? error.message : String(error)}`,
+                route.path,
+                "render",
+                "warning"
+              ));
+            }
+          }
+          if (!focusedSelection && authorScreenshot !== "none" && authorScreenshot !== "focus") {
+            // Functional navigation probes may restore keyboard focus to a
+            // trigger. Retain that state only in the explicit navigation frame;
+            // ordinary route frames represent a natural first load.
+            await page.evaluate(() => {
+              if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+            });
+            await page.waitForTimeout(50);
+            const captureDesktopTopOnly = authorScreenshot === "desktop-top";
+            if (captureDesktopTopOnly && viewport.name !== "desktop") {
+              // Measured text still runs on every viewport; only desktop top is photographed.
+            } else {
+              const retainExtendedEvidence = !captureDesktopTopOnly
+                && (input.captureMode === "review" || routeFindings.some(isTechnicalReleaseBlocker));
+              const frames = !retainExtendedEvidence || viewport.name === "tablet"
+                ? ["top"] as const
+                : ["top", "middle", "bottom"] as const;
+              const documentHeight = await page.evaluate(() => Math.max(
+                document.documentElement.scrollHeight,
+                document.body.scrollHeight
+              ));
+              for (const frame of frames) {
+                const maximumScroll = Math.max(0, documentHeight - viewport.height);
+                const position = frame === "top"
+                  ? 0
+                  : frame === "middle"
+                    ? maximumScroll / 2
+                    : maximumScroll;
+                await settleScrollPosition(page, position);
+                const pageState = await inspectCapturePageState(page);
+                const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-${frame}.png`;
+                captures.push({
+                  key,
+                  route: route.path,
+                  viewport: viewport.name,
+                  stage: "settled",
+                  frame,
+                  pageState,
+                  bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
+                });
+              }
+            }
+          }
+          await settleScrollPosition(page, 0);
+          findings.push(...routeFindings);
+          await page.close();
         }
-        await settleScrollPosition(page, 0);
-        findings.push(...routeFindings);
-        await page.close();
-      }
+      return { findings, captures, linksChecked };
+    });
+    for (const result of routeResults) {
+      findings.push(...result.findings);
+      captures.push(...result.captures);
+      linksChecked += result.linksChecked;
     }
     return {
       findings: dedupe(findings),
@@ -4354,6 +4366,28 @@ function routeKey(route: string) {
 function comparablePhone(value: string) {
   const digits = value.replace(/\D/g, "");
   return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+const browserGateRouteConcurrency = 3;
+
+async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>) {
+  const results = new Array<R>(items.length);
+  const failures = new Map<number, unknown>();
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length && failures.size === 0) {
+      const index = next++;
+      try {
+        results[index] = await work(items[index]!);
+      } catch (error) {
+        failures.set(index, error);
+      }
+    }
+  });
+  await Promise.all(workers);
+  // Report the earliest failing item, as serial verification would have.
+  if (failures.size) throw failures.get(Math.min(...failures.keys()));
+  return results;
 }
 
 function finding(

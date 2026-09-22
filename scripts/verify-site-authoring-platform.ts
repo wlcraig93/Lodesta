@@ -224,6 +224,11 @@ const largeAdvisoryArtifact = finalizeForTest({ ...prepared,
 assert.equal(largeAdvisoryArtifact.qa.hardGate, "passed", "A large subjective advisory must not fail or crash finalization.");
 assert(largeAdvisoryArtifact.qa.findings.some((finding) => finding.id === "advisory.ia_repetition"),
   "The advisory must remain visible in retained QA.");
+const longBrowserMessageArtifact = finalizeForTest(prepared, input, [{
+  id: "render.contrast", severity: "warning", area: "render", route: "/", message: `Examples: ${"p.eyebrow \"LONG EXAMPLE\" ".repeat(120)}`
+}]);
+assert(longBrowserMessageArtifact.qa.findings.every((finding) => finding.message.length <= 1000),
+  "A long browser finding message must be bounded instead of failing artifact finalization.");
 const trustedSiteCss = prepared.files.find((file) => file.path === "site.css")?.bytes.toString("utf8") ?? "";
 assert(trustedSiteCss.includes('font-family: "Lodesta Inter"'), "Finalized site CSS omitted the trusted self-hosted font library.");
 assert(trustedSiteCss.includes('url("/_lodesta/fonts/inter-latin-variable.woff2")'), "Trusted font CSS did not use the platform-owned font route.");

@@ -185,7 +185,7 @@ export function finalizePreparedArtifact(input: {
   const findings = dedupeFindings([
     ...input.prepared.findings,
     ...input.browserGate.findings
-  ]).map(advisoryUnlessTechnicalBlocker);
+  ]).map(advisoryUnlessTechnicalBlocker).map(boundedFindingMessage);
   const fileRecords = input.prepared.files.map((file) => ({
     path: file.path,
     contentType: file.contentType,
@@ -230,6 +230,16 @@ export function finalizePreparedArtifact(input: {
     }
   });
   return { artifact, files: input.prepared.files, qualityMetrics: input.prepared.qualityMetrics };
+}
+
+// The retained QA record caps each message; long example lists must not fail
+// finalization of an otherwise complete candidate.
+const retainedFindingMessageLimit = 1000;
+
+function boundedFindingMessage<T extends { message: string }>(finding: T): T {
+  return finding.message.length <= retainedFindingMessageLimit
+    ? finding
+    : { ...finding, message: `${finding.message.slice(0, retainedFindingMessageLimit - 1)}…` };
 }
 
 /**

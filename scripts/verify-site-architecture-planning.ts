@@ -748,8 +748,9 @@ assert.notEqual(siteArchitecturePromptIdentityFor("commercial-core-pull"), siteA
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /sourceText is that page's text/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /sourcePhotoCount is how many real photographs/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /do not invent customer routes that are not source paths/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /short page with a named subject and photographs is a real page/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /nearDuplicateOf names a clearly better complete answer/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /typical core is 5 to 12 live routes/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /Individual project pages.*redirect each to the core route that now carries its content/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /nearDuplicateOf names a better answer/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /sourceDispositions ledger remains mechanically exhaustive/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /live route path already exists in the source inventory.*must be preserved to itself/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-pull"), /transactional systems as capability boundaries/i);

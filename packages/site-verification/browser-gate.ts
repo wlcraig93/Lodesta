@@ -108,6 +108,8 @@ export async function runArtifactBrowserGate(input: {
   authorScreenshot?: AuthorReviewScreenshot;
   /** Author-review/operator/test viewport override. Final verification uses the defaults. */
   viewports?: readonly BrowserGateViewport[];
+  /** Release checks without PNG evidence, for an author preview of release blockers. Defaults to true. */
+  captureScreenshots?: boolean;
   signal?: AbortSignal;
   /** Exact audited patch bytes for candidate verification. Tests may omit this and build the named series source. */
   runtimeSource?: Buffer;
@@ -141,13 +143,16 @@ async function runArtifactBrowserGateOnce(input: {
   captureMode?: "verification" | "review";
   authorScreenshot?: AuthorReviewScreenshot;
   viewports?: readonly BrowserGateViewport[];
+  captureScreenshots?: boolean;
   signal?: AbortSignal;
 }, attempt: 1 | 2): Promise<FullBrowserGateResult> {
   const harness = await startHarness(input);
   let browser: Browser | undefined;
   try {
     const isAuthorReview = input.captureMode === "review";
-    const authorScreenshot = isAuthorReview ? (input.authorScreenshot ?? "full") : "full";
+    const authorScreenshot = isAuthorReview
+      ? (input.authorScreenshot ?? "full")
+      : input.captureScreenshots === false ? "none" : "full";
     // Author review is a measured feedback tool, not an early release gate. The
     // final verification pass still exercises every route and functional
     // contract after authoring is complete.

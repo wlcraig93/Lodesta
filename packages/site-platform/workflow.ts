@@ -3591,6 +3591,7 @@ export class SiteAuthoringWorkflow {
       capturePrefix: `${capturePrefix}/release-preview`,
       routePaths: prepared.routes.map((route) => route.path),
       captureMode: "verification",
+      captureScreenshots: false,
       signal: input.signal,
       runtimeSource
     });

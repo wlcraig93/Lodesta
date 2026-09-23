@@ -1,0 +1,126 @@
+/*
+ * Design directions. Put one theme class on the site root (SiteShell's theme
+ * prop) and tune any token for this business: take the accent from the logo,
+ * adjust surfaces to the photographs. Keep each text/surface pair at 4.5:1 or
+ * better (3:1 for large headings) when you change it.
+ */
+
+/* Trade Bold: rugged, direct, high-energy. */
+.theme-trade-bold {
+  --site-color-background: #f4f2ee;
+  --site-color-surface: #ffffff;
+  --site-color-alt: #e9e5dd;
+  --site-color-text: #17191c;
+  --site-color-muted: #4a4f55;
+  --site-color-border: #d3cec5;
+  --site-color-accent: #c2410c;
+  --site-color-accent-strong: #9a3412;
+  --site-color-on-accent: #ffffff;
+  --site-color-dark: #17191c;
+  --site-color-on-dark: #f6f4f0;
+  --site-color-on-dark-muted: #c7c9cc;
+  --site-font-display: "Lodesta Roboto Condensed", "Arial Narrow", Arial, sans-serif;
+  --site-font-body: "Lodesta Inter", Arial, sans-serif;
+  --site-heading-weight: 700;
+  --site-heading-transform: uppercase;
+  --site-heading-tracking: 0;
+  --site-radius: 0;
+  --site-image-radius: 0;
+  --site-button-radius: 0;
+}
+
+/* Clean Pro: trustworthy, orderly, clinical. */
+.theme-clean-pro {
+  --site-color-background: #ffffff;
+  --site-color-surface: #ffffff;
+  --site-color-alt: #f1f5f8;
+  --site-color-text: #0f1f2e;
+  --site-color-muted: #475866;
+  --site-color-border: #d6e0e8;
+  --site-color-accent: #0b6b8f;
+  --site-color-accent-strong: #08506b;
+  --site-color-on-accent: #ffffff;
+  --site-color-dark: #0d2233;
+  --site-color-on-dark: #f3f7fa;
+  --site-color-on-dark-muted: #bccbd6;
+  --site-font-display: "Lodesta Manrope", Arial, sans-serif;
+  --site-font-body: "Lodesta Inter", Arial, sans-serif;
+  --site-heading-weight: 750;
+  --site-heading-transform: none;
+  --site-heading-tracking: -0.01em;
+  --site-radius: 0.5rem;
+  --site-image-radius: 0.75rem;
+  --site-button-radius: 0.5rem;
+}
+
+/* Warm Local: family, heritage, craft. */
+.theme-warm-local {
+  --site-color-background: #faf6ee;
+  --site-color-surface: #fffdf8;
+  --site-color-alt: #efe7d8;
+  --site-color-text: #22251f;
+  --site-color-muted: #54584d;
+  --site-color-border: #ddd3c1;
+  --site-color-accent: #1f4d3a;
+  --site-color-accent-strong: #163a2b;
+  --site-color-on-accent: #ffffff;
+  --site-color-dark: #1c3328;
+  --site-color-on-dark: #f7f2e7;
+  --site-color-on-dark-muted: #cfd6c9;
+  --site-font-display: "Lodesta Fraunces", Georgia, serif;
+  --site-font-body: "Lodesta Figtree", Arial, sans-serif;
+  --site-heading-weight: 600;
+  --site-heading-transform: none;
+  --site-heading-tracking: -0.01em;
+  --site-radius: 0.75rem;
+  --site-image-radius: 1.25rem;
+  --site-button-radius: 999px;
+}
+
+/* Premium Studio: refined, confident, quiet. */
+.theme-premium-studio {
+  --site-color-background: #f6f4f1;
+  --site-color-surface: #ffffff;
+  --site-color-alt: #ebe7e1;
+  --site-color-text: #141414;
+  --site-color-muted: #4d4b48;
+  --site-color-border: #d8d3cc;
+  --site-color-accent: #141414;
+  --site-color-accent-strong: #000000;
+  --site-color-on-accent: #ffffff;
+  --site-color-dark: #111111;
+  --site-color-on-dark: #f3f0ea;
+  --site-color-on-dark-muted: #bdb8b0;
+  --site-font-display: "Lodesta Newsreader", Georgia, serif;
+  --site-font-body: "Lodesta Manrope", Arial, sans-serif;
+  --site-heading-weight: 500;
+  --site-heading-transform: none;
+  --site-heading-tracking: -0.015em;
+  --site-radius: 0.25rem;
+  --site-image-radius: 0.25rem;
+  --site-button-radius: 0;
+}
+
+/* Fresh Modern: bright, friendly, approachable. */
+.theme-fresh-modern {
+  --site-color-background: #fbfaff;
+  --site-color-surface: #ffffff;
+  --site-color-alt: #eef1ff;
+  --site-color-text: #16172b;
+  --site-color-muted: #4a4c66;
+  --site-color-border: #d9dcf0;
+  --site-color-accent: #4338ca;
+  --site-color-accent-strong: #3730a3;
+  --site-color-on-accent: #ffffff;
+  --site-color-dark: #1e1b4b;
+  --site-color-on-dark: #f5f5ff;
+  --site-color-on-dark-muted: #c7c9f0;
+  --site-font-display: "Lodesta Figtree", Arial, sans-serif;
+  --site-font-body: "Lodesta Figtree", Arial, sans-serif;
+  --site-heading-weight: 750;
+  --site-heading-transform: none;
+  --site-heading-tracking: -0.02em;
+  --site-radius: 1rem;
+  --site-image-radius: 1.5rem;
+  --site-button-radius: 999px;
+}

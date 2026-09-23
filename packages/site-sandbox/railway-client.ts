@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { Sandbox, SandboxNotFoundError, type ExecResult } from "railway";
+import { Sandbox, SandboxNotFoundError, type ExecResult, type SandboxTemplate } from "railway";
 import { sha256 } from "@/packages/business-data";
 import { expectedSiteSandboxManifest, sitePublicBuildInputSchema, type SitePublicBuildInput } from "@/packages/site-contracts";
 import { agentAuthoredArtifactSchema, normalizeAgentAuthoredArtifact, type AgentAuthoredArtifact } from "@/packages/site-verification";
@@ -25,6 +25,7 @@ const liveSandboxes = new Map<string, Sandbox>();
 const operationTails = new Map<string, Promise<unknown>>();
 
 let scaffoldArchivePromise: Promise<Uint8Array> | undefined;
+let dependencyTemplatePromise: Promise<SandboxTemplate | undefined> | undefined;
 
 export function isRailwaySandboxId(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -38,11 +39,10 @@ export class RailwaySiteSandbox implements AuthoringSandbox {
   constructor(private readonly blobStore: ArtifactBlobStore) {}
 
   async provision() {
-    const sandbox = await Sandbox.create({
-      ...railwayConnection(),
-      idleTimeoutMinutes,
-      networkIsolation: "ISOLATED"
-    });
+    const startedAt = Date.now();
+    const template = await dependencyTemplate();
+    const options = { ...railwayConnection(), idleTimeoutMinutes, networkIsolation: "ISOLATED" as const };
+    const sandbox = template ? await Sandbox.create(template, options) : await Sandbox.create(options);
     try {
       await waitUntilRunning(sandbox);
     } catch (error) {
@@ -50,18 +50,35 @@ export class RailwaySiteSandbox implements AuthoringSandbox {
       throw error;
     }
     liveSandboxes.set(sandbox.id, sandbox);
+    logSandboxTiming(sandbox.id, "provision", startedAt, { fromTemplate: Boolean(template) });
     return sandbox.id;
   }
 
   async bootstrap(sessionId: string, buildInput: SitePublicBuildInput) {
     return this.exclusive(sessionId, async (sandbox) => {
-      const parsed = sitePublicBuildInputSchema.parse(buildInput);
-      await this.ensureToolchain(sandbox);
-      const publicInputJson = await writePublicInput(sandbox, parsed);
-      await sandbox.files.write(`${workspaceRoot}/src/required-destinations.tsx`, requiredDestinationsSource(parsed));
-      const files = await readSourceFiles(sandbox);
-      const revision = await writeRevision(sandbox, files, publicInputJson);
-      return { ok: true as const, revision };
+      const startedAt = Date.now();
+      const steps: Record<string, number> = {};
+      const step = async <T>(name: string, operation: () => Promise<T>) => {
+        const stepStartedAt = Date.now();
+        try {
+          return await operation();
+        } finally {
+          steps[name] = Date.now() - stepStartedAt;
+        }
+      };
+      try {
+        const parsed = sitePublicBuildInputSchema.parse(buildInput);
+        await step("toolchain", () => this.ensureToolchain(sandbox));
+        const publicInputJson = await step("publicInput", () => writePublicInput(sandbox, parsed));
+        await step("requiredDestinations", () => sandbox.files.write(`${workspaceRoot}/src/required-destinations.tsx`, requiredDestinationsSource(parsed)));
+        const files = await step("readSource", () => readSourceFiles(sandbox));
+        const revision = await step("revision", () => writeRevision(sandbox, files, publicInputJson));
+        logSandboxTiming(sandbox.id, "bootstrap", startedAt, { steps });
+        return { ok: true as const, revision };
+      } catch (error) {
+        logSandboxTiming(sandbox.id, "bootstrap_failed", startedAt, { steps, error: error instanceof Error ? error.message.slice(0, 300) : String(error) });
+        throw error;
+      }
     });
   }
 
@@ -251,11 +268,15 @@ export class RailwaySiteSandbox implements AuthoringSandbox {
   }
 
   private async ensureToolchain(sandbox: Sandbox) {
-    if (await sandbox.files.exists(`${workspaceRoot}/node_modules/vite`)) return;
-    const archive = await scaffoldArchive();
-    await sandbox.files.write("/tmp/lodesta-scaffold.tgz", archive);
-    const extracted = await exec(sandbox, `mkdir -p ${workspaceRoot} && tar -xzf /tmp/lodesta-scaffold.tgz -C ${workspaceRoot} && test -f ${workspaceRoot}/package-lock.json`, 30);
-    if (extracted.exitCode !== 0) throw requestError(sandbox.id, "bootstrap", 500, "candidate_promotion_failed", commandOutput(extracted));
+    // Sandboxes from the dependency template already hold node_modules; the
+    // scaffold source is still extracted from this deployment's archive.
+    if (!await retryTransport(() => sandbox.files.exists(`${workspaceRoot}/platform/build.tsx`))) {
+      const archive = await scaffoldArchive();
+      await sandbox.files.write("/tmp/lodesta-scaffold.tgz", archive);
+      const extracted = await exec(sandbox, `mkdir -p ${workspaceRoot} && tar -xzf /tmp/lodesta-scaffold.tgz -C ${workspaceRoot} && test -f ${workspaceRoot}/package-lock.json`, 30);
+      if (extracted.exitCode !== 0) throw requestError(sandbox.id, "bootstrap", 500, "candidate_promotion_failed", commandOutput(extracted));
+    }
+    if (await retryTransport(() => sandbox.files.exists(`${workspaceRoot}/node_modules/vite`))) return;
     const installed = await exec(sandbox, `cd ${workspaceRoot} && npm ci --ignore-scripts --no-audit --no-fund`, 180);
     if (installed.exitCode !== 0) throw requestError(sandbox.id, "bootstrap", 500, "candidate_promotion_failed", commandOutput(installed));
   }
@@ -343,7 +364,7 @@ async function waitUntilRunning(sandbox: Sandbox) {
 
 async function writePublicInput(sandbox: Sandbox, input: SitePublicBuildInput) {
   const json = `${JSON.stringify(input)}\n`;
-  await sandbox.files.mkdir(`${workspaceRoot}/.lodesta`);
+  await retryTransport(() => sandbox.files.mkdir(`${workspaceRoot}/.lodesta`));
   await sandbox.files.write(`${workspaceRoot}/public-build-input.json`, json);
   await sandbox.files.write(`${workspaceRoot}/.lodesta/public-build-input.json`, json);
   return json;
@@ -354,13 +375,13 @@ async function writeRevision(sandbox: Sandbox, files: WorkspaceSourceFile[], pub
     files: canonicalFiles(files).map((file) => [file.path, file.content]),
     publicInputJson
   })).slice("sha256:".length);
-  await sandbox.files.mkdir(`${workspaceRoot}/.lodesta`);
+  await retryTransport(() => sandbox.files.mkdir(`${workspaceRoot}/.lodesta`));
   await sandbox.files.write(`${workspaceRoot}/.lodesta/revision`, revision);
   return revision;
 }
 
 async function readRevision(sandbox: Sandbox) {
-  if (!await sandbox.files.exists(`${workspaceRoot}/.lodesta/revision`)) return "uninitialized";
+  if (!await retryTransport(() => sandbox.files.exists(`${workspaceRoot}/.lodesta/revision`))) return "uninitialized";
   return sandbox.files.read(`${workspaceRoot}/.lodesta/revision`);
 }
 
@@ -411,6 +432,65 @@ function shellIsStarting(value: unknown) {
     ? value.message
     : `${(value as ExecResult).stderr ?? ""}\n${(value as ExecResult).stdout ?? ""}`;
   return /starting your shell session|sandbox is not running|CREATING/i.test(text);
+}
+
+/**
+ * A Railway template with this deployment's scaffold dependencies installed.
+ * Railway caches built templates by recipe, so rebuilding an unchanged
+ * recipe is a lookup; a changed lockfile builds a new template. When the
+ * template cannot be built, sandboxes start plain and bootstrap installs.
+ */
+function dependencyTemplate() {
+  dependencyTemplatePromise ??= buildDependencyTemplate().catch((error) => {
+    dependencyTemplatePromise = undefined;
+    console.error(JSON.stringify({ event: "sandbox_template_unavailable", error: error instanceof Error ? error.message.slice(0, 300) : String(error) }));
+    return undefined;
+  });
+  return dependencyTemplatePromise;
+}
+
+async function buildDependencyTemplate() {
+  const scaffold = join(process.cwd(), "workers/site-sandbox/scaffold");
+  let template = Sandbox.template().run(`mkdir -p ${workspaceRoot}`).workdir(workspaceRoot);
+  for (const name of ["package.json", "package-lock.json"]) {
+    for (const command of writeFileSteps(`${workspaceRoot}/${name}`, readFileSync(join(scaffold, name)))) template = template.run(command);
+  }
+  template = template.run(`cd ${workspaceRoot} && npm ci --ignore-scripts --no-audit --no-fund && test -d node_modules/vite`);
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      template.build(railwayConnection()),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Railway dependency template build timed out.")), 300_000);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Shell steps that recreate a file byte for byte (template recipes carry no file uploads). */
+export function writeFileSteps(path: string, bytes: Buffer) {
+  const chunks = bytes.toString("base64").match(/.{1,12000}/g) ?? [""];
+  return [
+    ...chunks.map((chunk, index) => `printf '%s' '${chunk}' ${index ? ">>" : ">"} ${path}.b64`),
+    `base64 -d < ${path}.b64 > ${path} && rm ${path}.b64`
+  ];
+}
+
+/** File operations the SDK does not retry itself get one retry after a dropped connection. */
+async function retryTransport<T>(operation: () => Promise<T>) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!/websocket|connection|econnreset|socket hang up|timed? ?out/i.test(error instanceof Error ? error.message : String(error))) throw error;
+    await wait(500);
+    return operation();
+  }
+}
+
+function logSandboxTiming(sandboxId: string, phase: string, startedAt: number, detail: Record<string, unknown>) {
+  console.log(JSON.stringify({ event: "sandbox_timing", sandboxId, phase, durationMs: Date.now() - startedAt, ...detail }));
 }
 
 function scaffoldArchive() {

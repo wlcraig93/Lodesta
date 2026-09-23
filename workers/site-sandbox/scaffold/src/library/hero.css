@@ -1,0 +1,30 @@
+/* Hero: photo, split, type and form variants. Driven by library/themes.css tokens; see library/base.css for CSS organization. */
+.lib-hero { background: var(--site-color-background); color: var(--site-color-text); }
+.lib-hero h1 { font-size: clamp(2.375rem, 6vw, 4.5rem); line-height: 1.02; margin: 0; max-width: 16ch; }
+.lib-hero .lib-lead { margin-top: 1.25rem; }
+.lib-hero-type { padding-block: clamp(4rem, 12vw, 8rem); background: var(--site-color-alt); color: var(--site-color-text); }
+.lib-hero-type h1 { max-width: 18ch; }
+.lib-hero-split { padding-block: clamp(2.5rem, 7vw, 5.5rem); }
+.lib-hero-grid { display: grid; gap: clamp(2rem, 5vw, 4rem); align-items: center; }
+@media (min-width: 60rem) { .lib-hero-grid { grid-template-columns: 1.05fr 1fr; } }
+.lib-hero-media { margin: 0; }
+.lib-hero-media img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--site-image-radius, 0); }
+.lib-hero-media figcaption { margin-top: 0.625rem; font-size: 0.875rem; color: var(--site-color-muted); }
+.lib-hero-proof { margin-top: 1.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; align-items: center; font-weight: 600; }
+.lib-hero-proof a { color: inherit; }
+
+.lib-hero-photo { position: relative; min-height: clamp(34rem, 82vh, 48rem); display: grid; align-items: end; overflow: hidden; background: var(--site-color-dark); color: var(--site-color-on-dark); }
+.lib-hero-photo-media, .lib-hero-photo-scrim { position: absolute; inset: 0; }
+.lib-hero-photo-media img { width: 100%; height: 100%; object-fit: cover; }
+.lib-hero-photo-scrim { background: linear-gradient(180deg, rgb(0 0 0 / 0.15) 0%, rgb(0 0 0 / 0.55) 55%, rgb(0 0 0 / 0.82) 100%); }
+.lib-hero-photo-copy { position: relative; padding-block: clamp(3rem, 8vw, 5.5rem); color: #ffffff; }
+.lib-hero-photo-copy .lib-kicker { color: #ffffff; }
+.lib-hero-photo-copy .lib-lead { color: #f1f1f1; }
+.lib-hero-photo-copy .lib-button-secondary { color: #ffffff; }
+
+/* Form: headline, lead and proof beside the managed form on desktop; the form follows the copy on phones. */
+.lib-hero-form { padding-block: clamp(2.5rem, 7vw, 5.5rem); background: var(--site-color-alt); color: var(--site-color-text); }
+.lib-hero-form-grid { display: grid; gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+@media (min-width: 60rem) { .lib-hero-form-grid { grid-template-columns: minmax(0, 1.1fr) minmax(22rem, 1fr); align-items: center; } }
+.lib-hero-form h1 { font-size: clamp(2.25rem, 5vw, 3.75rem); }
+

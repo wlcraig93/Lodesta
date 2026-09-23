@@ -3,4 +3,4 @@ export const sandboxStorageIdentity = "site-sandbox-storage@sha256:caec62e6aaa7e
 export const sandboxDurableObjectIdentity = "site-sandbox-durable-object@sha256:f60c304d730f280207606d2decd14312c95b211f355dbf1ca2f829cbe2166784";
 export const sandboxSourcePolicyIdentity = "workspace-source-policy@sha256:a9dc99a379ac4ccb9bd4a590bda1b4864ac05827a8d2e560fe06f46706974cab";
 export const sandboxArtifactContractIdentity = "agent-authored-artifact@sha256:49565a3bfd2348b4a3baa50be7641bccc4927a43d83b0222b4f262638509ff37";
-export const sandboxToolchainIdentity = "lodesta-static-site-workspace@sha256:7083dc80cf261f6ac6a35bf2a6acd6c79df3b6426e64d99b4b51b9fe944b5789";
+export const sandboxToolchainIdentity = "lodesta-static-site-workspace@sha256:523c92a6822db15a439e455a05123e68aa41727c94eac160dec61f0d663c586e";

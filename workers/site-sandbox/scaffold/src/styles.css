@@ -1,5 +1,9 @@
 /*
- * Starter styles. Restyle everything for this business: palette, type, spacing,
+ * Base styles: tokens, type and the shell (header, navigation, footer). This
+ * file is bundled first. Put section and page styles in small files under
+ * src/styles/ (styles/home.css, styles/services.css) instead of growing this
+ * file; the design library's own styles live in src/library/.
+ * Restyle everything for this business: palette, type, spacing,
  * layout and components. Keep these working properties when you change them:
  *  - every surface sets its own text colors, so nested surfaces never inherit
  *    text meant for another background; every text color stays at least 4.5:1

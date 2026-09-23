@@ -1,0 +1,25 @@
+/* Page templates (library/pages.tsx). Restyle freely; every surface sets its own text colors. */
+
+/* ServicePage */
+.lib-scope { max-width: 46rem; }
+.lib-scope h2 { margin-top: 0; }
+.lib-page-action { display: grid; gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+@media (min-width: 56rem) { .lib-page-action { grid-template-columns: 1fr 1.15fr; } }
+.lib-page-action h2 { margin-top: 0; }
+
+/* ContactPage */
+.lib-contact-page { display: grid; gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+@media (min-width: 56rem) { .lib-contact-page { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); } }
+.lib-contact-page-details-only { max-width: 46rem; }
+.lib-contact-list { display: grid; gap: 1.5rem; margin: 0; }
+.lib-contact-list > div { display: grid; gap: 0.25rem; padding-bottom: 1.5rem; border-bottom: 1px solid var(--site-color-border); }
+.lib-contact-list > div:last-child { border-bottom: 0; padding-bottom: 0; }
+.lib-contact-list > div:has(> dd:empty) { display: none; }
+.lib-contact-list dt { font-size: 1rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--site-color-muted); }
+.lib-contact-list dd { margin: 0; display: grid; justify-items: start; gap: 0.25rem; }
+.lib-contact-list dd > a:not(.lib-text-link) { display: inline-flex; align-items: center; min-height: 3rem; font-family: var(--site-font-display); font-size: clamp(1.25rem, 2.4vw, 1.5rem); font-weight: 700; color: inherit; text-underline-offset: 0.2em; overflow-wrap: anywhere; }
+.lib-contact-list address { font-style: normal; font-size: 1.125rem; }
+.lib-contact-list [data-lodesta-hours-variant="weekly"] { display: grid; gap: 0.25rem; margin: 0; min-width: min(100%, 20rem); }
+.lib-contact-list [data-lodesta-hours-variant="weekly"] > div { display: flex; justify-content: space-between; gap: 1.5rem; padding-block: 0.25rem; }
+.lib-contact-list [data-lodesta-hours-variant="weekly"] dt { font-size: 1rem; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--site-color-text); }
+.lib-contact-list [data-lodesta-hours-variant="weekly"] dd { color: var(--site-color-muted); }

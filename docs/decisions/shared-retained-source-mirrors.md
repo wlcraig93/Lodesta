@@ -21,6 +21,10 @@ Website-source freshness and retained storage identity are separate concerns.
 - Controlled experiments may explicitly pin an existing retained mirror. They create a new business-scoped snapshot reference and do not perform a network crawl or clone retained page/resource rows.
 - New customer intake still crawls unless a future replay-based ingestion path can reproduce all derived business facts, assets, and diagnostics from the retained mirror. A recent URL match alone is not sufficient evidence to reuse another customer's derived authority.
 
+## Retained-mirror fact regeneration
+
+When business-fact extraction improves, an operator can re-derive a site's discovered `BusinessState` from its retained website mirror without a network crawl: `npm run regenerate:website-business-state -- --site=<siteId>` replays the retained captures (`retainedWebsiteReplayTransport`) through the current `ingestWebsite` and prints the before/after name, contacts, phone facts, fact counts, and proof counts. It is a dry run unless `--apply` is passed. `--apply` attaches the result like a source recapture: a new immutable snapshot replayed from the retained bytes, a new state revision that keeps the current assets, and a new public build input, compare-and-swapped against the current input (it fails closed while runs or sandboxes are active). It refuses states with owner-confirmed facts or owner operational edits. Retained snapshots, inputs, and versions are never rewritten. Pages the original crawl failed to capture stay missing; recovering them requires an explicit network recapture.
+
 ## Why there is no generic TTL cache
 
 A URL-level TTL mixes two different questions: whether the public website should be fetched again, and whether identical captured bytes should be stored twice. It can silently reuse stale facts, while still failing to deduplicate two crawls that happen outside the TTL. Explicit recapture plus content-addressed retention gives predictable freshness and exact storage reuse.

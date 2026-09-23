@@ -24,6 +24,7 @@
     "runtime:promote": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/promote-site-runtime.ts",
     "audit:artifact-blobs": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/audit-artifact-blobs.ts",
     "audit:source-snapshot": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/audit-source-snapshot.ts",
+    "regenerate:website-business-state": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/regenerate-website-business-state.ts",
     "report:verification-policy-cutover": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/report-verification-policy-cutover.ts",
     "verify:minimal-site-kernel": "node --import tsx scripts/verify-minimal-site-kernel.tsx",
     "configure:r2-lifecycle": "node --env-file=.env.local --import tsx scripts/configure-r2-lifecycle.ts",

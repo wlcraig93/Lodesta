@@ -36,6 +36,19 @@ type HeaderBrandGeometry = {
   visibleRatio: number;
 };
 
+// Menus commonly slide or fade open. A fixed pause after a click let the
+// probe hit-test links mid-transition and fail valid navigation under load,
+// so wait for running animations and transitions to finish (bounded).
+async function settleNavigationMotion(page: Page, minimumMs: number) {
+  await page.waitForTimeout(minimumMs);
+  await page.waitForFunction(
+    () => document.getAnimations().every((animation) => animation.playState !== "running"),
+    undefined,
+    { timeout: 1500 }
+  ).catch(() => undefined);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+}
+
 export async function inspectNavigationReachability(
   page: Page,
   options: { canonicalLogoRevisionIds?: readonly string[] } = {}
@@ -107,7 +120,7 @@ export async function inspectNavigationReachability(
       const hoverTargets = page.locator("header nav li,header [role=navigation] li,nav[aria-label*=primary i] li,nav[aria-label*=main i] li");
       for (let index = 0; index < await hoverTargets.count() && !revealed; index += 1) {
         await hoverTargets.nth(index).hover({ timeout: probeActionTimeoutMs }).catch(() => undefined);
-        await page.waitForTimeout(75);
+        await settleNavigationMotion(page, 75);
         revealed = await anyMatchingLinkHitTestable(page, href);
       }
       await page.mouse.move(0, 0).catch(() => undefined);
@@ -151,7 +164,7 @@ async function revealMatchingLinkThroughDisclosures(page: Page, href: string) {
             const clicked = await toggle.click({ timeout: probeActionTimeoutMs }).then(() => true).catch(() => false);
             if (!clicked) continue;
             openedToggle = toggle;
-            await page.waitForTimeout(75);
+            await settleNavigationMotion(page, 75);
           }
           break;
         }
@@ -166,11 +179,11 @@ async function revealMatchingLinkThroughDisclosures(page: Page, href: string) {
         const clicked = await summary.click({ timeout: probeActionTimeoutMs }).then(() => true).catch(() => false);
         if (!clicked) continue;
         openedDetails.push(detail);
-        await page.waitForTimeout(75);
+        await settleNavigationMotion(page, 75);
       }
 
       await link.scrollIntoViewIfNeeded({ timeout: probeActionTimeoutMs }).catch(() => undefined);
-      await page.waitForTimeout(75);
+      await settleNavigationMotion(page, 75);
       if (await linkIsHitTestable(link)) return true;
     } finally {
       for (const detail of openedDetails.reverse()) {
@@ -222,7 +235,7 @@ async function inspectNavigationToggles(page: Page) {
     const brandBefore = await inspectHeaderBrandGeometry(toggle);
     const before = await visibleControlledNavigationLinkCount(toggle);
     const clicked = await toggle.click({ timeout: probeActionTimeoutMs }).then(() => true).catch(() => false);
-    await page.waitForTimeout(100);
+    await settleNavigationMotion(page, 100);
     const after = await visibleControlledNavigationLinkCount(toggle);
     const afterState = await navigationTriggerState(toggle);
     const stateOpened = !beforeState.open && afterState.open;
@@ -242,7 +255,7 @@ async function inspectNavigationToggles(page: Page) {
     if (pointerOpened) {
       await toggle.focus().catch(() => undefined);
       await page.keyboard.press("Enter").catch(() => undefined);
-      await page.waitForTimeout(100);
+      await settleNavigationMotion(page, 100);
       const keyboardOpened = await navigationTriggerIsOpen(toggle).catch(() => false);
       if (!keyboardOpened) {
         brokenToggles.push(`${label || `toggle ${index + 1}`} did not open through keyboard activation.`);
@@ -307,10 +320,10 @@ async function navigationTriggerIsOpen(toggle: Locator) {
 async function closeNavigationTrigger(page: Page, toggle: Locator) {
   if (!await navigationTriggerIsOpen(toggle).catch(() => false)) return;
   await page.keyboard.press("Escape").catch(() => undefined);
-  await page.waitForTimeout(75);
+  await settleNavigationMotion(page, 75);
   if (await navigationTriggerIsOpen(toggle).catch(() => false)) {
     await toggle.click({ timeout: probeActionTimeoutMs }).catch(() => undefined);
-    await page.waitForTimeout(75);
+    await settleNavigationMotion(page, 75);
   }
 }
 

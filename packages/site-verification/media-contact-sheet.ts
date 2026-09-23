@@ -28,16 +28,41 @@ export async function createMediaContactSheet(
   }));
 }
 
+/**
+ * One numbered sheet of retained source photographs. Each cell carries the
+ * number the author's photo inventory uses, the resource id, where the photo
+ * was published, its decoded size and orientation, and its selection notes.
+ */
 export async function createSourceMediaContactSheet(
-  resources: Array<{ resourceId: string; likelyKind: "photo" | "logo" | "icon" | "other"; bytes: Buffer }>
+  resources: Array<{ cell: number; resourceId: string; pageRole: string; pagePath: string; notes?: readonly string[]; bytes: Buffer }>,
+  sheet: { number: number; count: number; totalPhotos: number } = { number: 1, count: 1, totalPhotos: resources.length }
 ) {
+  const first = resources[0]?.cell ?? 1;
+  const last = resources.at(-1)?.cell ?? first;
   return createLabeledMediaContactSheet(resources.map((item) => ({
     bytes: item.bytes,
-    labels: ({ width, height }: { width: number; height: number }) => [item.resourceId, `${item.likelyKind} · ${width}×${height} · retained first-party candidate`, "judge the visible pixels; semantics are unverified"]
-  })));
+    labels: ({ width, height }: { width: number; height: number }) => [
+      `#${item.cell} · ${item.pageRole} · ${item.pagePath}`.slice(0, 46),
+      item.resourceId,
+      `${width}×${height} · ${width > height * 1.15 ? "landscape" : height > width * 1.15 ? "portrait" : "square"}`,
+      ...(item.notes ?? [])
+        .filter((note) => !note.startsWith("published on") && note !== "portrait orientation")
+        .map((note) => note.replace(/^\d+x\d+: /, "").slice(0, 52))
+        .slice(0, 2)
+    ]
+  })), {
+    title: `Retained business photos · sheet ${sheet.number} of ${sheet.count}`,
+    subtitle: `Photos #${first}–#${last} of ${sheet.totalPhotos}. Judge the visible pixels; semantics are unverified.`
+  });
 }
 
-async function createLabeledMediaContactSheet(items: Array<{ bytes: Buffer; labels: (dimensions: { width: number; height: number }) => string[] }>) {
+async function createLabeledMediaContactSheet(
+  items: Array<{ bytes: Buffer; labels: (dimensions: { width: number; height: number }) => string[] }>,
+  header: { title: string; subtitle: string } = {
+    title: "Available business media",
+    subtitle: "Optional visual context — choose only images that improve the website."
+  }
+) {
   if (!items.length) return undefined;
   const rows = Math.ceil(items.length / columns);
   const width = columns * tileWidth;
@@ -46,7 +71,7 @@ async function createLabeledMediaContactSheet(items: Array<{ bytes: Buffer; labe
     input: Buffer.from(svgText(
       width,
       headerHeight,
-      `<text x="24" y="32" class="title">Available business media</text><text x="24" y="56" class="meta">Optional visual context — choose only images that improve the website.</text>`
+      `<text x="24" y="32" class="title">${escapeXml(header.title)}</text><text x="24" y="56" class="meta">${escapeXml(header.subtitle)}</text>`
     )),
     left: 0,
     top: 0

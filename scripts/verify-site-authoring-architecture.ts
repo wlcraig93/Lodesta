@@ -191,6 +191,8 @@ function allowedBoundaryLabel(path: string, label: string) {
   // Supabase's external REST protocol, exercised against loopback by this fixture.
   if (path === "scripts/verify-inquiry-inbox.ts" && label === "rest/v1") return true;
   if (label.includes("site-runtime-v")) return true;
+  // Wix media transform URLs (`…~mv2.jpg/v1/fill/…`) are an external CDN format.
+  if (path === "scripts/verify-source-asset-ranking.ts" && label === "mv2.jpg/v1") return true;
   const boundaryFiles = [
     /^\.env\.example$/,
     /^\.github\//,

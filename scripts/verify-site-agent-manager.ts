@@ -1412,11 +1412,12 @@ const sourceEvidenceContext = managerReferenceContext({
     dataUrl: "data:image/webp;base64,UklGRg=="
   }]
 });
-const sourceEvidenceText = sourceEvidenceContext.find((block) => block.type === "input_text"
-  && block.text.includes("retained-first-party-visual-evidence"));
+const sourceEvidenceText = sourceEvidenceContext.find((block): block is Extract<typeof block, { type: "input_text" }> =>
+  block.type === "input_text" && block.text.includes("retained-first-party-visual-evidence"));
 assert(sourceEvidenceText?.text, "The source contact sheet omitted its evidence boundary.");
 const deliveredSourceEvidence = JSON.parse(sourceEvidenceText.text) as {
   instruction: string;
+  sheets: Array<{ sheet: number; mimeType: string; contentHash: string }>;
   references: Array<{ resourceId: string; sourcePageUrl: string; sourcePageTitle?: string }>;
 };
 assert.deepEqual(deliveredSourceEvidence.references[0], {
@@ -1424,10 +1425,49 @@ assert.deepEqual(deliveredSourceEvidence.references[0], {
   sourceId: "source_context_fixture",
   sourcePageId: "source_page_context_fixture",
   sourcePageUrl: "https://example.com/projects/retained-project",
-  sourcePageTitle: "Retained project page",
-  mimeType: "image/webp",
-  contentHash: `sha256:${"d".repeat(64)}`
+  sourcePageTitle: "Retained project page"
 });
+assert.deepEqual(deliveredSourceEvidence.sheets, [{ sheet: 1, mimeType: "image/webp", contentHash: `sha256:${"d".repeat(64)}` }]);
+assert.match(deliveredSourceEvidence.instruction, /adopted now with adopt_source_asset using its sourceId, resourceId and sourcePageId/,
+  "The photo inventory did not tell the author how to adopt a listed photo.");
+// A multi-sheet inventory delivers every sheet image in order and numbers
+// every photo, well beyond the retired eight-photo single sheet.
+const multiSheetReferences = Array.from({ length: 30 }, (_, index) => {
+  const sheet = Math.floor(index / 12) + 1;
+  return {
+    resourceId: `source_resource_multi_${index + 1}`,
+    sourceId: "source_context_fixture",
+    sourcePageId: "source_page_context_fixture",
+    sourcePageUrl: "https://example.com/",
+    pageRole: "home" as const,
+    sheet,
+    cell: index + 1,
+    width: 1600,
+    height: 1000,
+    mimeType: "image/webp" as const,
+    contentHash: `sha256:${String(sheet).repeat(64)}` as const,
+    dataUrl: `data:image/webp;base64,sheet${sheet}`
+  };
+});
+const multiSheetContext = managerReferenceContext({
+  ...canonicalAuthoringProfile("initial_build"),
+  sourceEvidenceReferences: multiSheetReferences
+});
+assert.deepEqual(
+  multiSheetContext.flatMap((block) => block.type === "input_image" ? [block.image_url] : []),
+  ["data:image/webp;base64,sheet1", "data:image/webp;base64,sheet2", "data:image/webp;base64,sheet3"],
+  "A multi-sheet photo inventory did not deliver every sheet in order."
+);
+const multiSheetText = multiSheetContext.find((block): block is Extract<typeof block, { type: "input_text" }> => block.type === "input_text");
+const multiSheetInventory = JSON.parse(multiSheetText!.text) as { references: Array<{ cell: number; sheet: number; pageRole: string; resourceId: string }> };
+assert.equal(multiSheetInventory.references.length, 30, "The photo inventory dropped photos beyond the first sheet.");
+assert.deepEqual(multiSheetInventory.references[29], {
+  cell: 30, sheet: 3, resourceId: "source_resource_multi_30", sourceId: "source_context_fixture",
+  sourcePageId: "source_page_context_fixture", pageRole: "home", sourcePageUrl: "https://example.com/",
+  width: 1600, height: 1000
+});
+assert.equal(canonicalAuthoringProfile("initial_build").sourceEvidenceLimit > 8, true,
+  "The author must see more than the retired eight-photo sheet.");
 assert.match(deliveredSourceEvidence.instruction, /width and height are intrinsic pixels/i);
 assert.match(deliveredSourceEvidence.instruction, /proofScope documented-on-this-page is the only supplied scope/i);
 assert.match(deliveredSourceEvidence.instruction, /site-illustration describes a visible subject and is not proof/i);

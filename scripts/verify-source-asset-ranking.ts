@@ -6,7 +6,10 @@ import type {
 } from "../packages/site-contracts";
 import {
   rankSourceAssetCandidates,
+  sourceImageFamily,
+  sourceImageHostIsFirstParty,
   sourcePhotoNotes,
+  sourcePhotoPageRole,
   sourceResourceIsAdoptableImage,
   stockImageSignal
 } from "../packages/site-platform/source-resource-ranking";
@@ -279,5 +282,85 @@ assert.deepEqual(sourcePhotoNotes({ imageUrl: "https://example.com/AdobeStock_1.
   "800x1200: too small for a full-width or hero placement",
   "portrait orientation"
 ]);
+
+// Site-builder media CDNs and the site's own subdomains serve first-party
+// uploads; stock and unrelated hosts stay cross-origin.
+const builderCdnRanking = rankSourceAssetCandidates({
+  pages: [home, about],
+  resources: [
+    resource("webflow_photo", "https://cdn.prod.website-files.com/64ab/65cd_detail-bay.jpeg", home.finalUrl!, "image/jpeg", 90_000),
+    resource("squarespace_photo", "https://images.squarespace-cdn.com/content/abc/coating.jpg?format=1500w", home.finalUrl!, "image/jpeg", 90_000),
+    resource("wix_photo", "https://static.wixstatic.com/media/a1b2c3_d4e5~mv2.jpg/v1/fill/w_980,h_600/detail.jpg", about.finalUrl!, "image/jpeg", 90_000),
+    resource("subdomain_photo", "https://media.fixture.example/uploads/shop.jpg", home.finalUrl!, "image/jpeg", 90_000),
+    resource("photon_photo", "https://i0.wp.com/fixture.example/wp-content/uploads/crew.jpg", home.finalUrl!, "image/jpeg", 90_000),
+    resource("third_party_photo", "https://widgets.reviews.example/badge-photo.jpg", home.finalUrl!, "image/jpeg", 90_000),
+    resource("stock_host_photo", "https://images.unsplash.com/photo-1581578731548", home.finalUrl!, "image/jpeg", 90_000),
+    resource("foreign_photon", "https://i0.wp.com/other.example/wp-content/uploads/crew.jpg", home.finalUrl!, "image/jpeg", 90_000)
+  ]
+});
+const crossOrigin = (id: string) => builderCdnRanking.find((candidate) => candidate.resource.id === id)?.relevanceReasons
+  .includes("cross-origin dependency rather than a first-party asset");
+for (const id of ["webflow_photo", "squarespace_photo", "wix_photo", "subdomain_photo", "photon_photo"]) {
+  assert.equal(crossOrigin(id), false, `A first-party site-builder or subdomain photo was penalized as cross-origin: ${id}`);
+}
+for (const id of ["third_party_photo", "stock_host_photo", "foreign_photon"]) {
+  assert.equal(crossOrigin(id), true, `A third-party or stock image became first-party: ${id}`);
+}
+assert.equal(sourceImageHostIsFirstParty(new URL("https://cdn.example.co.uk/a.jpg"), new URL("https://www.example.co.uk/")), true);
+assert.equal(sourceImageHostIsFirstParty(new URL("https://cdn.other.co.uk/a.jpg"), new URL("https://www.example.co.uk/")), false);
+
+// Responsive size variants share one visual family.
+for (const [left, right] of [
+  ["https://cdn.prod.website-files.com/site/hero-p-500.jpeg", "https://cdn.prod.website-files.com/site/hero.jpeg"],
+  ["https://fixture.example/uploads/deck-1024x683.jpg", "https://fixture.example/uploads/deck-scaled.jpg"],
+  ["https://images.squarespace-cdn.com/content/abc/roof.jpg?format=500w", "https://images.squarespace-cdn.com/content/abc/roof.jpg?format=2500w"],
+  ["https://static.wixstatic.com/media/a1~mv2.jpg/v1/fill/w_400,h_300/a.jpg", "https://static.wixstatic.com/media/a1~mv2.jpg"],
+  ["https://fixture.example/img/team@2x.png", "https://fixture.example/img/team.png"]
+]) assert.equal(sourceImageFamily(left!), sourceImageFamily(right!), `Size variants did not share a family: ${left}`);
+assert.notEqual(sourceImageFamily("https://fixture.example/a/hero.jpg"), sourceImageFamily("https://fixture.example/b/hero.jpg"));
+const webflowVariants = rankSourceAssetCandidates({
+  pages: [home],
+  resources: [
+    resource("variant_500", "https://cdn.prod.website-files.com/site/hero-p-500.jpeg", home.finalUrl!, "image/jpeg", 40_000),
+    resource("variant_1080", "https://cdn.prod.website-files.com/site/hero-p-1080.jpeg", home.finalUrl!, "image/jpeg", 120_000)
+  ]
+});
+assert.deepEqual(webflowVariants.map((candidate) => candidate.resource.id), ["variant_1080"],
+  "Webflow -p-NNN variants were not collapsed to the largest retained file.");
+
+// A photo referenced only by a stylesheet belongs to the pages loading that
+// stylesheet (through nested imports), or the homepage when none was retained.
+const stylesheet = (id: string, url: string, initiators: string[]): SourceSnapshotResource => ({
+  ...resource(id, url, initiators[0] ?? "", "text/css", 4_000), role: "stylesheet", initiatorUrls: initiators
+});
+const servicePage = page("page_service_detail", "/ceramic-coating/");
+const stylesheetRanking = rankSourceAssetCandidates({
+  pages: [home, servicePage],
+  resources: [
+    stylesheet("sheet_main", "https://fixture.example/css/main.css", [servicePage.finalUrl!]),
+    stylesheet("sheet_nested", "https://fixture.example/css/sections.css", ["https://fixture.example/css/main.css"]),
+    stylesheet("sheet_orphan", "https://fixture.example/css/orphan.css", ["https://fixture.example/unretained/"]),
+    resource("css_background", "https://fixture.example/media/bay-background.jpg", "https://fixture.example/css/main.css", "image/jpeg", 90_000),
+    resource("nested_css_background", "https://fixture.example/media/foam-cannon.jpg", "https://fixture.example/css/sections.css", "image/jpeg", 90_000),
+    resource("orphan_css_background", "https://fixture.example/media/garage.jpg", "https://fixture.example/css/orphan.css", "image/jpeg", 90_000),
+    resource("unknown_initiator", "https://fixture.example/media/unknown.jpg", "https://fixture.example/unretained/", "image/jpeg", 90_000)
+  ]
+});
+const stylesheetPage = (id: string) => stylesheetRanking.find((candidate) => candidate.resource.id === id)?.sourcePageId;
+assert.equal(stylesheetPage("css_background"), servicePage.id, "A stylesheet-only photo was dropped instead of attributed to its loading page.");
+assert.equal(stylesheetPage("nested_css_background"), servicePage.id, "A nested-import stylesheet photo was dropped.");
+assert.equal(stylesheetPage("orphan_css_background"), home.id, "A stylesheet photo without a retained loading page did not fall back to the homepage.");
+assert.equal(stylesheetPage("unknown_initiator"), undefined, "An image with no retained page or stylesheet initiator gained a page.");
+
+assert.equal(sourcePhotoPageRole("/"), "home");
+assert.equal(sourcePhotoPageRole("/services/tint"), "service");
+assert.equal(sourcePhotoPageRole("/ceramic-coating", "Ceramic coating", true), "service");
+assert.equal(sourcePhotoPageRole("/contact", "Contact", true), "other");
+assert.equal(sourcePhotoPageRole("/about-us"), "about");
+assert.equal(sourcePhotoPageRole("/gallery"), "portfolio");
+
+// The homepage path must not normalize away before preferred-slot selection.
+assert.doesNotMatch(workflowSource, /replace\(\/\\\/\+\$\/, ""\) \|\| ""/,
+  "Source-page paths must normalize the homepage to \"/\", not an empty string.");
 
 console.log("Source asset ranking verification passed.");

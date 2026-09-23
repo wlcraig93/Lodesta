@@ -26,17 +26,22 @@ export function rankSourceAssetCandidates(input: {
     pagesByUrl.set(page.requestedUrl, page);
     if (page.finalUrl) pagesByUrl.set(page.finalUrl, page);
   }
+  const stylesheetsByUrl = new Map<string, SourceSnapshotResource>();
+  for (const resource of input.resources) {
+    if (resource.role !== "stylesheet") continue;
+    stylesheetsByUrl.set(resource.requestedUrl, resource);
+    if (resource.finalUrl) stylesheetsByUrl.set(resource.finalUrl, resource);
+  }
+  const homepage = input.pages.find((page) => page.path === "/");
   const strongestByVisualIdentity = new Map<string, SourceAssetCandidate>();
   for (const resource of input.resources) {
     if (!sourceResourceIsAdoptableImage(resource)
       && !(input.includeSvgLogoCandidates && sourceResourceIsPersistedSvg(resource))) continue;
-    const sourcePage = resource.initiatorUrls
-      .map((url) => pagesByUrl.get(url))
-      .filter((page): page is SourceSnapshotPage => Boolean(page))
+    const sourcePage = sourceInitiatorPages(resource.initiatorUrls, pagesByUrl, stylesheetsByUrl, homepage)
       .sort((left, right) => sourcePageAssociationScore(right) - sourcePageAssociationScore(left))[0];
     if (!sourcePage) continue;
     const candidate = sourceAssetCandidate(resource, sourcePage);
-    const identity = sourceVisualIdentity(resource.finalUrl ?? resource.requestedUrl);
+    const identity = sourceImageFamily(resource.finalUrl ?? resource.requestedUrl);
     const current = strongestByVisualIdentity.get(identity);
     if (!current
       || candidate.relevanceScore > current.relevanceScore
@@ -50,6 +55,48 @@ export function rankSourceAssetCandidates(input: {
     || (right.resource.rawBytes ?? 0) - (left.resource.rawBytes ?? 0)
     || left.resource.id.localeCompare(right.resource.id)
   );
+}
+
+/**
+ * Pages that load an image. An image referenced only from a stylesheet (a CSS
+ * background) belongs to the pages that load that stylesheet, following
+ * nested imports; a retained stylesheet with no retained page falls back to
+ * the homepage rather than dropping the photograph.
+ */
+function sourceInitiatorPages(
+  initiatorUrls: readonly string[],
+  pagesByUrl: Map<string, SourceSnapshotPage>,
+  stylesheetsByUrl: Map<string, SourceSnapshotResource>,
+  homepage: SourceSnapshotPage | undefined
+) {
+  const direct = initiatorUrls
+    .map((url) => pagesByUrl.get(url))
+    .filter((page): page is SourceSnapshotPage => Boolean(page));
+  if (direct.length) return direct;
+  const pages = new Set<SourceSnapshotPage>();
+  let viaStylesheet = false;
+  const visited = new Set<string>();
+  let frontier = [...initiatorUrls];
+  for (let depth = 0; frontier.length && depth < 4; depth += 1) {
+    const next: string[] = [];
+    for (const url of frontier) {
+      if (visited.has(url)) continue;
+      visited.add(url);
+      const page = pagesByUrl.get(url);
+      if (page) {
+        pages.add(page);
+        continue;
+      }
+      const stylesheet = stylesheetsByUrl.get(url);
+      if (stylesheet) {
+        viaStylesheet = true;
+        next.push(...stylesheet.initiatorUrls);
+      }
+    }
+    frontier = next;
+  }
+  if (!pages.size && viaStylesheet && homepage) pages.add(homepage);
+  return [...pages];
 }
 
 export function sourcePhotoCountsByPagePath(input: {
@@ -92,7 +139,7 @@ function sourceAssetCandidate(resource: SourceSnapshotResource, page: SourceSnap
   let score = 0;
   let likelyKind: SourceAssetCandidate["likelyKind"] = "other";
   let excludedArtwork = false;
-  const firstParty = assetUrl.hostname.replace(/^www\./, "") === new URL(page.finalUrl ?? page.requestedUrl).hostname.replace(/^www\./, "");
+  const firstParty = sourceImageHostIsFirstParty(assetUrl, new URL(page.finalUrl ?? page.requestedUrl));
 
   if (!firstParty) {
     score -= 260;
@@ -225,12 +272,55 @@ function sourcePageAssociationScore(page: SourceSnapshotPage) {
   return score;
 }
 
-function sourceVisualIdentity(url: string) {
-  const parsed = new URL(url);
-  return `${parsed.hostname.toLowerCase()}${decodeURIComponentSafe(parsed.pathname)
+/**
+ * Site-builder media CDNs that serve a site's own uploads. An image on one of
+ * these hosts, loaded by the site's own page, is the business's upload rather
+ * than a third-party dependency.
+ */
+const siteBuilderMediaHostPattern = /(?:^|\.)(?:website-files\.com|webflow\.com|squarespace-cdn\.com|squarespace\.com|wixstatic\.com|wsimg\.com|shopify\.com|weebly\.com|editmysite\.com|multiscreensite\.com)$/;
+
+/**
+ * An image is first-party when the site serves it from its own domain (any
+ * subdomain), from a site-builder media CDN its page loads it from, or through
+ * a WordPress image proxy of its own host. Stock and other third-party hosts
+ * remain cross-origin dependencies.
+ */
+export function sourceImageHostIsFirstParty(imageUrl: URL, pageUrl: URL) {
+  const imageHost = imageUrl.hostname.toLowerCase().replace(/^www\./, "");
+  const pageHost = pageUrl.hostname.toLowerCase().replace(/^www\./, "");
+  if (imageHost === pageHost || registrableDomain(imageHost) === registrableDomain(pageHost)) return true;
+  if (siteBuilderMediaHostPattern.test(imageHost)) return true;
+  if (/^i[0-3]\.wp\.com$/.test(imageHost)) {
+    return imageUrl.pathname.split("/")[1]?.toLowerCase().replace(/^www\./, "") === pageHost;
+  }
+  return false;
+}
+
+function registrableDomain(host: string) {
+  const labels = host.split(".");
+  if (labels.length <= 2) return host;
+  const depth = labels.at(-1)!.length === 2 && /^(?:co|com|net|org|gov|ac|edu)$/.test(labels.at(-2)!) ? 3 : 2;
+  return labels.slice(-depth).join(".");
+}
+
+/**
+ * One visual family per image: responsive size variants (`-300x200`, Webflow
+ * `-p-800`, `@2x`, WordPress `-scaled`, gallery thumbs, Wix fill/fit/crop transforms
+ * and size query parameters) collapse to the same identity.
+ */
+export function sourceImageFamily(url: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  const path = decodeURIComponentSafe(parsed.pathname)
     .toLowerCase()
-    .replace(/\/thumbs\/thumbs_([^/]+)$/i, "/$1")
-    .replace(/-\d{2,4}x\d{2,4}(?=\.[a-z0-9]+$)/i, "")}`;
+    .replace(/\/v\d\/(?:fill|fit|crop)\/.*$/, "")
+    .replace(/\/thumbs\/thumbs_([^/]+)$/, "/$1")
+    .replace(/(?:-\d{2,5}x\d{2,5}|-p-\d{2,5}|@[23]x|-scaled)+(?=\.[a-z0-9]+$)/, "");
+  return `${parsed.hostname.toLowerCase().replace(/^www\./, "")}${path}`;
 }
 
 function decodeURIComponentSafe(value: string) {
@@ -265,6 +355,25 @@ export function stockImageSignal(url: string) {
   return stockHostPattern.test(parsed.hostname.toLowerCase())
     || stockPathPattern.test(path.toLowerCase())
     || stockPathPattern.test(normalizedSignal(path));
+}
+
+/** Photo page roles in the order the author's contact sheets present them. */
+export const sourcePhotoPageRoles = ["home", "service", "about", "portfolio", "other"] as const;
+export type SourcePhotoPageRole = (typeof sourcePhotoPageRoles)[number];
+
+/**
+ * The role of the page a photo was published on. A page the approved site
+ * architecture maps to a route and that is not otherwise classified is
+ * treated as a service page (e.g. `/ceramic-coating`).
+ */
+export function sourcePhotoPageRole(path: string, title?: string | null, architectureMapped = false): SourcePhotoPageRole {
+  if (path === "/" || path === "") return "home";
+  const signal = normalizedSignal(`${path} ${title ?? ""}`);
+  if (/\b(?:gallery|portfolio|projects?|remodel|before after|case stud(?:y|ies)|our work)\b/.test(signal)) return "portfolio";
+  if (/\b(?:about|team|company|staff|story)\b/.test(signal)) return "about";
+  if (/\bservices?\b/.test(signal)) return "service";
+  if (architectureMapped && !/\b(?:contact|blog|news|faq|reviews?|testimonials?|privacy|terms|careers?|jobs?)\b/.test(signal)) return "service";
+  return "other";
 }
 
 /**

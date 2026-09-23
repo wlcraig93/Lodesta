@@ -107,6 +107,8 @@ try {
   const mediaBytes = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#285649" } }).webp().toBuffer();
   const largeSourcePhotoBytes = await sharp({ create: { width: 3_000, height: 2_000, channels: 3, background: "#793f34" } })
     .jpeg({ quality: 92 }).toBuffer();
+  const officePhotoBytes = await sharp({ create: { width: 1_200, height: 800, channels: 3, background: "#3a5f7d" } })
+    .webp().toBuffer();
   const logoBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 100"><rect x="40" y="20" width="80" height="60" fill="#183957"/></svg>');
   // Exercise the production evidence builder with the full canonical cap. The
   // manager request test separately proves these references and their shared
@@ -246,8 +248,8 @@ try {
         documentsDiscovered: 2, documentsEligible: 2, documentsFetched: 2, documentsExcluded: 0,
         documentsFailed: 0, documentsUnfinished: 0, resourcesDiscovered: 2, resourcesFetched: 2,
         resourcesExcluded: 0, resourcesFailed: 0, resourcesUnfinished: 0, browserRendered: 0,
-        uniqueBlobs: 2, rawBytes: largeSourcePhotoBytes.length + mediaBytes.length,
-        storedBytes: largeSourcePhotoBytes.length + mediaBytes.length
+        uniqueBlobs: 2, rawBytes: largeSourcePhotoBytes.length + officePhotoBytes.length,
+        storedBytes: largeSourcePhotoBytes.length + officePhotoBytes.length
       },
       stages: {
         discoveryMs: 0, documentFetchMs: 0, dependencyFetchMs: 0, browserFallbackMs: 0,
@@ -294,8 +296,8 @@ try {
     schemaVersion: 1, id: "resource_visual_evidence_untitled", sourceSnapshotId: visualSnapshot.id,
     captureKind: "http_response", role: "image", requestedUrl: "https://visual-evidence.example/media/office-photo.webp",
     finalUrl: "https://visual-evidence.example/media/office-photo.webp", outcome: "fetched", status: 200, contentType: "image/webp",
-    storedEncoding: "identity", rawContentHash: sha256(mediaBytes), blobContentHash: sha256(mediaBytes),
-    storageKey: "fixture/visual-evidence-untitled", rawBytes: mediaBytes.length, storedBytes: mediaBytes.length,
+    storedEncoding: "identity", rawContentHash: sha256(officePhotoBytes), blobContentHash: sha256(officePhotoBytes),
+    storageKey: "fixture/visual-evidence-untitled", rawBytes: officePhotoBytes.length, storedBytes: officePhotoBytes.length,
     headers: {}, redirectChain: [], initiatorUrls: [untitledVisualPage.requestedUrl], capturedAt: now, metadata: {}
   });
   await repository.saveSourceSnapshot(visualSnapshot);
@@ -303,14 +305,14 @@ try {
   await repository.saveSourceSnapshotPages([titledVisualPage, untitledVisualPage]);
   await store.putImmutable({ key: titledVisualResource.storageKey!, bytes: largeSourcePhotoBytes,
     contentType: "image/jpeg", contentHash: sha256(largeSourcePhotoBytes) });
-  await store.putImmutable({ key: untitledVisualResource.storageKey!, bytes: mediaBytes,
-    contentType: "image/webp", contentHash: sha256(mediaBytes) });
+  await store.putImmutable({ key: untitledVisualResource.storageKey!, bytes: officePhotoBytes,
+    contentType: "image/webp", contentHash: sha256(officePhotoBytes) });
   const sourceEvidence = await Reflect.get(canaryWorkflow, "createOperatorVisualEvidence").call(
     canaryWorkflow,
     [visualSnapshot],
     [titledVisualPage, untitledVisualPage],
     canonicalProfile.sourceEvidenceLimit,
-    canonicalProfile.sourceEvidencePresentation
+    canonicalProfile.sourceEvidenceSheetSize
   ) as Array<{
     resourceId: string;
     sourceId: string;
@@ -337,6 +339,100 @@ try {
   assert.equal(untitledSourceEvidence.sourcePageUrl, untitledVisualPage.finalUrl);
   assert.equal("sourcePageTitle" in untitledSourceEvidence, false,
     "Source evidence fabricated a title for an untitled retained page.");
+  // Photo coverage: every distinct usable photo reaches numbered sheets, far
+  // beyond the retired eight-photo sheet; homepage and service photos keep
+  // their slots ahead of a larger, higher-scoring gallery; responsive size
+  // variants collapse to one family; a CSS-background photo is retained.
+  const coverageSnapshot = sourceSnapshotSchema.parse({
+    ...visualSnapshot, id: "source_photo_coverage_fixture", sourceUrl: "https://coverage.example/",
+    contentHash: sha256("photo-coverage-fixture")
+  });
+  const coveragePage = (id: string, path: string, title?: string) => sourceSnapshotPageSchema.parse({
+    ...homepage, id, sourceSnapshotId: coverageSnapshot.id, resourceId: "resource_coverage_stylesheet",
+    requestedUrl: `https://coverage.example${path}`, finalUrl: `https://coverage.example${path}`, path, title,
+    extractedText: `${path} content`, textContentHash: sha256(`${path} content`)
+  });
+  const coverageHome = coveragePage("page_coverage_home", "/", "Home");
+  const coverageService = coveragePage("page_coverage_service", "/ceramic-coating", "Ceramic coating");
+  const coverageGallery = coveragePage("page_coverage_gallery", "/gallery", "Gallery");
+  const coverageAbout = coveragePage("page_coverage_about", "/about", "About us");
+  let coverageColor = 0;
+  const coverageResources: Array<ReturnType<typeof sourceSnapshotResourceSchema.parse>> = [];
+  const coverageBlobs: Array<{ key: string; bytes: Buffer }> = [];
+  const addCoveragePhoto = async (id: string, url: string, initiator: string) => {
+    coverageColor += 1;
+    const bytes = await sharp({ create: { width: 640, height: 420, channels: 3,
+      background: { r: (coverageColor * 37) % 256, g: (coverageColor * 91) % 256, b: (coverageColor * 53) % 256 } } })
+      .jpeg({ quality: 80 }).toBuffer();
+    const key = `fixture/coverage/${id}`;
+    coverageBlobs.push({ key, bytes });
+    coverageResources.push(sourceSnapshotResourceSchema.parse({
+      schemaVersion: 1, id, sourceSnapshotId: coverageSnapshot.id, captureKind: "http_response", role: "image",
+      requestedUrl: url, finalUrl: url, outcome: "fetched", status: 200, contentType: "image/jpeg",
+      storedEncoding: "identity", rawContentHash: sha256(bytes), blobContentHash: sha256(bytes), storageKey: key,
+      rawBytes: 60_000, storedBytes: bytes.length, headers: {}, redirectChain: [], initiatorUrls: [initiator],
+      capturedAt: now, metadata: {}
+    }));
+  };
+  for (let index = 1; index <= 30; index += 1) {
+    await addCoveragePhoto(`resource_coverage_gallery_${index}`, `https://cdn.prod.website-files.com/site/gallery-${index}.jpg`, coverageGallery.finalUrl!);
+  }
+  for (let index = 1; index <= 3; index += 1) {
+    await addCoveragePhoto(`resource_coverage_home_${index}`, `https://coverage.example/media/home-${index}.jpg`, coverageHome.finalUrl!);
+  }
+  await addCoveragePhoto("resource_coverage_home_variant_small", "https://cdn.prod.website-files.com/site/hero-p-500.jpg", coverageHome.finalUrl!);
+  await addCoveragePhoto("resource_coverage_home_variant_large", "https://cdn.prod.website-files.com/site/hero-p-1080.jpg", coverageHome.finalUrl!);
+  for (let index = 1; index <= 3; index += 1) {
+    await addCoveragePhoto(`resource_coverage_service_${index}`, `https://coverage.example/media/coating-${index}.jpg`, coverageService.finalUrl!);
+  }
+  await addCoveragePhoto("resource_coverage_about_1", "https://coverage.example/media/owner-1.jpg", coverageAbout.finalUrl!);
+  const coverageStylesheetUrl = "https://coverage.example/css/site.css";
+  await addCoveragePhoto("resource_coverage_css_background", "https://coverage.example/media/bay-background.jpg", coverageStylesheetUrl);
+  const coverageStylesheetBytes = Buffer.from("body{background:url(/media/bay-background.jpg)}");
+  coverageResources.push(sourceSnapshotResourceSchema.parse({
+    schemaVersion: 1, id: "resource_coverage_stylesheet", sourceSnapshotId: coverageSnapshot.id,
+    captureKind: "http_response", role: "stylesheet", requestedUrl: coverageStylesheetUrl, finalUrl: coverageStylesheetUrl,
+    outcome: "fetched", status: 200, contentType: "text/css", storedEncoding: "identity",
+    rawContentHash: sha256(coverageStylesheetBytes), blobContentHash: sha256(coverageStylesheetBytes),
+    storageKey: "fixture/coverage/stylesheet", rawBytes: coverageStylesheetBytes.length, storedBytes: coverageStylesheetBytes.length,
+    headers: {}, redirectChain: [], initiatorUrls: [coverageService.finalUrl!], capturedAt: now, metadata: {}
+  }));
+  await repository.saveSourceSnapshot(coverageSnapshot);
+  await repository.saveSourceSnapshotResources(coverageResources);
+  await repository.saveSourceSnapshotPages([coverageHome, coverageService, coverageGallery, coverageAbout]);
+  for (const { key, bytes } of coverageBlobs) {
+    await store.putImmutable({ key, bytes, contentType: "image/jpeg", contentHash: sha256(bytes) });
+  }
+  const coverageEvidence = await Reflect.get(canaryWorkflow, "createOperatorVisualEvidence").call(
+    canaryWorkflow,
+    [coverageSnapshot],
+    [coverageHome, coverageService, coverageGallery, coverageAbout],
+    canonicalProfile.sourceEvidenceLimit,
+    canonicalProfile.sourceEvidenceSheetSize,
+    ["/", "/ceramic-coating"]
+  ) as Array<{ resourceId: string; sourcePageId: string; pageRole: string; sheet: number; cell: number; contentHash: string; dataUrl: string }>;
+  const coverageIds = coverageEvidence.map((reference) => reference.resourceId);
+  assert.equal(coverageEvidence.length, 39,
+    "Every distinct usable photo (30 gallery, 4 home families, 3 service, 1 about, 1 CSS background) must reach the author.");
+  assert.equal(new Set(coverageEvidence.map((reference) => reference.contentHash)).size, 4,
+    "39 photos must be split across four numbered sheets of 12.");
+  assert.deepEqual(coverageEvidence.map((reference) => reference.cell), Array.from({ length: 39 }, (_, index) => index + 1));
+  for (const reference of coverageEvidence) {
+    const sheetMetadata = await sharp(Buffer.from(reference.dataUrl.split(",")[1]!, "base64")).metadata();
+    assert.equal(sheetMetadata.format, "webp");
+  }
+  assert.deepEqual(coverageEvidence.slice(0, 4).map((reference) => reference.pageRole), ["home", "home", "home", "home"],
+    "Homepage photos did not lead the contact sheets.");
+  for (const id of ["resource_coverage_home_1", "resource_coverage_home_2", "resource_coverage_home_3",
+    "resource_coverage_service_1", "resource_coverage_service_2", "resource_coverage_service_3", "resource_coverage_about_1"]) {
+    assert(coverageIds.includes(id), `A reserved homepage, service or about photo was displaced: ${id}`);
+  }
+  assert.equal(coverageIds.filter((id) => id.startsWith("resource_coverage_home_variant_")).length, 1,
+    "Webflow -p-NNN size variants of one image reached the author twice.");
+  const cssBackground = coverageEvidence.find((reference) => reference.resourceId === "resource_coverage_css_background");
+  assert.equal(cssBackground?.sourcePageId, coverageService.id,
+    "A stylesheet-only photo was dropped or not attributed to the page loading its stylesheet.");
+  assert.equal(cssBackground?.pageRole, "service", "An architecture-mapped service page was not treated as a service page.");
   const logoResource = sourceSnapshotResourceSchema.parse({
     schemaVersion: 1, id: "resource_opaque_crest", sourceSnapshotId: originalSnapshot.id,
     captureKind: "http_response", role: "image", requestedUrl: "https://cdn.example/PristineTXNewLogo.svg",

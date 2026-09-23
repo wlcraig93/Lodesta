@@ -189,10 +189,12 @@ export async function ingestWebsite(input: {
   businessId?: string;
   now?: string;
   signal?: AbortSignal;
+  /** Replays retained captures instead of the network (operator regeneration and tests). */
+  crawlTransport?: Pick<Parameters<typeof crawlWebsiteForGeneration>[0], "fetchImpl" | "browserFetch" | "validateUrl" | "sleep">;
 }): Promise<WebsiteIngestionResult> {
   let sourceUrl: string;
   try {
-    sourceUrl = await assertPublicFetchUrl(input.url);
+    sourceUrl = await (input.crawlTransport?.validateUrl ?? assertPublicFetchUrl)(input.url);
   } catch (error) {
     throw new WebsiteCrawlError(
       "source_invalid",
@@ -202,11 +204,17 @@ export async function ingestWebsite(input: {
   const now = input.now ?? new Date().toISOString();
   const siteId = input.siteId ?? `site_${idPart(randomUUID())}`;
   const businessId = input.businessId ?? `business_${idPart(randomUUID())}`;
-  const { ingestion: generationIngestion, crawl, captures, documents, timings } = await crawlWebsiteForGeneration({ url: sourceUrl, signal: input.signal });
+  const { ingestion: generationIngestion, crawl, captures, documents, timings } = await crawlWebsiteForGeneration({ ...input.crawlTransport, url: sourceUrl, signal: input.signal });
   assertSourceSuitableForGeneration(crawl, generationIngestion);
 
   const retainedContacts = retainedContactConsensus(documents);
+  const firstPartyPageUrls = new Set(generationIngestion.pages
+    .filter((page) => page.evidenceClass === "first_party")
+    .flatMap((page) => [page.url, (page.summary as CrawlPageSummary).url]));
   const scopedContactAndLocation = selectSourceContactAndLocation(crawl, retainedContacts);
+  const displayedPhones = selectDisplayedFirstPartyPhones(
+    crawl.pageSummaries.filter((page) => firstPartyPageUrls.has(page.url) && sourceFactPageEligible(page, sourceUrl))
+  );
   const facts = {
     ...crawl.extractedFacts,
     ...scopedContactAndLocation
@@ -300,8 +308,20 @@ export async function ingestWebsite(input: {
     "Phone",
     clean(facts.phone),
     0.82,
-    sameValue(facts.phone, crawl.extractedFacts.phone) || sameValue(facts.phone, retainedContacts.phone)
+    sameValue(facts.phone, crawl.extractedFacts.phone)
+      || sameValue(facts.phone, retainedContacts.phone)
+      || displayedPhones.some((candidate) => samePhone(candidate.phone, facts.phone))
   );
+  // Every number the site itself displays or links on at least two pages is
+  // a real way to reach the business, so each stays its own public fact.
+  for (const displayed of displayedPhones) {
+    if (samePhone(displayed.phone, facts.phone)) continue;
+    addFact("phone", "Additional phone", displayed.phone, 0.8, true, {
+      ...(displayed.sourceBlockId ? { sourceBlockId: displayed.sourceBlockId } : {}),
+      sourceUrl: displayed.sourceUrl,
+      evidenceClass: "first_party"
+    });
+  }
   addFact(
     "email",
     "Email",
@@ -375,7 +395,7 @@ export async function ingestWebsite(input: {
     sourceFactIds: locationSourceIds
   }] : [];
 
-  const proof = observedProof(crawl, sourceSnapshotId, publicFacts, now);
+  const proof = observedProof(crawl, sourceSnapshotId, publicFacts, now, firstPartyPageUrls);
   const factExtractionCompleted = Date.now();
   const stateWithoutHash = {
     schemaVersion: 1 as const,
@@ -1080,58 +1100,63 @@ export function observedProof(
   crawl: CrawlAssessment,
   sourceSnapshotId: string,
   facts: BusinessFact[],
-  now: string
+  now: string,
+  firstPartyPageUrls?: ReadonlySet<string>
 ): BusinessState["proof"] {
-  const testimonialCandidates = selectObservedFirstPartyTestimonialBlocks(crawl.pageSummaries, crawl.url);
-  const testimonials = testimonialCandidates.map((block, index) => {
-    const factId = `fact_proof_${index + 1}_${sha256(block.displayText).slice(7, 17)}`;
+  const pages = firstPartyPageUrls
+    ? crawl.pageSummaries.filter((page) => firstPartyPageUrls.has(page.url))
+    : crawl.pageSummaries;
+  const observedFact = (
+    factId: string,
+    label: string,
+    value: string,
+    evidence: { sourceUrl: string; sourceBlockId?: string },
+    confidence: number,
+    publicEligible: boolean
+  ) => {
     facts.push({
       id: factId,
       kind: "proof",
-      label: "Observed testimonial",
-      value: block.displayText,
+      label,
+      value,
       source: {
         factId,
         sourceSnapshotId,
-        sourceBlockId: block.id,
-        sourceUrl: block.sourceUrl,
+        ...(evidence.sourceBlockId ? { sourceBlockId: evidence.sourceBlockId } : {}),
+        sourceUrl: evidence.sourceUrl,
         evidenceClass: "first_party",
         observedAt: now,
-        confidence: 0.65,
+        confidence,
         ownerConfirmed: false
       },
-      publicEligible: true
+      publicEligible
     });
+  };
+
+  const testimonials = selectObservedFirstPartyTestimonials(pages, crawl.url).map((testimonial, index) => {
+    const factId = `fact_proof_${index + 1}_${sha256(testimonial.text).slice(7, 17)}`;
+    observedFact(
+      factId,
+      (testimonial.author ? `Observed testimonial from ${testimonial.author}` : "Observed testimonial").slice(0, 160),
+      testimonial.text,
+      testimonial,
+      0.65,
+      true
+    );
     return {
       id: `proof_${index + 1}`,
       kind: "testimonial" as const,
       status: "confirmed" as const,
-      publicText: block.displayText,
+      publicText: testimonial.text,
       verbatim: true,
       sourceFactIds: [factId]
     };
   });
 
-  const warranties = selectObservedFirstPartyWarrantyBlocks(crawl.pageSummaries, crawl.url).map((block) => {
+  const warranties = selectObservedFirstPartyWarrantyBlocks(pages, crawl.url).map((block) => {
     const suffix = sha256(`${block.sourceUrl}\n${block.displayText}`).slice(7, 19);
     const factId = `fact_proof_warranty_${suffix}`;
-    facts.push({
-      id: factId,
-      kind: "proof",
-      label: "Observed service guarantee",
-      value: block.displayText,
-      source: {
-        factId,
-        sourceSnapshotId,
-        sourceBlockId: block.id,
-        sourceUrl: block.sourceUrl,
-        evidenceClass: "first_party",
-        observedAt: now,
-        confidence: 0.88,
-        ownerConfirmed: false
-      },
-      publicEligible: false
-    });
+    observedFact(factId, "Observed service guarantee", block.displayText, { sourceUrl: block.sourceUrl, sourceBlockId: block.id }, 0.88, false);
     return {
       id: `proof_warranty_${suffix}`,
       kind: "warranty" as const,
@@ -1142,40 +1167,216 @@ export function observedProof(
     };
   });
 
-  return [...testimonials, ...warranties];
+  const credentialLabels = {
+    credential: "Observed license or certification",
+    longevity: "Observed founding year",
+    ownership: "Observed ownership"
+  } as const;
+  const credentials = selectObservedFirstPartyCredentials(pages, crawl.url, now).map((credential) => {
+    const suffix = sha256(`${credential.kind}\n${normalizedText(credential.text)}`).slice(7, 19);
+    const factId = `fact_proof_${credential.kind}_${suffix}`;
+    observedFact(factId, credentialLabels[credential.kind], credential.text, credential, 0.85, true);
+    return {
+      id: `proof_${credential.kind}_${suffix}`,
+      kind: credential.kind,
+      status: "confirmed" as const,
+      publicText: credential.text,
+      verbatim: true,
+      sourceFactIds: [factId]
+    };
+  });
+
+  return [...testimonials, ...warranties, ...credentials];
 }
 
-export function selectObservedFirstPartyTestimonialBlocks(
-  pages: Array<Pick<CrawlPageSummary, "url" | "purposeTags" | "sourceTextBlocks">>,
+export type ObservedTestimonial = {
+  text: string;
+  sourceUrl: string;
+  sourceBlockId?: string;
+  author?: string;
+};
+
+type TestimonialSourcePage = Pick<CrawlPageSummary, "url" | "purposeTags" | "sourceTextBlocks"> & {
+  title?: string;
+  thirdPartyReviewBlockIds?: string[];
+  extractedFacts?: Pick<ExtractedBusinessFacts, "structuredReviews">;
+};
+
+/**
+ * Customer quotations the business publishes on its own site, kept verbatim:
+ * quoted or blockquoted text and attributed review cards on review pages, and
+ * the business's own structured-data reviews. Blocks rendered inside embedded
+ * review-platform widgets are that platform's content and are never used.
+ */
+export function selectObservedFirstPartyTestimonials(
+  pages: TestimonialSourcePage[],
   sourceUrl: string
-): SourceTextBlock[] {
+): ObservedTestimonial[] {
   const sourceHost = new URL(sourceUrl).hostname.replace(/^www\./, "");
   const seen = new Set<string>();
-  return pages
-    .filter((page) => page.purposeTags.includes("reviews"))
-    .filter((page) => sourceFactPageEligible(page, sourceUrl))
-    .filter((page) => {
-      try {
-        return new URL(page.url).hostname.replace(/^www\./, "") === sourceHost;
-      } catch {
-        return false;
+  const testimonials: ObservedTestimonial[] = [];
+  const accept = (candidate: ObservedTestimonial) => {
+    const text = candidate.text.replace(/\s+/g, " ").trim();
+    if (canonicalWordCount(text) < 6 || text.length < 30 || text.length > 600) return;
+    if (isPlaceholderOrTemplateCopy(text)) return;
+    const identity = normalizedText(text);
+    if (seen.has(identity)) return;
+    seen.add(identity);
+    testimonials.push({ ...candidate, text });
+  };
+  for (const page of pages) {
+    if (!sameSourceHost(page.url, sourceHost) || !sourceFactPageEligible(page, sourceUrl)) continue;
+    if (page.purposeTags.includes("reviews")) {
+      const widgetBlocks = new Set(page.thirdPartyReviewBlockIds ?? []);
+      const blocks = page.sourceTextBlocks
+        .filter((block) => !widgetBlocks.has(block.id))
+        .sort((left, right) => left.order - right.order);
+      for (const block of blocks) {
+        const blockquote = /^blockquote(?:[#.:]|$)/.test(block.containerId.split(" > ").at(-1) ?? "");
+        const visiblyQuoted = /(?:^|\s)[“"][^”"]{20,}[”"](?:\s|$)/u.test(block.displayText);
+        if (blockquote || visiblyQuoted) accept({ text: block.displayText, sourceUrl: block.sourceUrl, sourceBlockId: block.id });
       }
-    })
-    .flatMap((page) => page.sourceTextBlocks)
-    .filter((block) => {
-      const blockquote = /^blockquote(?:[#.:]|$)/.test(block.containerId);
-      const visiblyQuoted = /(?:^|\s)[“"][^”"]{20,}[”"](?:\s|$)/u.test(block.displayText);
-      return blockquote || visiblyQuoted;
-    })
-    .filter((block) => canonicalWordCount(block.displayText) >= 6 && block.displayText.length >= 30 && block.displayText.length <= 600)
-    .filter((block) => !isPlaceholderOrTemplateCopy(block.displayText))
-    .filter((block) => {
-      const identity = normalizedText(block.displayText);
-      if (seen.has(identity)) return false;
-      seen.add(identity);
-      return true;
-    })
-    .slice(0, 8);
+      for (const card of attributedReviewCards(blocks)) accept(card);
+    }
+    for (const review of page.extractedFacts?.structuredReviews ?? []) {
+      accept({ text: review.text, sourceUrl: page.url, ...(review.author ? { author: review.author } : {}) });
+    }
+  }
+  return testimonials.slice(0, 8);
+}
+
+function sameSourceHost(url: string, sourceHost: string) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "") === sourceHost;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A review card is a run of prose blocks followed by a short person-name
+ * attribution inside the same card container, where that container holds no
+ * other attribution.
+ */
+function attributedReviewCards(blocks: SourceTextBlock[]): ObservedTestimonial[] {
+  const attributions = blocks.map((block) => reviewAttributionName(block.displayText));
+  const cards: ObservedTestimonial[] = [];
+  for (let index = 1; index < blocks.length; index += 1) {
+    const author = attributions[index];
+    if (!author) continue;
+    const attribution = blocks[index];
+    const card = sharedContainerPath(attribution.containerId, blocks[index - 1].containerId);
+    if (!card || card.split(" > ").length < 2) continue;
+    const inCard = (block: SourceTextBlock) => block.containerId.startsWith(`${card} > `);
+    if (blocks.some((block, other) => other !== index && attributions[other] && inCard(block))) continue;
+    const quote: SourceTextBlock[] = [];
+    for (let previous = index - 1; previous >= 0 && quote.length < 4; previous -= 1) {
+      const block = blocks[previous];
+      if (!inCard(block) || sourceBlockHeadingLevel(block)) break;
+      quote.unshift(block);
+    }
+    if (!quote.length) continue;
+    cards.push({
+      text: quote.map((block) => block.displayText).join(" "),
+      sourceUrl: quote[0].sourceUrl,
+      sourceBlockId: quote[0].id,
+      author
+    });
+  }
+  return cards;
+}
+
+function sharedContainerPath(left: string, right: string) {
+  const leftSegments = left.split(" > ");
+  const rightSegments = right.split(" > ");
+  const shared: string[] = [];
+  for (let index = 0; index < Math.min(leftSegments.length, rightSegments.length) - 1; index += 1) {
+    if (leftSegments[index] !== rightSegments[index]) break;
+    shared.push(leftSegments[index]);
+  }
+  return shared.join(" > ");
+}
+
+function reviewAttributionName(value: string) {
+  const text = value.replace(/^[\s\-–—~]+/, "").replace(/\s+/g, " ").trim();
+  if (text.length < 2 || text.length > 60) return undefined;
+  const name = text.split(/\s*[,|–—]\s*|\s+-\s+/, 1)[0] ?? "";
+  if (!/^(?:(?:Dr|Mr|Mrs|Ms)\.?\s+)?[A-Z][a-zA-Z'’-]*\.?(?:\s+(?:[A-Z][a-zA-Z'’-]*\.?|&|and)){0,3}$/.test(name)) return undefined;
+  if (/^(?:testimonials?|reviews?|read more|more|home|contact(?: us)?|about(?: us)?|call(?: now)?|submit|send|learn more|leave a review|write a review|customer reviews?|our reviews?|happy customers?)$/i.test(name)) return undefined;
+  if (/\b(?:services?|removal|repair|installation|trimming|pruning|control|company|llc|inc|team|pump|well|electric|roofing|detailing|tree|google|yelp|facebook|reviews?|testimonials?)\b/i.test(name)) return undefined;
+  return name;
+}
+
+type ObservedCredential = {
+  kind: "credential" | "longevity" | "ownership";
+  text: string;
+  sourceUrl: string;
+  sourceBlockId: string;
+};
+
+// Registry acronyms immediately before a number are licenses ("TECL #28122",
+// "ROC #123456"); these common non-license labels are not.
+const nonLicenseLabel = /^(?:apt|ste|suite|unit|bldg|box|room|floor|lot|page|item|sku|job|ticket|case|order|invoice|inv|ref|call|tel|fax|ext|zip|tax|ein|model|part|serial|account|acct|claim|policy|member|route|hwy|store|exit|gate|dock|pin|code|step|phase|year|week|day|num|number)$/i;
+const registryLicensePattern = /\b([A-Za-z]{3,6})\s*(?:#|No\.?)\s*:?\s*\d{3,}[A-Za-z0-9-]*/g;
+const labeledLicensePattern = /\b(?:(?:[A-Z]{2,6}|[A-Z][a-z]+)\s+){0,3}(?:[Ll]icen[cs]e|LICEN[CS]E|Lic\.|[Rr]egistration|REGISTRATION|Reg\.)\s*(?:[Nn]o\.?|[Nn]umber|NUMBER|#)\s*:?\s*#?\s*[A-Z]{0,4}[-\s]?\d[\dA-Z-]{2,}/g;
+const certificationIdPattern = /\b(?:[A-Z]{2,6}\s+)?Certified\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?[^.!?\n]{0,48}?\b[A-Z]{2}-\d{3,}[A-Z]?\b/g;
+const foundingPattern = /\b(?:(?:[Ss]erving|[Ii]n business|[Oo]perating|[Pp]roviding|[Pp]roudly)[^.!?\n]{0,60}?\s)?(?:[Ss]ince|SINCE|[Ee]stablished(?:\s+in)?|ESTABLISHED|[Ff]ounded(?:\s+in)?|FOUNDED|Est\.|EST\.)\s+((?:18|19|20)\d{2})\b/g;
+const ownershipPattern = /\bfamily[- ]owned(?:\s+(?:and|&)\s+operated)?\b/gi;
+
+/**
+ * Licenses, founding year, and family ownership the business states on its
+ * own pages, each kept as the exact phrase with its source block.
+ */
+export function selectObservedFirstPartyCredentials(
+  pages: Array<Pick<CrawlPageSummary, "url" | "title" | "purposeTags" | "sourceTextBlocks"> & { thirdPartyReviewBlockIds?: string[] }>,
+  sourceUrl: string,
+  now: string
+): ObservedCredential[] {
+  const sourceHost = new URL(sourceUrl).hostname.replace(/^www\./, "");
+  const currentYear = new Date(now).getUTCFullYear();
+  const licenses = new Map<string, ObservedCredential>();
+  const foundingYears = new Map<string, ObservedCredential>();
+  let ownership: ObservedCredential | undefined;
+  for (const page of pages) {
+    if (!sameSourceHost(page.url, sourceHost) || !sourceFactPageEligible(page, sourceUrl)) continue;
+    if (page.purposeTags.includes("blog") || page.purposeTags.includes("legal")) continue;
+    const widgetBlocks = new Set(page.thirdPartyReviewBlockIds ?? []);
+    for (const block of page.sourceTextBlocks) {
+      if (widgetBlocks.has(block.id)) continue;
+      const text = block.displayText;
+      const evidence = { sourceUrl: block.sourceUrl, sourceBlockId: block.id };
+      const license = (value: string) => {
+        const phrase = value.trim();
+        if (phrase.replace(/\D/g, "").length >= 10) return;
+        // One credential per license number, however it is labeled.
+        const identity = phrase.match(/[A-Za-z]{0,4}-?\d[\dA-Za-z-]{2,}\s*$/)?.[0]?.replace(/[^A-Za-z0-9]/g, "").toLocaleLowerCase("en-US") ?? normalizedText(phrase);
+        if (!licenses.has(identity)) licenses.set(identity, { kind: "credential", text: phrase, ...evidence });
+      };
+      for (const match of text.matchAll(labeledLicensePattern)) license(match[0]);
+      for (const match of text.matchAll(certificationIdPattern)) license(match[0]);
+      for (const match of text.matchAll(registryLicensePattern)) {
+        if (!nonLicenseLabel.test(match[1] ?? "")) license(match[0]);
+      }
+      for (const match of text.matchAll(foundingPattern)) {
+        const year = Number(match[1]);
+        if (year < 1850 || year > currentYear) continue;
+        const qualified = /^(?:serving|in business|operating|providing|proudly|established|founded|est)/i.test(match[0])
+          || text.length <= 40
+          || /\b(?:we|we've|our|family|business|company)\b/i.test(text);
+        if (!qualified || foundingYears.has(match[1]!)) continue;
+        foundingYears.set(match[1]!, { kind: "longevity", text: match[0].trim(), ...evidence });
+      }
+      for (const match of text.matchAll(ownershipPattern)) {
+        const after = text.slice((match.index ?? 0) + match[0].length);
+        const before = text.slice(Math.max(0, (match.index ?? 0) - 8), match.index ?? 0);
+        if (/^\s+(?:businesses|companies|farms)\b/i.test(after) || /\bnot\s+(?:a\s+)?$/i.test(before)) continue;
+        if (!ownership || match[0].length > ownership.text.length) ownership = { kind: "ownership", text: match[0], ...evidence };
+      }
+    }
+  }
+  // Different founding years are a factual conflict; state none of them.
+  const founding = foundingYears.size === 1 ? [...foundingYears.values()] : [];
+  return [...[...licenses.values()].slice(0, 4), ...founding, ...(ownership ? [ownership] : [])];
 }
 
 const freeReturnServicePattern = /\b(?:re[-\s]?(?:treat|service)|come back|we(?:'|’)ll return)\b.{0,180}\b(?:free of charge|at no (?:additional|extra) cost|at no additional charge|for free)\b/i;
@@ -1428,13 +1629,89 @@ export function selectSourceContactAndLocation(
     ? primary
     : onlyAddressPages?.slice().sort((left, right) =>
       locationEvidenceCompleteness(right) - locationEvidenceCompleteness(left))[0];
+  // The number the source page displays and links is the business's phone.
+  // Homepage structured data alone never overrides it: prefer the site-wide
+  // displayed consensus when this page shows it, then this page's own link.
+  const primaryDisplayed = primary ? displayedPagePhones(primary) : { tel: [], visible: [] };
+  const consensus = clean(crawl.extractedFacts.phone);
+  const displayedPhone = consensus && [...primaryDisplayed.tel, ...primaryDisplayed.visible].some((phone) => samePhone(phone, consensus))
+    ? consensus
+    : primaryDisplayed.tel[0] ?? consensus ?? primaryDisplayed.visible[0];
   return {
-    phone: clean(primary?.extractedFacts.phone) ?? clean(locationPage?.extractedFacts.phone) ?? clean(retainedContacts.phone),
+    phone: displayedPhone ?? clean(primary?.extractedFacts.phone) ?? clean(locationPage?.extractedFacts.phone) ?? clean(retainedContacts.phone),
     email: clean(primary?.extractedFacts.email) ?? clean(locationPage?.extractedFacts.email) ?? clean(retainedContacts.email),
     address: locationPage?.extractedFacts.address,
     geo: locationPage?.extractedFacts.geo,
     hours: locationPage?.extractedFacts.hours
   };
+}
+
+function displayedPagePhones(page: Pick<CrawlPageSummary, "linkReferences" | "sourceTextBlocks">) {
+  const tel = unique(page.linkReferences
+    .filter((reference) => reference.kind === "tel")
+    .map((reference) => normalizedUsPhone(reference.href.replace(/^tel:/i, "").split(/[?;]/, 1)[0] ?? "")));
+  const visible = unique(page.sourceTextBlocks.flatMap((block) => visiblePhoneMatches(block.displayText)));
+  return { tel, visible };
+}
+
+function visiblePhoneMatches(text: string) {
+  return [...text.matchAll(/(?:\+?1[\s.(\-]*)?(?:\d{3}|\(\d{3}\))[\s.)\-]*\d{3}[\s.\-]*\d{4}\b/g)]
+    // A labeled fax line is not a number to call.
+    .filter((match) => !/\bfax\b[\s:#.-]*$/i.test(text.slice(Math.max(0, (match.index ?? 0) - 12), match.index ?? 0)))
+    .map((match) => normalizedUsPhone(match[0]))
+    .filter((value): value is string => Boolean(value));
+}
+
+/**
+ * Phones shown in first-party tel: links or visible text on at least two
+ * pages, one of them the homepage or a contact page, with the page (and
+ * visible block, when there is one) that shows it. A number that only lingers
+ * in articles or templated side pages is not presented as current contact.
+ */
+export function selectDisplayedFirstPartyPhones(
+  pages: Array<Pick<CrawlPageSummary, "url" | "source" | "purposeTags" | "linkReferences" | "sourceTextBlocks">>
+) {
+  const candidates = new Map<string, { phone: string; pageUrls: Set<string>; linked: boolean; onContactPage: boolean; sourceUrl: string; sourceBlockId?: string }>();
+  for (const page of pages) {
+    const { tel, visible } = displayedPagePhones(page);
+    const contactPage = page.source === "primary"
+      || (!page.purposeTags.includes("blog") && /^\/contact(?:[-_]?us)?(?:\.html?)?\/?$/i.test(safePathname(page.url)));
+    for (const phone of unique([...tel, ...visible])) {
+      const candidate = candidates.get(phone) ?? { phone, pageUrls: new Set<string>(), linked: false, onContactPage: false, sourceUrl: page.url };
+      candidate.pageUrls.add(page.url);
+      candidate.linked ||= tel.includes(phone);
+      candidate.onContactPage ||= contactPage;
+      if (!candidate.sourceBlockId) {
+        const block = page.sourceTextBlocks.find((entry) => visiblePhoneMatches(entry.displayText).includes(phone));
+        if (block) {
+          candidate.sourceBlockId = block.id;
+          candidate.sourceUrl = page.url;
+        }
+      }
+      candidates.set(phone, candidate);
+    }
+  }
+  return [...candidates.values()]
+    .filter((candidate) => candidate.pageUrls.size >= 2 && candidate.onContactPage)
+    .sort((left, right) => right.pageUrls.size - left.pageUrls.size
+      || Number(right.linked) - Number(left.linked)
+      || left.phone.localeCompare(right.phone))
+    .slice(0, 4)
+    .map(({ phone, sourceUrl, sourceBlockId, pageUrls }) => ({ phone, sourceUrl, sourceBlockId, pageCount: pageUrls.size }));
+}
+
+function safePathname(value: string) {
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return "";
+  }
+}
+
+function samePhone(left: unknown, right: unknown) {
+  const digits = (value: unknown) => typeof value === "string" ? value.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "") : "";
+  const leftDigits = digits(left);
+  return leftDigits.length >= 10 && leftDigits === digits(right);
 }
 
 function locationEvidenceCompleteness(page: CrawlPageSummary) {

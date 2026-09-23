@@ -1,5 +1,5 @@
 import { validatePublicFetchUrl } from "./url-safety";
-import { extractSourceTextBlocks, type SourceTextBlock } from "./source-text-blocks";
+import { extractSourceTextBlocks, sourceTextBlockIdsWithin, type SourceTextBlock } from "./source-text-blocks";
 import {
   businessNameCandidateScore,
   normalizeObservedBusinessHours,
@@ -47,6 +47,8 @@ export type CrawlPageSummary = {
   mainText?: string;
   /** Semantic visible-text blocks retained with deterministic token-to-display provenance. */
   sourceTextBlocks: SourceTextBlock[];
+  /** Blocks rendered inside an embedded third-party review widget (Google/Yelp/etc.), which are not the business's own words. */
+  thirdPartyReviewBlockIds?: string[];
   hasViewportMeta: boolean;
   hasLocalBusinessSchema: boolean;
   hasTelLink: boolean;
@@ -90,6 +92,8 @@ const titleSegmentSeparator = /\s+(?:\|+|[\u2013\u2014-])\s+/;
 
 export type ExtractedBusinessFacts = {
   name?: string;
+  /** Name declared by this page's own LocalBusiness/Organization structured data. */
+  structuredName?: string;
   description?: string;
   phone?: string;
   email?: string;
@@ -118,6 +122,13 @@ export type ExtractedBusinessFacts = {
     count?: number;
     sources: string[];
   };
+  /** Individual `review` entries declared by the page's own business structured data. */
+  structuredReviews?: StructuredReview[];
+};
+
+export type StructuredReview = {
+  text: string;
+  author?: string;
 };
 
 export type CrawlAssetReference = {
@@ -280,6 +291,9 @@ export function canonicalFromLinkHeader(linkHeader: string | null | undefined, s
   return undefined;
 }
 
+// Class/id signatures of review-aggregation embeds that republish platform reviews.
+const thirdPartyReviewWidgetMarkup = /\b(?:rplg[\w-]*|grw[\w-]*|wp-gr[\w-]*|trustindex[\w-]*|ti-widget[\w-]*|ti-review[\w-]*|elfsight[\w-]*|eapps-[\w-]*|es-review[\w-]*|sk-ww-google[\w-]*|sociablekit[\w-]*|embedsocial[\w-]*|wprevpro[\w-]*|wprev-[\w-]*|brb-[\w-]*|repocean[\w-]*|birdeye[\w-]*|bf-review[\w-]*|podium[\w-]*|nicejob[\w-]*|gatherup[\w-]*|grade-us[\w-]*|reviewsonmywebsite[\w-]*|google-reviews?[\w-]*|yelp-reviews?[\w-]*|yelp-widget[\w-]*)\b/i;
+
 function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSummary["source"]): CrawlPageSummary {
   const sourcePage = new URL(sourceUrl);
   const title = boundedUnicodeText(extractTagContent(html, "title"), 500);
@@ -307,6 +321,10 @@ function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSu
     linkReferences: [],
     assetReferences: []
   };
+  if (thirdPartyReviewWidgetMarkup.test(html)) {
+    summary.thirdPartyReviewBlockIds = sourceTextBlockIdsWithin(html, sourcePage.href, (element) =>
+      thirdPartyReviewWidgetMarkup.test(`${element.attribs?.class ?? ""} ${element.attribs?.id ?? ""}`));
+  }
   const signals = extractCrawlPageSignals(html, sourcePage.href);
   summary.jsonLdTypes = signals.jsonLdTypes;
   summary.extractedFacts = extractBusinessFacts(html, { url: sourcePage.href, finalUrl: sourcePage.href, title }, sourcePage);
@@ -319,6 +337,7 @@ function summarizeCrawlPage(html: string, sourceUrl: string, source: CrawlPageSu
   summary.assetReferences = capAssetReferences(signals.assetReferences);
 
   for (const href of extractHrefs(html)) {
+    if (bareEmailHref(href)) continue;
     try {
       const resolved = new URL(href, sourcePage.href);
       if (!["http:", "https:"].includes(resolved.protocol)) continue;
@@ -782,6 +801,8 @@ function normalizeLinkReference(
   const lowerHref = href.toLowerCase();
   if (lowerHref.startsWith("tel:")) return { href, text, kind: "tel" };
   if (lowerHref.startsWith("mailto:")) return { href: href.split("?")[0], text, kind: "mailto" };
+  const bareEmail = bareEmailHref(href);
+  if (bareEmail) return { href: `mailto:${bareEmail}`, text, kind: "mailto" };
 
   try {
     const url = new URL(href, sourceUrl);
@@ -816,7 +837,11 @@ function extractBusinessFacts(
   const jsonLdNodes = flattenJsonLd(extractJsonLd(html));
   const localNode =
     jsonLdNodes.find((node) => hasType(node, ["LocalBusiness", "Restaurant", "Dentist", "LegalService", "HomeAndConstructionBusiness"])) ??
+    jsonLdNodes.find(isBusinessEntityNode) ??
     jsonLdNodes.find((node) => typeof node.name === "string");
+  const structuredName = localNode && isBusinessEntityNode(localNode)
+    ? normalizeBusinessNameCandidate(normalizeFact(localNode.name), base.hostname)
+    : undefined;
 
   if (localNode) {
     facts.name = normalizeFact(localNode.name);
@@ -830,11 +855,15 @@ function extractBusinessFacts(
     facts.services = unique([...facts.services, ...extractServices(localNode)]);
     facts.serviceAreas = unique([...facts.serviceAreas, ...extractAreas(localNode)]);
     facts.reviewsSummary = extractRating(localNode);
+    if (isBusinessEntityNode(localNode)) facts.structuredReviews = extractStructuredReviews(localNode);
   }
   facts.name = normalizeBusinessNameCandidate(facts.name, base.hostname);
   facts.name ||= normalizeBusinessNameCandidate(cleanText(extractMetaContent(html, "og:site_name")), base.hostname);
   facts.name ||= inferNameFromTitle(page.title, base.hostname);
-  facts.name = preferBusinessNameCandidate(
+  // A business's own LocalBusiness/Organization declaration names the entity;
+  // a visible heading is usually a service headline, so it only fills gaps.
+  facts.structuredName = structuredName;
+  facts.name = structuredName ?? preferBusinessNameCandidate(
     facts.name,
     extractVisibleBusinessNameCandidate(html, base.hostname),
     base.hostname
@@ -848,7 +877,9 @@ function extractBusinessFacts(
     ...extractServiceMentionsFromText(html)
   ]).slice(0, 12);
   facts.serviceHighlights = unique([...(facts.serviceHighlights ?? []), ...extractServiceHighlightsFromText(html)]).slice(0, 8);
-  facts.phone ||= normalizePhone(extractTelLinks(html)[0] ?? extractPhoneFromText(html));
+  // The number the page links for calling is what customers use; structured
+  // data alone does not override it, and loose page text is the last resort.
+  facts.phone = normalizePhone(extractTelLinks(html)[0]) ?? facts.phone ?? normalizePhone(extractPhoneFromText(html));
   facts.email ||= normalizeEmail(extractMailtoLinks(html)[0] ?? extractEmailFromText(html));
 
   for (const reference of extractLinkReferences(html, page.finalUrl ?? page.url, base.hostname)) {
@@ -1507,7 +1538,67 @@ function extractTelLinks(html: string) {
 }
 
 function extractMailtoLinks(html: string) {
-  return extractHrefs(html).filter((href) => href.toLowerCase().startsWith("mailto:")).map((href) => href.replace(/^mailto:/i, "").split("?")[0]);
+  return extractHrefs(html).flatMap((href) => href.toLowerCase().startsWith("mailto:")
+    ? [href.replace(/^mailto:/i, "").split("?")[0]]
+    : bareEmailHref(href) ? [bareEmailHref(href)!] : []);
+}
+
+/** An href that is a bare address (`name@host.tld`, no `mailto:`) is an email, not a relative page path. */
+export function bareEmailHref(value: string) {
+  const trimmed = value.trim();
+  return /^[A-Z0-9._%+-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,}$/i.test(trimmed) ? trimmed.toLowerCase() : undefined;
+}
+
+const businessEntityTypes = [
+  "LocalBusiness",
+  "Organization",
+  "Corporation",
+  "ProfessionalService",
+  "HomeAndConstructionBusiness",
+  "AutomotiveBusiness",
+  "AutoRepair",
+  "Plumber",
+  "Electrician",
+  "HVACBusiness",
+  "RoofingContractor",
+  "GeneralContractor",
+  "HousePainter",
+  "Locksmith",
+  "MovingCompany",
+  "Restaurant",
+  "Dentist",
+  "LegalService"
+];
+
+function isBusinessEntityNode(node: Record<string, unknown>) {
+  if (typeof node.name !== "string") return false;
+  if (hasType(node, businessEntityTypes)) return true;
+  return toArray(node["@type"]).some((type) => typeof type === "string" && /(?:Business|Contractor|Store)$/.test(type));
+}
+
+const thirdPartyReviewPlatform = /\b(?:google|yelp|facebook|angi|angie'?s ?list|homeadvisor|thumbtack|bbb|better business bureau|nextdoor|houzz|trustpilot|birdeye|podium)\b/i;
+
+function extractStructuredReviews(node: Record<string, unknown>): StructuredReview[] {
+  const reviews: StructuredReview[] = [];
+  for (const entry of toArray(caseInsensitiveProperty(node, "review"))) {
+    if (!entry || typeof entry !== "object") continue;
+    const review = entry as Record<string, unknown>;
+    const text = normalizeFact(review.reviewBody) ?? normalizeFact(review.description);
+    if (!text) continue;
+    const author = typeof review.author === "string"
+      ? cleanText(review.author)
+      : review.author && typeof review.author === "object"
+        ? normalizeFact((review.author as Record<string, unknown>).name)
+        : undefined;
+    // Reviews republished from a platform are that platform's content, not the business's own testimonials.
+    const platformSignals = [review.publisher, review.url, review.sameAs, review.author, (review.author as Record<string, unknown> | undefined)?.url]
+      .flatMap((value) => toArray(value))
+      .map((value) => typeof value === "string" ? value : value && typeof value === "object" ? String((value as Record<string, unknown>).name ?? (value as Record<string, unknown>).url ?? "") : "")
+      .join(" ");
+    if (thirdPartyReviewPlatform.test(platformSignals)) continue;
+    reviews.push({ text, ...(author ? { author } : {}) });
+  }
+  return reviews.slice(0, 12);
 }
 
 function extractPhoneFromText(html: string) {
@@ -1732,7 +1823,8 @@ function selectInternalCrawlTargets(urls: string[], sourceUrl: string, limit: nu
 
 function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: ExtractedBusinessFacts, hostname: string): ExtractedBusinessFacts {
   return {
-    name: preferBusinessNameCandidate(left.name, right.name, hostname),
+    name: left.structuredName ?? preferBusinessNameCandidate(left.name, right.name, hostname),
+    structuredName: left.structuredName ?? right.structuredName,
     description: left.description ?? right.description,
     phone: left.phone ?? right.phone,
     email: left.email ?? right.email,
@@ -1747,7 +1839,8 @@ function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: Extrac
     bookingLinks: unique([...left.bookingLinks, ...right.bookingLinks]).slice(0, 6),
     orderingLinks: unique([...left.orderingLinks, ...right.orderingLinks]).slice(0, 6),
     pressLinks: unique([...left.pressLinks, ...right.pressLinks]).slice(0, 8),
-    reviewsSummary: left.reviewsSummary ?? right.reviewsSummary
+    reviewsSummary: left.reviewsSummary ?? right.reviewsSummary,
+    structuredReviews: [...(left.structuredReviews ?? []), ...(right.structuredReviews ?? [])].slice(0, 24)
   };
 }
 

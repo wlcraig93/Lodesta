@@ -313,7 +313,7 @@ export type BusinessOffering = z.infer<typeof businessOfferingSchema>;
 
 export const businessProofSchema = z.object({
   id: identifier,
-  kind: z.enum(["testimonial", "credential", "warranty", "award", "offer", "insurance_support", "longevity"]),
+  kind: z.enum(["testimonial", "credential", "warranty", "award", "offer", "insurance_support", "longevity", "ownership"]),
   status: z.enum(["observed", "confirmed", "rejected", "inactive"]),
   publicText: z.string().min(1).max(600),
   verbatim: z.boolean(),

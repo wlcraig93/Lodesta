@@ -1,6 +1,7 @@
 import { gunzipSync } from "node:zlib";
 import { z } from "zod";
 import {
+  bareEmailHref,
   canonicalFromLinkHeader,
   summarizeCrawlHtml,
   type CrawlAssessment,
@@ -374,7 +375,17 @@ export async function crawlWebsiteForGeneration(input: {
   const worker = async () => {
     while (cursor < queue.length && !signal.aborted) {
       const item = queue[cursor++];
-      const fetched = await fetchHtml(item.url, fetchImpl, scheduler, signal, limits, ["text/html", "application/xhtml+xml"], validateSameSite);
+      let fetched = await fetchHtml(item.url, fetchImpl, scheduler, signal, limits, ["text/html", "application/xhtml+xml"], validateSameSite);
+      const staticVariant = !fetched.ok && fetched.status === 404 ? staticHtmlExportVariant(item.url) : undefined;
+      if (staticVariant && !queued.has(staticVariant) && !signal.aborted) {
+        // Static exports (e.g. Next.js `out/`) link /about but serve about.html;
+        // the browser router hides that, a direct request gets 404.
+        queued.add(staticVariant);
+        const variant = await fetchHtml(staticVariant, fetchImpl, scheduler, signal, limits, ["text/html", "application/xhtml+xml"], validateSameSite);
+        // The retained document keeps the linked URL as requested and the
+        // served .html file as its final URL.
+        if (variant.ok) fetched = variant;
+      }
       if (!fetched.ok) {
         const failedCapture = captureFromFailedFetch("document", item.url, fetched);
         const rawCaptureKey = failedCapture ? retainCapture(failedCapture) : undefined;
@@ -800,7 +811,7 @@ function responsiveImageSize(value: string) {
 function extractResourceReferences(html: string, baseUrl: string) {
   const resources: Array<{ url: string; role: GenerationResourceRole }> = [];
   const add = (raw: string | undefined, role: GenerationResourceRole) => {
-    if (!raw || /^(?:data:|blob:|javascript:|mailto:|tel:|#)/i.test(raw.trim())) return;
+    if (!raw || /^(?:data:|blob:|javascript:|mailto:|tel:|#)/i.test(raw.trim()) || bareEmailHref(raw)) return;
     try {
       const url = new URL(decodeHtmlAttribute(raw.trim()), baseUrl);
       url.hash = "";
@@ -1233,7 +1244,9 @@ function assessmentFromPages(sourceUrl: string, pages: CrawlPageSummary[], inges
   const mergedFacts = factPages.reduce((combined, page) => mergeExtractedFacts(combined, page.extractedFacts, source.hostname), emptyFacts());
   const facts = {
     ...mergedFacts,
-    name: corroboratedHomepageBusinessName({
+    // The homepage's own LocalBusiness/Organization declaration names the
+    // business; headings and title segments only decide when it is absent.
+    name: primary?.extractedFacts.structuredName ?? corroboratedHomepageBusinessName({
       current: mergedFacts.name,
       homepageTitle: primary?.title,
       otherPageNames: factPages.filter(page => page !== primary).map(page => page.extractedFacts.name),
@@ -1495,6 +1508,7 @@ function mergeExtractedFacts(left: ExtractedBusinessFacts, right: ExtractedBusin
   return {
     ...left,
     name: preferBusinessNameCandidate(left.name, right.name, hostname),
+    structuredName: left.structuredName ?? right.structuredName,
     description: left.description ?? right.description,
     phone: left.phone ?? right.phone,
     email: left.email ?? right.email,
@@ -1660,6 +1674,18 @@ function meaningfulUrl(value: string) {
   if (/(?:^|\/)(?:administrator|wp-login\.php|wp-admin)(?:\/|$)/.test(path)) return false;
   return !/\.(?:avif|bmp|csv|docx?|eot|gif|gz|ico|jpe?g|json|kml|kmz|m4a|mov|mp3|mp4|mpeg|odt|ogg|pdf|png|pptx?|rar|rss|svg|tar|tiff?|txt|webm|webp|woff2?|xlsx?|xml|zip)$/.test(path);
 }
+
+export function staticHtmlExportVariant(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.pathname === "/" || url.pathname.endsWith("/") || /\.[a-z0-9]{1,5}$/i.test(url.pathname)) return undefined;
+    url.pathname = `${url.pathname}.html`;
+    return url.href;
+  } catch {
+    return undefined;
+  }
+}
+
 function transientStatus(status: number) { return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500; }
 function classifyHttpFailure(response: Response): GenerationFetchFailureReason {
   if (response.status === 401) return "authentication_required";
@@ -1921,7 +1947,7 @@ function extractDocumentLinks(html: string, baseUrl: string, sourceHostname: str
   const external = new Set<string>();
   for (const match of html.matchAll(/<a\b[^>]*href\s*=\s*(?:["']([^"']*)["']|([^\s>]+))/gi)) {
     const raw = match[1] ?? match[2];
-    if (!raw || /^(?:mailto:|tel:|javascript:|data:|#)/i.test(raw)) continue;
+    if (!raw || /^(?:mailto:|tel:|javascript:|data:|#)/i.test(raw) || bareEmailHref(raw)) continue;
     try {
       const resolved = new URL(raw, baseUrl);
       resolved.hash = "";

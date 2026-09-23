@@ -8,8 +8,14 @@ import { explicitServiceAreaListEvidence, summarizeCrawlHtml, type CrawlAssessme
 import {
   crawlWebsiteForGeneration,
   generationIngestionLimits,
-  sourceGalleryOriginalVariant
+  sourceGalleryOriginalVariant,
+  staticHtmlExportVariant
 } from "../packages/business-data/generation-crawler";
+import { createPublicBuildInput } from "../packages/business-data/public-projection";
+import { stableJson } from "../packages/business-data/hash";
+import { decodeRetainedSourceResource } from "../packages/business-data/source-mirror";
+import { retainedWebsiteReplayTransport } from "../packages/business-data/source-replay";
+import { canonicalSiteAuthoringRuntimeSeriesId } from "../packages/site-contracts/platform-manifest";
 import {
   generationCrawlerProductToken,
   generationCrawlerUserAgent,
@@ -24,7 +30,8 @@ import {
   observedProof,
   retainedContactConsensus,
   selectSupportingSourceBlock,
-  selectObservedFirstPartyTestimonialBlocks,
+  selectObservedFirstPartyCredentials,
+  selectObservedFirstPartyTestimonials,
   selectSourceContactAndLocation,
   selectBusinessCategories,
   selectSourceOfferingFacts,
@@ -395,7 +402,7 @@ const reviewSummary = {
   </main>`, "https://testimonial-source.example/reviews"),
   source: "primary" as const
 };
-const testimonialBlocks = selectObservedFirstPartyTestimonialBlocks([reviewSummary], reviewSummary.url);
+const testimonialBlocks = selectObservedFirstPartyTestimonials([reviewSummary], reviewSummary.url);
 assert.equal(testimonialBlocks.length, 2, "Generic reviews-page marketing copy was mistaken for a customer quotation, or explicit quotations were lost.");
 const proofFacts: Parameters<typeof observedProof>[2] = [];
 const retainedProof = observedProof({
@@ -404,6 +411,194 @@ const retainedProof = observedProof({
 }, "source_testimonial_fixture", proofFacts, "2026-09-01T00:00:00.000Z");
 assert(retainedProof.every((proof) => proof.kind === "testimonial" && proof.status === "confirmed" && proof.verbatim));
 assert(proofFacts.every((fact) => fact.kind === "proof" && fact.publicEligible && fact.source.evidenceClass === "first_party"));
+
+// Intake authority regressions (synthetic, replayed without network):
+// displayed phone over stale structured data, every repeated real number,
+// structured business name over a service headline, attributed review cards
+// and the business's own structured reviews without platform widgets,
+// credentials, bare-address email links, and static-export .html pages.
+const intakeOrigin = "https://intake-authority.example";
+const intakeFooter = `<div class="site-footer-contact"><p>Call <a href="tel:+19195550181">(919) 555-0181</a> · Office <a href="tel:919-555-0199">919-555-0199</a></p></div>`;
+const intakeDocuments = new Map<string, string>([
+  ["/", `<!doctype html><html><head><title>Dependable Well Service | Intake Authority</title>
+    <script type="application/ld+json">${JSON.stringify({
+      "@context": "https://schema.org",
+      "@graph": [
+        { "@type": "WebSite", name: "Intake Authority Website" },
+        {
+          "@type": "LocalBusiness",
+          name: "A &amp; T Well and Pump",
+          telephone: "+19195550100",
+          review: [
+            { "@type": "Review", reviewBody: "They restored our water the same afternoon and explained every part they replaced.", author: { "@type": "Person", name: "Pat Q." } },
+            { "@type": "Review", reviewBody: "Five stars on the platform for fast and friendly service every time we called.", author: { "@type": "Organization", name: "Google" } }
+          ]
+        }
+      ]
+    })}</script></head><body><main>
+    <h1>Dependable Well Service, Repair &amp; Installation</h1>
+    <p>${"We repair, replace, and maintain residential well pumps and pressure tanks across the county. ".repeat(3)}</p>
+    <p>Family owned and operated and serving the county since 2006.</p>
+    <p>NC Well Contractor License #4417 · Suite #200 · Order #55512</p>
+    <p>We are proud to help other family-owned businesses keep their water running.</p>
+    <a href="owner@intake-authority.example">Email the owner</a>
+    <a href="/contact">Contact</a><a href="/services/well-repair">Well repair</a><a href="/testimonials">Testimonials</a>
+    <a href="/about">About</a><a href="/blog/old-post">Old post</a><a href="/blog/older-post">Older post</a>
+    ${intakeFooter}</main></body></html>`],
+  ["/contact", `<!doctype html><html><head><title>Contact | Intake Authority</title></head><body><main><h1>Contact</h1>
+    <p>${"Reach the well service team for repairs and new installations. ".repeat(4)}</p>${intakeFooter}</main></body></html>`],
+  ["/services/well-repair", `<!doctype html><html><head><title>Well Repair | Intake Authority</title></head><body><main><h1>Well repair</h1>
+    <p>${"Well pump repair includes diagnosis, pressure switch checks, and pump replacement. ".repeat(4)}</p>
+    <p>Call <a href="tel:9195550181">919-555-0181</a></p></main></body></html>`],
+  ["/blog/old-post", `<!doctype html><html><head><title>Winter Well Tips | Blog</title></head><body><main><h1>Winter well tips</h1>
+    <p>${"Insulate the well house and keep the pressure tank above freezing. ".repeat(4)}</p>
+    <p>Questions? Call <a href="tel:919-555-0142">919-555-0142</a></p></main></body></html>`],
+  ["/blog/older-post", `<!doctype html><html><head><title>Spring Well Tips | Blog</title></head><body><main><h1>Spring well tips</h1>
+    <p>${"Test the water after heavy rain and inspect the well cap for damage. ".repeat(4)}</p>
+    <p>Questions? Call <a href="tel:919-555-0142">919-555-0142</a></p></main></body></html>`],
+  ["/testimonials", `<!doctype html><html><head><title>Testimonials | Intake Authority</title></head><body><main><h1>Testimonials</h1>
+    <section class="cards">
+      <div class="card"><div class="quote"><p>Stewart came out on a Saturday, found the failed pressure switch, and had water running within the hour.</p></div><div class="who"><h3>Ted L.</h3></div></div>
+      <div class="card"><div class="quote"><p>They replaced our old jet pump with a submersible and cleaned up everything afterwards.</p><p>We will call them again.</p></div><div class="who"><h3>Hilda H.</h3></div></div>
+    </section>
+    <div class="rplg"><div class="rplg-review"><div class="rplg-review-text"><p>Great platform review text that was copied from the Google listing by a widget plugin.</p></div><div class="rplg-review-name"><h4>Widget Person</h4></div></div></div>
+    <blockquote>“The crew explained the whole replacement and left the yard exactly as they found it.”</blockquote>
+    <p>${"Customers across the county share their experience with our well team. ".repeat(3)}</p>
+  </main></body></html>`],
+  ["/about.html", `<!doctype html><html><head><title>About | Intake Authority</title></head><body><main><h1>About us</h1>
+    <p>${"Our crew has installed and repaired wells for local families for many years. ".repeat(3)}</p>
+    <p>Established in 2006, we still answer our own phones.</p></main></body></html>`]
+]);
+const intakeFetched: string[] = [];
+const intakeTransport = {
+  validateUrl: async (value: string) => {
+    assert.equal(new URL(value).origin, intakeOrigin, "Intake fixture attempted an unexpected origin.");
+    return new URL(value).href;
+  },
+  sleep: async () => undefined,
+  browserFetch: async () => { throw new Error("browser rendering is not part of this fixture"); },
+  fetchImpl: (async (input: string | URL | Request) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    intakeFetched.push(url.pathname);
+    if (url.pathname === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+    const html = intakeDocuments.get(url.pathname);
+    return html === undefined ? response("missing", 404, "text/plain") : response(html, 200);
+  }) as typeof fetch
+};
+const intake = await ingestWebsite({ url: `${intakeOrigin}/`, now: "2026-09-23T00:00:00.000Z", crawlTransport: intakeTransport });
+assert.equal(intake.state.identity.name, "A & T Well and Pump",
+  "A homepage service headline displaced the business's own LocalBusiness name.");
+assert.equal(intake.state.contacts.phone, "+19195550181",
+  "Homepage structured data displaced the phone the site displays and links.");
+const intakePhones = intake.state.facts.filter((fact) => fact.kind === "phone");
+assert.deepEqual(
+  intakePhones.map((fact) => [fact.value, fact.publicEligible]).sort(),
+  [["+19195550181", true], ["+19195550199", true]],
+  "Every repeated displayed number must be its own public fact; structured-only and blog-only numbers must not be."
+);
+assert.equal(intake.state.facts.find((fact) => fact.kind === "email")?.value, "owner@intake-authority.example",
+  "A bare-address email link was lost.");
+assert.equal(intakeFetched.some((path) => path.includes("@")), false, "A bare-address email link was crawled as a page.");
+const intakeAbout = intake.generationIngestion.pages.find((page) => new URL(page.url).pathname === "/about");
+assert.equal(intakeAbout?.outcome, "fetched", "A static-export page linked without .html was lost to a 404.");
+assert.equal(intakeAbout?.finalUrl, `${intakeOrigin}/about.html`);
+const intakeProof = intake.state.proof;
+const intakeTestimonials = intakeProof.filter((item) => item.kind === "testimonial").map((item) => item.publicText);
+assert(intakeTestimonials.includes("Stewart came out on a Saturday, found the failed pressure switch, and had water running within the hour."),
+  "An attributed first-party review card was not retained verbatim.");
+assert(intakeTestimonials.includes("They replaced our old jet pump with a submersible and cleaned up everything afterwards. We will call them again."),
+  "A multi-paragraph review card was not retained in full.");
+assert(intakeTestimonials.includes("They restored our water the same afternoon and explained every part they replaced."),
+  "The business's own structured-data review was not retained.");
+assert(intakeTestimonials.includes("“The crew explained the whole replacement and left the yard exactly as they found it.”"));
+assert.equal(intakeTestimonials.some((text) => /widget plugin|on the platform/i.test(text)), false,
+  "Review-platform widget or platform-authored review content was copied as a first-party testimonial.");
+const tedFact = intake.state.facts.find((fact) => fact.kind === "proof" && String(fact.value).startsWith("Stewart came out"));
+assert.equal(tedFact?.label, "Observed testimonial from Ted L.");
+assert.equal(tedFact?.source.sourceUrl, `${intakeOrigin}/testimonials`);
+assert(tedFact?.source.sourceBlockId, "A review card lost its source block provenance.");
+const intakeCredentials = intakeProof.filter((item) => item.kind !== "testimonial" && item.kind !== "warranty")
+  .map((item) => [item.kind, item.publicText, item.status]);
+assert.deepEqual(intakeCredentials, [
+  ["credential", "NC Well Contractor License #4417", "confirmed"],
+  ["longevity", "serving the county since 2006", "confirmed"],
+  ["ownership", "Family owned and operated", "confirmed"]
+], "Stated license, founding year, and family ownership were not captured exactly (or a suite/order number was).");
+const intakeBuildInput = createPublicBuildInput({
+  id: "input_intake_authority",
+  state: intake.state,
+  intent: intake.intent,
+  forms: intake.forms,
+  sourceSnapshotIds: intake.sourceSnapshots.map((snapshot) => snapshot.id),
+  runtimeSeriesId: canonicalSiteAuthoringRuntimeSeriesId
+});
+assert.equal(intakeBuildInput.business.contacts.phone, "+19195550181");
+assert.deepEqual(
+  intakeBuildInput.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => fact.value).sort(),
+  ["+19195550181", "+19195550199"],
+  "Displayed phones did not reach publicFacts, so their tel: links would be rejected."
+);
+for (const text of ["NC Well Contractor License #4417", "serving the county since 2006", "Family owned and operated", "They restored our water the same afternoon and explained every part they replaced."]) {
+  assert(intakeBuildInput.publicFacts.some((fact) => fact.kind === "proof" && fact.value === text), `Supported fact did not reach the author: ${text}`);
+}
+
+// Operator regeneration re-derives business facts from the retained mirror
+// alone: replaying the retained captures reproduces the same facts and proof.
+const intakeReplay = await ingestWebsite({
+  url: `${intakeOrigin}/`,
+  siteId: intake.site.id,
+  businessId: intake.site.businessId,
+  now: "2026-09-23T00:00:00.000Z",
+  crawlTransport: retainedWebsiteReplayTransport(intake.retainedSourceResources.map(({ resource, bytes }) => ({
+    resource,
+    ...(bytes ? { body: decodeRetainedSourceResource(resource, bytes) } : {})
+  })))
+});
+const factSignature = (state: typeof intake.state) => state.facts
+  .map((fact) => stableJson({ kind: fact.kind, label: fact.label, value: fact.value, publicEligible: fact.publicEligible, sourceUrl: fact.source.sourceUrl }))
+  .sort();
+assert.deepEqual(factSignature(intakeReplay.state), factSignature(intake.state),
+  "Replaying the retained mirror did not reproduce the business facts.");
+assert.deepEqual(intakeReplay.state.proof.map((item) => item.publicText), intake.state.proof.map((item) => item.publicText));
+assert.equal(intakeReplay.state.identity.name, intake.state.identity.name);
+assert.deepEqual(intakeReplay.state.contacts, intake.state.contacts);
+
+assert.deepEqual(selectSourceContactAndLocation({
+  ...activeCrawlShell(`${intakeOrigin}/`),
+  extractedFacts: { ...activeCrawlShell(`${intakeOrigin}/`).extractedFacts, phone: "+19195550181" },
+  pageSummaries: [{
+    ...summarizeCrawlHtml(`<!doctype html><script type="application/ld+json">{"@type":"LocalBusiness","name":"Well Co","telephone":"919-555-0100"}</script><main><a href="tel:9195550181">Call (919) 555-0181</a></main>`, `${intakeOrigin}/`),
+    source: "primary" as const
+  }]
+}, { phone: "+19195550100" }).phone, "+19195550181", "Structured or retained-text phones overrode the displayed site-wide phone.");
+const structuredVsHeading = summarizeCrawlHtml(`<!doctype html><title>Home</title>
+  <script type="application/ld+json">{"@type":"Organization","name":"Oak &amp; Pine Tree Care"}</script>
+  <main><h1>Tree Removal You Can Trust</h1><a href="tel:512-555-0111">512-555-0111</a><a href="mailto:office@oak.example">Email</a></main>`, "https://oakandpine.example/");
+assert.equal(structuredVsHeading.extractedFacts.name, "Oak & Pine Tree Care");
+assert.equal(structuredVsHeading.extractedFacts.phone, "+15125550111");
+assert.deepEqual(
+  summarizeCrawlHtml(`<!doctype html><main><a href="hello@bare.example">Write to us</a></main>`, "https://bare.example/").linkReferences,
+  [{ href: "mailto:hello@bare.example", text: "Write to us", kind: "mailto" }]
+);
+assert.equal(staticHtmlExportVariant("https://static.example/about"), "https://static.example/about.html");
+for (const value of ["https://static.example/", "https://static.example/about/", "https://static.example/file.pdf"]) {
+  assert.equal(staticHtmlExportVariant(value), undefined);
+}
+const credentialPage = (text: string) => ({
+  ...summarizeCrawlHtml(`<!doctype html><title>About</title><main><h1>About</h1><p>${text}</p></main>`, `${intakeOrigin}/about`),
+  source: "sampled_internal" as const
+});
+assert.deepEqual(selectObservedFirstPartyCredentials([
+  credentialPage("Visit Suite #210 or reference Order #88123 and Invoice #4412. Call 919-555-0181."),
+  credentialPage("We help family-owned businesses and are not family owned ourselves.")
+], intakeOrigin, "2026-09-23T00:00:00.000Z"), [], "Suite, order, invoice, phone, or non-self ownership text became a credential.");
+assert.deepEqual(selectObservedFirstPartyCredentials([
+  credentialPage("Our company has been serving the valley since 1998."),
+  credentialPage("Established in 2004, our crew works across the county.")
+], intakeOrigin, "2026-09-23T00:00:00.000Z"), [], "Conflicting founding years were published instead of withheld.");
+assert.deepEqual(selectObservedFirstPartyCredentials([
+  credentialPage("HD ELECTRIC where we keep you out of the dark tecl #28122")
+], intakeOrigin, "2026-09-23T00:00:00.000Z").map((item) => item.text), ["tecl #28122"]);
 
 const cmsOrigin = "https://akeyexterminators.example";
 const cmsPrimarySummary = {
@@ -430,7 +625,7 @@ const cmsDemoSummary = {
   purposeTags: ["reviews" as const, "service_detail" as const]
 };
 assert.deepEqual(
-  selectObservedFirstPartyTestimonialBlocks([cmsDemoSummary], `${cmsOrigin}/`),
+  selectObservedFirstPartyTestimonials([cmsDemoSummary], `${cmsOrigin}/`),
   [],
   "CMS demo Lorem Ipsum was retained as publishable first-party testimonial proof."
 );
@@ -527,7 +722,7 @@ assert(mixedPlaceholderCrawl.captures.some(capture =>
 const mixedPlaceholderServiceSummary = mixedPlaceholderCrawl.crawl.pageSummaries.find(page =>
   new URL(page.url).pathname === "/services/paint-correction");
 assert(mixedPlaceholderServiceSummary);
-assert.deepEqual(selectObservedFirstPartyTestimonialBlocks(
+assert.deepEqual(selectObservedFirstPartyTestimonials(
   [mixedPlaceholderServiceSummary], mixedPlaceholderOrigin
 ), [], "Placeholder quotation text became first-party testimonial proof.");
 assert.equal(mixedPlaceholderCrawl.ingestion.pages.find(page =>
@@ -540,7 +735,7 @@ assert.equal(whollyPlaceholderPage?.evidenceClass, "first_party",
 const whollyPlaceholderSummary = mixedPlaceholderCrawl.crawl.pageSummaries.find(page =>
   new URL(page.url).pathname === "/placeholder-customer");
 assert(whollyPlaceholderSummary);
-assert.deepEqual(selectObservedFirstPartyTestimonialBlocks([whollyPlaceholderSummary], mixedPlaceholderOrigin), [],
+assert.deepEqual(selectObservedFirstPartyTestimonials([whollyPlaceholderSummary], mixedPlaceholderOrigin), [],
   "A specifically titled but wholly placeholder page contributed testimonial proof.");
 assert.deepEqual(
   new Set(selectSourceOfferingFacts(cmsCanonicalized.crawl, cmsCanonicalized.ingestion, []).map(offering => offering.name)),

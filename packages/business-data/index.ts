@@ -8,3 +8,4 @@ export * from "./crawl-errors";
 export * from "./robots-policy";
 export * from "./source-preparation-diff";
 export * from "./source-mirror";
+export * from "./source-replay";

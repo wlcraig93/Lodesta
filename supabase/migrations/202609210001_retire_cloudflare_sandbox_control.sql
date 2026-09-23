@@ -2,10 +2,8 @@ alter table public.site_agent_sessions
   drop constraint site_agent_sessions_sandbox_provider_check;
 
 update public.site_agent_sessions
-set sandbox_provider = 'railway',
-    session = jsonb_set(session, '{sandboxProvider}', '"railway"')
-where sandbox_provider = 'cloudflare'
-   or session->>'sandboxProvider' = 'cloudflare';
+set sandbox_provider = 'railway'
+where sandbox_provider = 'cloudflare';
 
 alter table public.site_agent_sessions
   add constraint site_agent_sessions_sandbox_provider_check

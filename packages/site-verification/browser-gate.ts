@@ -108,8 +108,11 @@ export async function runArtifactBrowserGate(input: {
   authorScreenshot?: AuthorReviewScreenshot;
   /** Author-review/operator/test viewport override. Final verification uses the defaults. */
   viewports?: readonly BrowserGateViewport[];
-  /** Release checks without PNG evidence, for an author preview of release blockers. Defaults to true. */
-  captureScreenshots?: boolean;
+  /**
+   * Verification only: routes that also capture PNG evidence. Omitted means
+   * every route (final verification); an author preview passes its sample.
+   */
+  screenshotRoutePaths?: readonly string[];
   signal?: AbortSignal;
   /** Exact audited patch bytes for candidate verification. Tests may omit this and build the named series source. */
   runtimeSource?: Buffer;
@@ -143,16 +146,15 @@ async function runArtifactBrowserGateOnce(input: {
   captureMode?: "verification" | "review";
   authorScreenshot?: AuthorReviewScreenshot;
   viewports?: readonly BrowserGateViewport[];
-  captureScreenshots?: boolean;
+  screenshotRoutePaths?: readonly string[];
   signal?: AbortSignal;
 }, attempt: 1 | 2): Promise<FullBrowserGateResult> {
   const harness = await startHarness(input);
   let browser: Browser | undefined;
   try {
     const isAuthorReview = input.captureMode === "review";
-    const authorScreenshot = isAuthorReview
-      ? (input.authorScreenshot ?? "full")
-      : input.captureScreenshots === false ? "none" : "full";
+    const reviewScreenshot = isAuthorReview ? (input.authorScreenshot ?? "full") : "full";
+    const screenshotRoutes = !isAuthorReview && input.screenshotRoutePaths ? new Set(input.screenshotRoutePaths) : undefined;
     // Author review is a measured feedback tool, not an early release gate. The
     // final verification pass still exercises every route and functional
     // contract after authoring is complete.
@@ -191,6 +193,7 @@ async function runArtifactBrowserGateOnce(input: {
       const findings: ArtifactGateFinding[] = [];
       const captures: BrowserGateCapture[] = [];
       let linksChecked = 0;
+      const authorScreenshot: AuthorReviewScreenshot = screenshotRoutes && !screenshotRoutes.has(route.path) ? "none" : reviewScreenshot;
         // Tablet-specific shell failures are disproportionately likely between
         // wide navigation and the phone disclosure breakpoint. Exercise that
         // state once on the homepage during final verification without adding a

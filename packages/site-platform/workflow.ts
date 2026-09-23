@@ -3569,7 +3569,21 @@ export class SiteAuthoringWorkflow {
           ? 1
           : 5
       );
-    const browserGate = await runArtifactBrowserGate({
+    // Every inspection runs the release browser checks on every route, so the
+    // author sees each blocker finish would report. A requested route or
+    // close-up additionally captures that one page's pictures.
+    const releaseGate = await runArtifactBrowserGate({
+      prepared,
+      buildInput: input.buildInput,
+      blobStore: this.blobStore,
+      capturePrefix: `${capturePrefix}/release-preview`,
+      routePaths: prepared.routes.map((route) => route.path),
+      captureMode: "verification",
+      screenshotRoutePaths: [],
+      signal: input.signal,
+      runtimeSource
+    });
+    const browserGate = authorScreenshot === "none" ? undefined : await runArtifactBrowserGate({
       prepared,
       buildInput: input.buildInput,
       blobStore: this.blobStore,
@@ -3581,30 +3595,17 @@ export class SiteAuthoringWorkflow {
       signal: input.signal,
       runtimeSource
     });
-    // The screenshot sample covers a few routes; release verification covers
-    // every route. Run the release browser checks on every route now, without
-    // screenshots, so the author sees each blocker finish would report.
-    const releaseGate = await runArtifactBrowserGate({
-      prepared,
-      buildInput: input.buildInput,
-      blobStore: this.blobStore,
-      capturePrefix: `${capturePrefix}/release-preview`,
-      routePaths: prepared.routes.map((route) => route.path),
-      captureMode: "verification",
-      captureScreenshots: false,
-      signal: input.signal,
-      runtimeSource
-    });
-    const sampleFindingKeys = new Set(browserGate.findings.map(findingIdentityKey));
-    const releaseBlockers = releaseGate.findings
-      .filter(isTechnicalReleaseBlocker)
-      .filter((finding) => !sampleFindingKeys.has(findingIdentityKey(finding)));
-    const inspectionFindings = [...prepared.findings, ...browserGate.findings, ...releaseBlockers];
+    const releaseFindingKeys = new Set(releaseGate.findings.map(findingIdentityKey));
+    const inspectionFindings = [
+      ...prepared.findings,
+      ...releaseGate.findings,
+      ...(browserGate?.findings ?? []).filter((finding) => !releaseFindingKeys.has(findingIdentityKey(finding)))
+    ];
     const browserCaptureMs = Date.now() - browserStartedAt;
     input.onPhase?.("browser_navigation_capture", browserCaptureMs);
     const visualEvidenceStartedAt = Date.now();
     input.onPhase?.("visual_evidence_preparation");
-    const visualFrames = browserGate.captures.length
+    const visualFrames = browserGate?.captures.length
       ? await createArtifactVisualFrames(browserGate.captures, selectedRoutes)
       : [];
     const visualEvidencePreparationMs = Date.now() - visualEvidenceStartedAt;
@@ -3617,7 +3618,7 @@ export class SiteAuthoringWorkflow {
         sandboxRevision: input.sandboxRevision
       },
       findings: inspectionFindings,
-      captures: browserGate.captures
+      captures: browserGate?.captures ?? []
     });
     input.onPhase?.("persistence", 0);
     return {
@@ -3634,12 +3635,12 @@ export class SiteAuthoringWorkflow {
         routes: prepared.routes.map((route) => route.path),
         findings: inspectionFindings,
         staticFindingCount: prepared.findings.length,
-        browserFindingCount: browserGate.findings.length,
-        screenshotCount: browserGate.captures.length,
+        browserFindingCount: inspectionFindings.length - prepared.findings.length,
+        screenshotCount: browserGate?.captures.length ?? 0,
         visualEvidenceRoutes: [...new Set(visualFrames.map((frame) => frame.evidence.route))],
         visualEvidenceFrames: visualFrames.map((frame) => frame.evidence),
         visualEvidenceFrameCount: visualFrames.length,
-        focusedScreenshotCount: browserGate.captures.filter((capture) => capture.frame === "focus").length
+        focusedScreenshotCount: (browserGate?.captures ?? []).filter((capture) => capture.frame === "focus").length
       },
       diagnosticSummary: {
         visualOnly: true,
@@ -3652,7 +3653,7 @@ export class SiteAuthoringWorkflow {
         visualEvidenceBytes: visualFrames.reduce((sum, frame) => sum + frame.bytes.byteLength, 0),
         findings: inspectionFindings,
         staticFindingCount: prepared.findings.length,
-        browserFindingCount: browserGate.findings.length,
+        browserFindingCount: inspectionFindings.length - prepared.findings.length,
         timings: {
           compilationMs: 0,
           hardChecksMs,

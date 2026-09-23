@@ -152,6 +152,7 @@ import {
 } from "@/packages/website-assessment/route-selection";
 import {
   rankSourceAssetCandidates,
+  sourcePhotoNotes,
   sourcePhotoCountsByPagePath,
   sourceResourceIsAdoptableImage
 } from "./source-resource-ranking";
@@ -4751,6 +4752,13 @@ export class SiteAuthoringWorkflow {
         width: metadata?.width ?? null,
         height: metadata?.height ?? null,
         proofScope: imageProofScope(sourcePage?.path ?? candidate.sourcePageUrl, sourcePage?.title),
+        photoNotes: sourcePhotoNotes({
+          imageUrl: candidate.resource.finalUrl ?? candidate.resource.requestedUrl,
+          pagePath: sourcePage?.path,
+          pageTitle: sourcePage?.title,
+          width: metadata?.width,
+          height: metadata?.height
+        }),
         mimeType: "image/webp",
         contentHash: sha256(preview),
         dataUrl: `data:image/webp;base64,${preview.toString("base64")}`
@@ -4811,6 +4819,15 @@ export class SiteAuthoringWorkflow {
           sourceSnapshotId: revision.provenance.sourceSnapshotId,
           ...(revision.provenance.sourceResourceId ? { sourceResourceId: revision.provenance.sourceResourceId } : {}),
           sourcePageUrl: revision.provenance.sourcePageUrl
+        } : {}),
+        ...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {}),
+        ...(asset.kind === "photo" ? {
+          photoNotes: sourcePhotoNotes({
+            imageUrl: revision.provenance.origin === "source_website" ? revision.provenance.sourceUrl : undefined,
+            pagePath: revision.provenance.origin === "source_website" ? urlPath(revision.provenance.sourcePageUrl) : undefined,
+            width: asset.width,
+            height: asset.height
+          })
         } : {}),
         // Operator evidence is deliberately pixel-led. Retained alt text can
         // be stale or plainly wrong (for example, a plumbing stock photo
@@ -6325,4 +6342,12 @@ function failureMessage(error: unknown) {
 function combineAbortSignals(left?: AbortSignal, right?: AbortSignal) {
   if (left && right) return AbortSignal.any([left, right]);
   return left ?? right;
+}
+
+function urlPath(url: string) {
+  try {
+    return new URL(url).pathname.replace(/\/+$/, "") || "/";
+  } catch {
+    return undefined;
+  }
 }

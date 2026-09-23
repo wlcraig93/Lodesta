@@ -6,7 +6,9 @@ import type {
 } from "../packages/site-contracts";
 import {
   rankSourceAssetCandidates,
-  sourceResourceIsAdoptableImage
+  sourcePhotoNotes,
+  sourceResourceIsAdoptableImage,
+  stockImageSignal
 } from "../packages/site-platform/source-resource-ranking";
 
 const sourceId = "source_fixture";
@@ -256,5 +258,26 @@ for (const id of ["cdn_tiny", "cdn_vendor", "cdn_archive"]) {
 assert(cdnCandidates.find(c => c.resource.id === "cdn_service")?.relevanceReasons
   .includes("cross-origin dependency rather than a first-party asset"),
 "A visual-review hint erased the cross-origin provenance warning.");
+
+for (const url of [
+  "https://example.com/wp-content/uploads/AdobeStock_123456.jpeg",
+  "https://example.com/images/shutterstock_98765.jpg",
+  "https://images.unsplash.com/photo-1581578731548",
+  "https://static.wixstatic.com/media/11062b_4f2d.jpg",
+  "https://static.wixstatic.com/media/nsplsh_5a7b.jpg",
+  "https://example.com/uploads/iStock-1182.jpg"
+]) assert.equal(stockImageSignal(url), true, `Stock image URL was not recognized: ${url}`);
+for (const url of [
+  "https://example.com/wp-content/uploads/crew-truck-2024.jpg",
+  "https://images.squarespace-cdn.com/content/v1/abc/roof-replacement.jpg",
+  "https://example.com/uploads/livestock-fence.jpg"
+]) assert.equal(stockImageSignal(url), false, `Business photograph was labeled stock: ${url}`);
+assert.deepEqual(sourcePhotoNotes({ imageUrl: "https://example.com/gallery/deck.jpg", pagePath: "/our-work", width: 2400, height: 1600 }), ["published on a project or gallery page"]);
+assert.deepEqual(sourcePhotoNotes({ imageUrl: "https://example.com/AdobeStock_1.jpg", pagePath: "/", width: 800, height: 1200 }), [
+  "published on the source homepage",
+  "URL indicates licensed stock photography, not this business's own work",
+  "800x1200: too small for a full-width or hero placement",
+  "portrait orientation"
+]);
 
 console.log("Source asset ranking verification passed.");

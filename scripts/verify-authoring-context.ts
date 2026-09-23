@@ -172,7 +172,8 @@ const initialBuildSkill = taskSkillFor("initial_build").knowledge.join("\n");
 for (const contract of [
   /do not add, remove, merge, or redirect routes/,
   /authored TSX and CSS readable, structurally formatted/,
-  /take the palette from the logo and the strongest photographs/,
+  /Pick the direction whose tone fits this business and its photographs/,
+  /Licensed stock or visibly generic photographs .* never as the hero/,
   /Avoid the generic generated-site look/,
   /Preserve geographic qualifiers/,
   /headlines at a comfortable size/,

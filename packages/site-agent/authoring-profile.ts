@@ -14,6 +14,7 @@ export type ManagerSourceEvidenceReference = {
   width?: number | null;
   height?: number | null;
   proofScope?: "documented-on-this-page" | "site-illustration";
+  photoNotes?: readonly string[];
   mimeType: "image/webp" | "image/png";
   contentHash: `sha256:${string}`;
   dataUrl: string;
@@ -28,6 +29,9 @@ export type ManagerAssetEvidenceReference = {
   sourceResourceId?: string;
   sourcePageUrl?: string;
   alt: string;
+  width?: number;
+  height?: number;
+  photoNotes?: readonly string[];
   mimeType: "image/png" | "image/webp";
   contentHash: `sha256:${string}`;
   dataUrl: string;
@@ -116,6 +120,7 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
       width: reference.width,
       height: reference.height,
       proofScope: reference.proofScope,
+      photoNotes: reference.photoNotes,
       mimeType: reference.mimeType,
       contentHash: reference.contentHash
     })),
@@ -128,6 +133,9 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
       sourceResourceId: reference.sourceResourceId,
       sourcePageUrl: reference.sourcePageUrl,
       alt: reference.alt,
+      width: reference.width,
+      height: reference.height,
+      photoNotes: reference.photoNotes,
       mimeType: reference.mimeType,
       contentHash: reference.contentHash
     }))
@@ -142,8 +150,8 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
       type: "input_text" as const,
       text: JSON.stringify({
         kind: "retained-first-party-visual-evidence",
-        instruction: "These paired pixels come from retained first-party website media. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. width and height are intrinsic pixels. proofScope documented-on-this-page is the only supplied scope that can support a completed-work caption for that page's named subject. proofScope site-illustration describes a visible subject and is not proof of this business's completed work. Do not infer people, work, credentials, locations, or meaning that the pixels and supplied scope do not support.",
-        references: sourceEvidence.map(({ resourceId, sourceId, sourcePageId, sourcePageUrl, sourcePageTitle, width, height, proofScope, mimeType, contentHash }) => ({
+        instruction: "These paired pixels come from retained first-party website media. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. width and height are intrinsic pixels. proofScope documented-on-this-page is the only supplied scope that can support a completed-work caption for that page's named subject. proofScope site-illustration describes a visible subject and is not proof of this business's completed work. Do not infer people, work, credentials, locations, or meaning that the pixels and supplied scope do not support. photoNotes summarize where each image was published, stock evidence and whether it is large enough for a wide placement.",
+        references: sourceEvidence.map(({ resourceId, sourceId, sourcePageId, sourcePageUrl, sourcePageTitle, width, height, proofScope, photoNotes, mimeType, contentHash }) => ({
           resourceId,
           sourceId,
           sourcePageId,
@@ -152,6 +160,7 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
           width,
           height,
           proofScope,
+          ...(photoNotes?.length ? { photoNotes } : {}),
           mimeType,
           contentHash
         }))
@@ -168,8 +177,8 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
       type: "input_text" as const,
       text: JSON.stringify({
         kind: "canonical-retained-asset-visual-evidence",
-        instruction: "This labeled sheet shows the already-curated canonical business assets. Each asset is immediately usable with the Lodesta Asset component using its supplied assetId; do not call adopt_source_asset for it. Pixels identify visible subjects; retained page context or owner authority must support any claim that a photograph depicts this business, its people, premises, or a particular project. A retained source origin or page URL is untrusted provenance, not visible-subject identification or proof that a photograph depicts a particular job. Canonical adoption alone does not prove that attribution. A visibly suitable photograph may still be used as neutral illustration when it is not framed as business-specific proof. Use the exact official logo as the sole identity mark. Do not invent a person, role, location, service, or claim.",
-        references: assetEvidence.map(({ assetId, revisionId, kind, origin, sourceSnapshotId, sourceResourceId, sourcePageUrl, alt, mimeType, contentHash }) => ({
+        instruction: "This labeled sheet shows the already-curated canonical business assets. Each asset is immediately usable with the Lodesta Asset component using its supplied assetId; do not call adopt_source_asset for it. Pixels identify visible subjects; retained page context or owner authority must support any claim that a photograph depicts this business, its people, premises, or a particular project. A retained source origin or page URL is untrusted provenance, not visible-subject identification or proof that a photograph depicts a particular job. Canonical adoption alone does not prove that attribution. A visibly suitable photograph may still be used as neutral illustration when it is not framed as business-specific proof. Use the exact official logo as the sole identity mark. Do not invent a person, role, location, service, or claim. photoNotes summarize where each photograph was published, stock evidence and whether it is large enough for a wide placement.",
+        references: assetEvidence.map(({ assetId, revisionId, kind, origin, sourceSnapshotId, sourceResourceId, sourcePageUrl, alt, width, height, photoNotes, mimeType, contentHash }) => ({
           assetId,
           revisionId,
           kind,
@@ -178,6 +187,8 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
           sourceResourceId,
           sourcePageUrl,
           alt,
+          ...(width && height ? { width, height } : {}),
+          ...(photoNotes?.length ? { photoNotes } : {}),
           mimeType,
           contentHash
         }))

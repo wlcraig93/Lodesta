@@ -206,6 +206,8 @@ try {
     sourceSnapshotId: originalSnapshot.id,
     sourceResourceId: "resource_asset_evidence_1",
     sourcePageUrl: "https://northstar.example/",
+    width: 24,
+    height: 16,
     alt: "Retained logo candidate; inspect the pixels.",
     mimeType: "image/webp",
     contentHash: assetEvidence[0]!.contentHash,

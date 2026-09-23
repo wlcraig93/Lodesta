@@ -194,7 +194,7 @@ function sourceAssetCandidate(resource: SourceSnapshotResource, page: SourceSnap
     excludedArtwork = true;
     reasons.push("generic utility-art signal");
   }
-  if (/\b(?:adobestock|shutterstock|istock|depositphotos|portrait of|side view of|utc)\b/.test(signal)) {
+  if (/\b(?:portrait of|side view of|utc)\b/.test(signal) || stockImageSignal(url)) {
     score -= 175;
     reasons.push("filename suggests generic stock photography");
   }
@@ -248,4 +248,39 @@ function normalizedSignal(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+const stockHostPattern = /(?:^|\.)(?:shutterstock|istockphoto|gettyimages|stock\.adobe|depositphotos|dreamstime|123rf|bigstockphoto|unsplash|pexels|pixabay|freepik)\.(?:com|net)$/;
+const stockPathPattern = /\b(?:adobe ?stock|shutterstock|istock(?:photo)?|getty ?images|depositphotos|dreamstime|123rf|bigstock|unsplash|pexels|pixabay|freepik|stock ?photo)\b|\/(?:11062b|nsplsh)_/;
+
+/** URL evidence that an image is licensed stock rather than the business's own photograph. */
+export function stockImageSignal(url: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const path = decodeURIComponentSafe(parsed.pathname);
+  return stockHostPattern.test(parsed.hostname.toLowerCase())
+    || stockPathPattern.test(path.toLowerCase())
+    || stockPathPattern.test(normalizedSignal(path));
+}
+
+/**
+ * Plain-language selection notes for one candidate photograph: where it was
+ * published, stock evidence and whether its pixels can fill a wide layout.
+ * These describe evidence only; the author judges the pixels.
+ */
+export function sourcePhotoNotes(input: { imageUrl?: string; pagePath?: string; pageTitle?: string; width?: number | null; height?: number | null }) {
+  const notes: string[] = [];
+  const pageSignal = normalizedSignal(`${input.pagePath ?? ""} ${input.pageTitle ?? ""}`);
+  if (input.pagePath === "/") notes.push("published on the source homepage");
+  else if (/\b(?:gallery|portfolio|projects?|remodel|before after|case stud(?:y|ies)|our work)\b/.test(pageSignal)) notes.push("published on a project or gallery page");
+  else if (/\b(?:about|team|company|staff|story)\b/.test(pageSignal)) notes.push("published on an about or team page");
+  else if (/\bservices?\b/.test(pageSignal)) notes.push("published on a service page");
+  if (input.imageUrl && stockImageSignal(input.imageUrl)) notes.push("URL indicates licensed stock photography, not this business's own work");
+  if (input.width && input.width < 1200) notes.push(`${input.width}x${input.height}: too small for a full-width or hero placement`);
+  if (input.width && input.height && input.height > input.width * 1.2) notes.push("portrait orientation");
+  return notes;
 }

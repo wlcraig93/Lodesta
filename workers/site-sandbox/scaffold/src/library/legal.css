@@ -1,0 +1,20 @@
+/* LegalDocument (library/legal.tsx): a comfortable reading measure, clear heading rhythm and scrollable tables. */
+.lib-legal { max-width: 60rem; }
+.lib-legal > :not(.lib-legal-table) { max-width: 40rem; }
+.lib-legal > :first-child { margin-top: 0; }
+.lib-legal :where(h2, h3, h4) { scroll-margin-top: 1.5rem; }
+.lib-legal h2 { margin: 2.75rem 0 0.875rem; font-size: clamp(1.375rem, 2.6vw, 1.75rem); line-height: 1.2; }
+.lib-legal h3 { margin: 2rem 0 0.625rem; font-size: 1.1875rem; line-height: 1.3; }
+.lib-legal h4 { margin: 1.5rem 0 0.5rem; font-size: 1.0625rem; line-height: 1.35; }
+.lib-legal :where(p, li, td) { overflow-wrap: anywhere; }
+.lib-legal p { margin: 0 0 1rem; max-width: none; }
+.lib-legal ul, .lib-legal ol { margin: 0 0 1.25rem; padding-left: 1.375rem; display: grid; gap: 0.5rem; }
+.lib-legal li::marker { color: var(--site-color-accent); }
+.lib-legal a { color: inherit; text-decoration: underline; text-underline-offset: 0.2em; }
+
+.lib-legal-table { margin: 1.5rem 0 2rem; overflow-x: auto; border: 1px solid var(--site-color-border); border-radius: var(--site-radius, 0.5rem); background: var(--site-color-surface); color: var(--site-color-text); }
+.lib-legal-table:focus-visible { outline: 3px solid var(--site-color-accent); outline-offset: 3px; }
+.lib-legal-table table { width: 100%; min-width: 34rem; border-collapse: collapse; font-size: 1rem; line-height: 1.5; }
+.lib-legal-table :where(th, td) { padding: 0.75rem 1rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--site-color-border); }
+.lib-legal-table tbody tr:last-child td { border-bottom: 0; }
+.lib-legal-table th { background: var(--site-color-alt); color: var(--site-color-text); font-weight: 700; }

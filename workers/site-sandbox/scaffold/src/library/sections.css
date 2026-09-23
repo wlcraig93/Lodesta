@@ -1,77 +1,4 @@
-/*
- * Section library styles. Driven by the design-direction tokens in
- * library/themes.css; restyle freely. Every surface sets its own text colors.
- */
-.lib-container { width: min(100% - 2.5rem, var(--site-content-width, 72rem)); margin-inline: auto; }
-.lib-section { padding-block: clamp(3.5rem, 8vw, 6.5rem); }
-.lib-tone-default { background: var(--site-color-background); color: var(--site-color-text); }
-.lib-tone-alt { background: var(--site-color-alt); color: var(--site-color-text); }
-.lib-tone-dark { background: var(--site-color-dark); color: var(--site-color-on-dark); }
-.lib-tone-dark :where(p, li) { color: var(--site-color-on-dark-muted); }
-.lib-tone-accent { background: var(--site-color-accent); color: var(--site-color-on-accent); }
-.lib-tone-accent :where(p, li) { color: var(--site-color-on-accent); }
-
-.lib-kicker {
-  margin: 0 0 1rem;
-  font-size: 0.875rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--site-color-accent);
-}
-.lib-lead { font-size: clamp(1.0625rem, 1.6vw, 1.25rem); line-height: 1.55; color: var(--site-color-muted); max-width: 60ch; }
-.lib-note { font-size: 1rem; color: var(--site-color-muted); margin-top: 1.25rem; }
-
-/* Buttons and links */
-.lib-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }
-.lib-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 3rem;
-  padding: 0.8rem 1.4rem;
-  border: 2px solid transparent;
-  border-radius: var(--site-button-radius, 0.5rem);
-  font-weight: 700;
-  text-decoration: none;
-  line-height: 1.2;
-}
-.lib-button-primary { background: var(--site-color-accent); border-color: var(--site-color-accent); color: var(--site-color-on-accent); }
-.lib-button-primary:hover { background: var(--site-color-accent-strong); border-color: var(--site-color-accent-strong); }
-.lib-button-secondary { background: transparent; border-color: currentColor; color: inherit; }
-.lib-text-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 3rem;
-  font-weight: 700;
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 0.25em;
-}
-
-/* Hero */
-.lib-hero { background: var(--site-color-background); color: var(--site-color-text); }
-.lib-hero h1 { font-size: clamp(2.375rem, 6vw, 4.5rem); line-height: 1.02; margin: 0; max-width: 16ch; }
-.lib-hero .lib-lead { margin-top: 1.25rem; }
-.lib-hero-type { padding-block: clamp(4rem, 12vw, 8rem); background: var(--site-color-alt); color: var(--site-color-text); }
-.lib-hero-type h1 { max-width: 18ch; }
-.lib-hero-split { padding-block: clamp(2.5rem, 7vw, 5.5rem); }
-.lib-hero-grid { display: grid; gap: clamp(2rem, 5vw, 4rem); align-items: center; }
-@media (min-width: 60rem) { .lib-hero-grid { grid-template-columns: 1.05fr 1fr; } }
-.lib-hero-media { margin: 0; }
-.lib-hero-media img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--site-image-radius, 0); }
-.lib-hero-media figcaption { margin-top: 0.625rem; font-size: 0.875rem; color: var(--site-color-muted); }
-.lib-hero-proof { margin-top: 1.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; align-items: center; font-weight: 600; }
-.lib-hero-proof a { color: inherit; }
-
-.lib-hero-photo { position: relative; min-height: clamp(34rem, 82vh, 48rem); display: grid; align-items: end; overflow: hidden; background: var(--site-color-dark); color: var(--site-color-on-dark); }
-.lib-hero-photo-media, .lib-hero-photo-scrim { position: absolute; inset: 0; }
-.lib-hero-photo-media img { width: 100%; height: 100%; object-fit: cover; }
-.lib-hero-photo-scrim { background: linear-gradient(180deg, rgb(0 0 0 / 0.15) 0%, rgb(0 0 0 / 0.55) 55%, rgb(0 0 0 / 0.82) 100%); }
-.lib-hero-photo-copy { position: relative; padding-block: clamp(3rem, 8vw, 5.5rem); color: #ffffff; }
-.lib-hero-photo-copy .lib-kicker { color: #ffffff; }
-.lib-hero-photo-copy .lib-lead { color: #f1f1f1; }
-.lib-hero-photo-copy .lib-button-secondary { color: #ffffff; }
+/* Content sections. Driven by the tokens in library/themes.css; restyle freely. Every surface sets its own text colors. */
 
 /* Proof bar */
 .lib-proofbar { background: var(--site-color-surface); color: var(--site-color-text); border-block: 1px solid var(--site-color-border); }
@@ -80,11 +7,6 @@
 .lib-proofbar-item strong { font-family: var(--site-font-display); font-size: 1.375rem; }
 .lib-proofbar-item span { color: var(--site-color-muted); font-size: 0.9375rem; }
 .lib-proofbar-item a { color: inherit; }
-
-/* Section heading */
-.lib-heading { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 1rem 2rem; margin-bottom: clamp(2rem, 4vw, 3rem); }
-.lib-heading h2 { margin: 0; max-width: 20ch; }
-.lib-heading .lib-lead { margin: 0.875rem 0 0; }
 
 /* Services */
 .lib-services-rows { border-top: 1px solid var(--site-color-border); }
@@ -126,9 +48,9 @@ a.lib-service:hover h3 { text-decoration: underline; text-underline-offset: 0.2e
 .lib-package-highlight { border-color: var(--site-color-accent); box-shadow: inset 0 4px 0 var(--site-color-accent); }
 .lib-package h3 { margin: 0 0 0.5rem; }
 .lib-package-summary { color: var(--site-color-muted); margin: 0 0 1rem; }
-.lib-package ul, .lib-checklist { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.625rem; }
-.lib-package li, .lib-checklist li { position: relative; padding-left: 1.5rem; }
-.lib-package li::before, .lib-checklist li::before {
+.lib-package ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.625rem; }
+.lib-package li { position: relative; padding-left: 1.5rem; }
+.lib-package li::before {
   content: "";
   position: absolute;
   left: 0.125rem;
@@ -150,7 +72,6 @@ a.lib-service:hover h3 { text-decoration: underline; text-underline-offset: 0.2e
 .lib-feature-copy h2, .lib-story-copy h2 { margin-top: 0; }
 .lib-feature-copy p, .lib-story-copy p { color: var(--site-color-muted); }
 .lib-tone-dark .lib-feature-copy p, .lib-tone-dark .lib-story-copy p { color: var(--site-color-on-dark-muted); }
-.lib-checklist { margin-block: 1.25rem; }
 
 /* Projects, before/after */
 .lib-project-grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); }
@@ -225,16 +146,6 @@ a.lib-service:hover h3 { text-decoration: underline; text-underline-offset: 0.2e
 .lib-contact-details { margin-top: 1.5rem; display: grid; gap: 0.75rem; }
 .lib-contact-details :where(p, address) { margin: 0; font-style: normal; }
 .lib-contact-details a { display: inline-flex; align-items: center; min-height: 3rem; color: inherit; font-weight: 700; }
-.lib-contact-form { padding: clamp(1.5rem, 3vw, 2.25rem); background: var(--site-color-surface); color: var(--site-color-text); border: 1px solid var(--site-color-border); border-radius: var(--site-radius, 0.5rem); }
-/* Default <LeadForm id="..." /> markup; restyle freely, keep 16px text and 48px controls. */
-.lib-contact-form form { display: grid; gap: 1rem; }
-.lib-contact-form [data-lodesta-lead-field] { display: grid; gap: 0.375rem; }
-.lib-contact-form label { font-weight: 600; }
-.lib-contact-form :where(input:not([type="radio"], [type="checkbox"]), textarea, select) { width: 100%; min-height: 3rem; padding: 0.75rem; border: 1px solid var(--site-color-muted); border-radius: var(--site-radius, 0.5rem); background: var(--site-color-surface); color: var(--site-color-text); font: inherit; font-size: 1rem; }
-.lib-contact-form textarea { min-height: 7rem; }
-.lib-contact-form button[type="submit"] { justify-self: start; min-height: 3rem; padding: 0.75rem 1.5rem; border: 2px solid var(--site-color-accent); border-radius: var(--site-button-radius, 0.5rem); background: var(--site-color-accent); color: var(--site-color-on-accent); font: inherit; font-weight: 700; cursor: pointer; }
-.lib-contact-form button[type="submit"]:hover { background: var(--site-color-accent-strong); border-color: var(--site-color-accent-strong); }
-.lib-contact-form [data-lodesta-form-status] { margin: 0; }
 
 /* Page header */
 .lib-page-header { padding-block: clamp(3rem, 8vw, 5.5rem); background: var(--site-color-alt); color: var(--site-color-text); }

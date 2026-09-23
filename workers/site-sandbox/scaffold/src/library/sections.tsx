@@ -6,7 +6,8 @@
  * the content it needs: no placeholder proof, projects, steps or quotes.
  *
  *   Hero            first viewport: what, where, primary action, one proof cue
- *                   variant "photo" (full-bleed real photo), "split", "type" (no strong photo)
+ *                   variant "photo" (full-bleed real photo), "split", "type" (no strong photo),
+ *                   "form" (copy beside the managed LeadForm; only with an active form)
  *   ProofBar        short facts: rating, years, service area, licensing (only when supported)
  *   Services        variant "rows" or "cards"; items link to service pages
  *   Packages        named packages/options and what each includes
@@ -21,8 +22,19 @@
  *   Steps           a real, source-backed process
  *   Faq             questions with native disclosure
  *   Contact         the managed form beside contact details
+ *   FormPanel       the managed form on a surface panel (used by Hero "form" and Contact)
  *   PageHeader      inner-page title, lead and action
  *   CtaBand         closing action
+ *
+ * Page templates (library/pages.tsx), composed from these sections:
+ *   ServicePage     header, scope list, work photo, related services, form or call
+ *   ContactPage     form, confirmed phone/email, address, hours, directions
+ * Long documents (library/legal.tsx):
+ *   LegalDocument   privacy, terms, cookie and accessibility text, preserved exactly
+ *
+ * Styles: library/base.css (tones, buttons, form panel), hero.css,
+ * sections.css, pages.css, legal.css. Put this site's own styles in
+ * per-section or per-page files under src/styles/, not one large stylesheet.
  */
 import type { ReactNode } from "react";
 
@@ -37,7 +49,7 @@ function Arrow() {
   );
 }
 
-function ActionLink({ action, kind = "primary" }: { action: Action; kind?: "primary" | "secondary" | "text" }) {
+export function ActionLink({ action, kind = "primary" }: { action: Action; kind?: "primary" | "secondary" | "text" }) {
   return (
     <a
       className={kind === "text" ? "lib-text-link" : `lib-button lib-button-${kind}`}
@@ -49,7 +61,7 @@ function ActionLink({ action, kind = "primary" }: { action: Action; kind?: "prim
   );
 }
 
-function Actions({ primary, secondary }: { primary?: Action; secondary?: Action }) {
+export function Actions({ primary, secondary }: { primary?: Action; secondary?: Action }) {
   if (!primary && !secondary) return null;
   return (
     <div className="lib-actions">
@@ -67,8 +79,8 @@ export function Section({ tone = "default", id, className, children }: { tone?: 
   );
 }
 
-export function Hero({ variant = "split", kicker, title, lead, primary, secondary, media, caption, proof }: {
-  variant?: "photo" | "split" | "type";
+export function Hero({ variant = "split", kicker, title, lead, primary, secondary, media, caption, proof, form, formTitle, formLead }: {
+  variant?: "photo" | "split" | "type" | "form";
   kicker?: ReactNode;
   title: ReactNode;
   lead?: ReactNode;
@@ -77,7 +89,27 @@ export function Hero({ variant = "split", kicker, title, lead, primary, secondar
   media?: ReactNode;
   caption?: ReactNode;
   proof?: ReactNode;
+  /* variant "form": the managed form, e.g. <LeadForm id="..." />, with an optional panel heading and note. */
+  form?: ReactNode;
+  formTitle?: ReactNode;
+  formLead?: ReactNode;
 }) {
+  if (variant === "form" && form) {
+    return (
+      <section className="lib-hero lib-hero-form">
+        <div className="lib-container lib-hero-form-grid">
+          <div className="lib-hero-copy">
+            {kicker ? <p className="lib-kicker">{kicker}</p> : null}
+            <h1>{title}</h1>
+            {lead ? <p className="lib-lead">{lead}</p> : null}
+            <Actions primary={primary} secondary={secondary} />
+            {proof ? <div className="lib-hero-proof">{proof}</div> : null}
+          </div>
+          <FormPanel title={formTitle} lead={formLead} form={form} />
+        </div>
+      </section>
+    );
+  }
   if (variant === "photo" && media) {
     return (
       <section className="lib-hero lib-hero-photo">
@@ -350,7 +382,17 @@ export function Contact({ title, lead, details, form }: { title: ReactNode; lead
         {lead ? <p className="lib-lead">{lead}</p> : null}
         {details ? <div className="lib-contact-details">{details}</div> : null}
       </div>
-      <div className="lib-contact-form">{form}</div>
+      <FormPanel form={form} />
+    </div>
+  );
+}
+
+export function FormPanel({ title, lead, form }: { title?: ReactNode; lead?: ReactNode; form: ReactNode }) {
+  return (
+    <div className="lib-form-panel">
+      {title ? <h2>{title}</h2> : null}
+      {lead ? <p>{lead}</p> : null}
+      {form}
     </div>
   );
 }

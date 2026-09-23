@@ -39,7 +39,7 @@ async function redBounds(sheet: Buffer) {
   const xs = points.map(point => point[0]), ys = points.map(point => point[1]);
   return { width: Math.max(...xs) - Math.min(...xs) + 1, height: Math.max(...ys) - Math.min(...ys) + 1 };
 }
-const sheet = await sheetModule.exports.createSourceMediaContactSheet([{ resourceId: "resource_small", likelyKind: "photo", bytes: small }]);
+const sheet = await sheetModule.exports.createSourceMediaContactSheet([{ cell: 1, resourceId: "resource_small", pageRole: "home", pagePath: "/", bytes: small }]);
 assert.deepEqual(await redBounds(sheet), { width: 40, height: 20 }, "Source contact sheet enlarged a small original.");
 assert(svgLabels.some(label => label.includes("40×20")), "Source sheet did not label decoded original dimensions.");
 svgLabels.length = 0;
@@ -49,7 +49,7 @@ assert.deepEqual(await redBounds(rotatedSheet), { width: 20, height: 60 }, "Mana
 assert(svgLabels.some(label => label.includes("20×60")), "Managed sheet trusted stale asset dimensions instead of oriented decoded dimensions.");
 assert(!svgLabels.some(label => /999×888|DO_NOT_EXPOSE_ALT|private\.invalid|hidden\.jpg/.test(label)), "Neutral sheet exposed stale dimensions or semantic cues.");
 assert.deepEqual([asset.width, asset.height], [999, 888], "Sheet generation mutated retained metadata.");
-const largeSheet = await sheetModule.exports.createSourceMediaContactSheet([{ resourceId: "resource_large", likelyKind: "photo", bytes: large }]);
+const largeSheet = await sheetModule.exports.createSourceMediaContactSheet([{ cell: 1, resourceId: "resource_large", pageRole: "home", pagePath: "/", bytes: large }]);
 assert.deepEqual(await redBounds(largeSheet), { width: 360, height: 180 }, "Large image no longer fits without cropping.");
 assert(svgLabels.some(label => label.includes("2000×1000")), "Sheet labeled thumbnail size instead of original size.");
 

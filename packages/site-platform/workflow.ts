@@ -152,9 +152,13 @@ import {
 } from "@/packages/website-assessment/route-selection";
 import {
   rankSourceAssetCandidates,
+  sourceImageFamily,
   sourcePhotoNotes,
   sourcePhotoCountsByPagePath,
-  sourceResourceIsAdoptableImage
+  sourcePhotoPageRole,
+  sourcePhotoPageRoles,
+  sourceResourceIsAdoptableImage,
+  type SourcePhotoPageRole
 } from "./source-resource-ranking";
 import {
   WorkspaceManagerRuntime,
@@ -2118,7 +2122,7 @@ export class SiteAuthoringWorkflow {
       input.snapshots,
       input.sourcePages,
       authoringProfile.sourceEvidenceLimit,
-      authoringProfile.sourceEvidencePresentation,
+      authoringProfile.sourceEvidenceSheetSize,
       approvedPlan?.routes.flatMap((route) => route.sourcePaths)
     );
     const assetEvidenceReferences = await this.createOperatorAssetEvidence(
@@ -4685,11 +4689,17 @@ export class SiteAuthoringWorkflow {
     return images;
   }
 
+  /**
+   * Numbered contact sheets covering every distinct usable retained photo up
+   * to the profile ceiling. Selection reserves slots for homepage, service and
+   * about photos before portfolio and other pages, and keeps one photo from
+   * each approved-architecture source page first.
+   */
   private async createOperatorVisualEvidence(
     snapshots: SourceSnapshot[],
     pages: SourceSnapshotPage[],
-    limit: 2 | 4 | 8,
-    presentation: "individual" | "contact-sheet" = "individual",
+    limit: number,
+    sheetSize: number,
     preferredSourcePaths: readonly string[] = []
   ): Promise<ManagerSourceEvidenceReference[]> {
     const websiteSourceIds = new Set(snapshots
@@ -4706,84 +4716,148 @@ export class SiteAuthoringWorkflow {
       || (right.resource.rawBytes ?? 0) - (left.resource.rawBytes ?? 0)
       || left.resource.id.localeCompare(right.resource.id)
     );
-    const ordered = [
+    const normalizedPath = (path: string) => path.split("?")[0]?.replace(/\/+$/, "") || "/";
+    const preferredPaths = new Set(preferredSourcePaths.map(normalizedPath));
+    const pageFor = (candidate: (typeof candidates)[number]) => pages.find((page) =>
+      page.id === candidate.sourcePageId && page.sourceSnapshotId === candidate.resource.sourceSnapshotId
+    );
+    const pool = [
       ...candidates.filter((candidate) => candidate.likelyKind === "photo"),
-      ...candidates.filter((candidate) => candidate.likelyKind !== "logo" && candidate.likelyKind !== "photo")
-    ];
-    const selected = [] as typeof candidates;
+      ...candidates.filter((candidate) => candidate.likelyKind === "other")
+    ].map((candidate) => {
+      const page = pageFor(candidate);
+      const path = normalizedPath(page?.path ?? urlPath(candidate.sourcePageUrl) ?? "/");
+      return { candidate, page, path, role: sourcePhotoPageRole(path, page?.title, preferredPaths.has(path)) };
+    });
+    type PoolItem = (typeof pool)[number];
+    const selected: PoolItem[] = [];
+    const selectedSet = new Set<PoolItem>();
+    const families = new Set<string>();
     const contentHashes = new Set<string>();
-    const preferredPaths = new Set(preferredSourcePaths.map((path) => path.split("?")[0]?.replace(/\/+$/, "") || "/"));
-    const seenPreferredPages = new Set<string>();
-    const take = (candidate: (typeof ordered)[number]) => {
-      const identity = candidate.resource.rawContentHash ?? candidate.resource.id;
-      if (contentHashes.has(identity)) return false;
-      contentHashes.add(identity);
-      selected.push(candidate);
-      return selected.length === limit;
+    // Blob reads are bounded by the ceiling plus the candidates rejected on
+    // the way (duplicates, unreadable or tiny images).
+    type DecodedPhoto = { bytes: Buffer; width: number; height: number };
+    const decoding = new Map<PoolItem, Promise<DecodedPhoto | undefined>>();
+    const decoded = new Map<PoolItem, DecodedPhoto>();
+    const decode = (item: PoolItem) => {
+      const existing = decoding.get(item);
+      if (existing) return existing;
+      const pending = (async () => {
+        const storageKey = item.candidate.resource.storageKey;
+        const blob = storageKey ? await this.blobStore.get(storageKey).catch(() => undefined) : undefined;
+        if (!blob || item.candidate.resource.blobContentHash && sha256(blob.bytes) !== item.candidate.resource.blobContentHash) return undefined;
+        const metadata = await sharp(blob.bytes, { limitInputPixels: 80_000_000, animated: false }).metadata().catch(() => undefined);
+        const width = metadata?.autoOrient?.width ?? metadata?.width;
+        const height = metadata?.autoOrient?.height ?? metadata?.height;
+        if (!width || !height || Math.min(width, height) < 100) return undefined;
+        const value = { bytes: blob.bytes, width, height };
+        decoded.set(item, value);
+        return value;
+      })();
+      decoding.set(item, pending);
+      return pending;
     };
-    for (const candidate of ordered) {
-      if (candidate.likelyKind !== "photo") continue;
-      const page = pages.find((item) => item.id === candidate.sourcePageId && item.sourceSnapshotId === candidate.resource.sourceSnapshotId);
-      const path = page?.path.split("?")[0]?.replace(/\/+$/, "") || "";
-      if (!path || path === "/" && !preferredPaths.has("/") || !preferredPaths.has(path) || seenPreferredPages.has(path)) continue;
-      seenPreferredPages.add(path);
-      if (take(candidate)) break;
-    }
-    if (selected.length < limit) {
-      for (const candidate of ordered) {
-        if (take(candidate)) break;
+    // Warm the next few reads of a pass so blob downloads overlap.
+    const warm = (items: readonly PoolItem[], from: number) => {
+      for (const item of items.slice(from, from + 8)) {
+        if (!selectedSet.has(item)) void decode(item);
       }
+    };
+    const take = async (item: PoolItem) => {
+      if (selected.length >= limit || selectedSet.has(item)) return false;
+      const family = sourceImageFamily(item.candidate.resource.finalUrl ?? item.candidate.resource.requestedUrl);
+      const contentHash = item.candidate.resource.rawContentHash ?? item.candidate.resource.id;
+      if (families.has(family) || contentHashes.has(contentHash)) return false;
+      if (!await decode(item)) return false;
+      families.add(family);
+      contentHashes.add(contentHash);
+      selected.push(item);
+      selectedSet.add(item);
+      return true;
+    };
+    const runPass = async (items: readonly PoolItem[], stop: () => boolean, accepted: (item: PoolItem) => void = () => {}) => {
+      for (const [index, item] of items.entries()) {
+        if (selected.length >= limit || stop()) return;
+        warm(items, index);
+        if (await take(item)) accepted(item);
+      }
+    };
+    const photos = pool.filter((item) => item.candidate.likelyKind === "photo");
+    const seenPreferredPages = new Set<string>();
+    const preferredFirst = [...new Map(photos
+      .filter((item) => preferredPaths.has(item.path))
+      .map((item) => [item.path, photos.filter((other) => other.path === item.path)] as const)).values()];
+    for (const pagePhotos of preferredFirst) {
+      await runPass(pagePhotos, () => seenPreferredPages.has(pagePhotos[0]!.path), (item) => seenPreferredPages.add(item.path));
     }
+    const reservedPerRole: Record<SourcePhotoPageRole, number> = {
+      home: Math.ceil(limit * 0.25),
+      service: Math.ceil(limit * 0.3),
+      about: Math.ceil(limit * 0.15),
+      portfolio: limit,
+      other: limit
+    };
+    for (const role of sourcePhotoPageRoles) {
+      let count = selected.filter((item) => item.role === role).length;
+      await runPass(photos.filter((item) => item.role === role), () => count >= reservedPerRole[role], () => { count += 1; });
+    }
+    await runPass(pool, () => false);
+    selected.sort((left, right) =>
+      sourcePhotoPageRoles.indexOf(left.role) - sourcePhotoPageRoles.indexOf(right.role)
+      || right.candidate.relevanceScore - left.candidate.relevanceScore
+      || left.candidate.resource.id.localeCompare(right.candidate.resource.id)
+    );
     const references: ManagerSourceEvidenceReference[] = [];
-    const sheetResources: Array<{ resourceId: string; likelyKind: "photo" | "logo" | "icon" | "other"; bytes: Buffer }> = [];
-    let totalBytes = 0;
-    for (const candidate of selected) {
-      const sourcePage = pages.find((page) =>
-        page.id === candidate.sourcePageId
-        && page.sourceSnapshotId === candidate.resource.sourceSnapshotId
-      );
-      const storageKey = candidate.resource.storageKey;
-      if (!storageKey) continue;
-      const blob = await this.blobStore.get(storageKey).catch(() => undefined);
-      if (!blob || candidate.resource.blobContentHash && sha256(blob.bytes) !== candidate.resource.blobContentHash) continue;
-      const evidenceBytes = blob.bytes;
-      const metadata = await sharp(evidenceBytes, { limitInputPixels: 80_000_000, animated: false }).metadata().catch(() => undefined);
-      const preview = await sharp(evidenceBytes, { limitInputPixels: 80_000_000, animated: false })
-        .rotate()
-        .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
-        .webp({ quality: 80, effort: 4 })
-        .toBuffer()
-        .catch(() => undefined);
-      if (!preview || totalBytes + preview.length > 2_500_000) continue;
-      totalBytes += preview.length;
-      sheetResources.push({ resourceId: candidate.resource.id, likelyKind: candidate.likelyKind, bytes: evidenceBytes });
-      references.push({
-        resourceId: candidate.resource.id,
-        sourceId: candidate.resource.sourceSnapshotId,
-        sourcePageId: candidate.sourcePageId,
-        sourcePageUrl: candidate.sourcePageUrl,
-        ...(sourcePage?.title ? { sourcePageTitle: sourcePage.title } : {}),
-        width: metadata?.width ?? null,
-        height: metadata?.height ?? null,
-        proofScope: imageProofScope(sourcePage?.path ?? candidate.sourcePageUrl, sourcePage?.title),
-        photoNotes: sourcePhotoNotes({
-          imageUrl: candidate.resource.finalUrl ?? candidate.resource.requestedUrl,
-          pagePath: sourcePage?.path,
-          pageTitle: sourcePage?.title,
-          width: metadata?.width,
-          height: metadata?.height
-        }),
-        mimeType: "image/webp",
-        contentHash: sha256(preview),
-        dataUrl: `data:image/webp;base64,${preview.toString("base64")}`
+    const sheetCount = Math.ceil(selected.length / sheetSize);
+    let totalSheetBytes = 0;
+    for (let sheetIndex = 0; sheetIndex < sheetCount; sheetIndex += 1) {
+      const items = selected.slice(sheetIndex * sheetSize, (sheetIndex + 1) * sheetSize);
+      const cells = items.map((item, index) => {
+        const pixels = decoded.get(item)!;
+        return {
+          item,
+          pixels,
+          cell: sheetIndex * sheetSize + index + 1,
+          notes: sourcePhotoNotes({
+            imageUrl: item.candidate.resource.finalUrl ?? item.candidate.resource.requestedUrl,
+            pagePath: item.page?.path,
+            pageTitle: item.page?.title,
+            width: pixels.width,
+            height: pixels.height
+          })
+        };
       });
-    }
-    if (presentation === "contact-sheet" && references.length) {
-      const sheet = await createSourceMediaContactSheet(sheetResources);
-      if (!sheet) return [];
+      const sheet = await createSourceMediaContactSheet(cells.map(({ item, pixels, cell, notes }) => ({
+        cell,
+        resourceId: item.candidate.resource.id,
+        pageRole: item.role,
+        pagePath: item.path,
+        notes,
+        bytes: pixels.bytes
+      })), { number: sheetIndex + 1, count: sheetCount, totalPhotos: selected.length }).catch(() => undefined);
+      if (!sheet || totalSheetBytes + sheet.length > 6_000_000) break;
+      totalSheetBytes += sheet.length;
       const contentHash = sha256(sheet);
       const dataUrl = `data:image/webp;base64,${sheet.toString("base64")}`;
-      return references.map((reference) => ({ ...reference, mimeType: "image/webp" as const, contentHash, dataUrl }));
+      for (const { item, pixels, cell, notes } of cells) {
+        references.push({
+          resourceId: item.candidate.resource.id,
+          sourceId: item.candidate.resource.sourceSnapshotId,
+          sourcePageId: item.candidate.sourcePageId,
+          sourcePageUrl: item.candidate.sourcePageUrl,
+          ...(item.page?.title ? { sourcePageTitle: item.page.title } : {}),
+          pageRole: item.role,
+          sheet: sheetIndex + 1,
+          cell,
+          width: pixels.width,
+          height: pixels.height,
+          proofScope: imageProofScope(item.page?.path ?? item.candidate.sourcePageUrl, item.page?.title),
+          photoNotes: notes,
+          mimeType: "image/webp",
+          contentHash,
+          dataUrl
+        });
+      }
     }
     return references;
   }

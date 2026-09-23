@@ -11,6 +11,12 @@ export type ManagerSourceEvidenceReference = {
   sourcePageId: string;
   sourcePageUrl: string;
   sourcePageTitle?: string;
+  /** Role of the page the photo was published on. */
+  pageRole?: "home" | "service" | "about" | "portfolio" | "other";
+  /** 1-based contact sheet carrying this photo. */
+  sheet?: number;
+  /** 1-based photo number printed on the contact sheet. */
+  cell?: number;
   width?: number | null;
   height?: number | null;
   proofScope?: "documented-on-this-page" | "site-illustration";
@@ -49,8 +55,9 @@ export type ManagerAuthoringProfile = {
   architectureEvidenceMode: "indexed-pull-preview-readable";
   architectureBrowserCoverage: "all-routes";
   sourceEvidenceReferences?: readonly ManagerSourceEvidenceReference[];
-  sourceEvidenceLimit: 8;
-  sourceEvidencePresentation: "contact-sheet";
+  sourceEvidenceLimit: 60;
+  sourceEvidenceSheetSize: 12;
+  sourceEvidencePresentation: "numbered-contact-sheets";
   assetEvidenceLimit: 2 | 8;
   assetEvidencePresentation: "contact-sheet";
   assetEvidenceReferences?: readonly ManagerAssetEvidenceReference[];
@@ -74,8 +81,9 @@ export function canonicalAuthoringProfile(kind: ManagerTaskKind): ManagerAuthori
     architectureMode: "commercial-core-message-target",
     architectureEvidenceMode: "indexed-pull-preview-readable",
     architectureBrowserCoverage: "all-routes",
-    sourceEvidenceLimit: 8,
-    sourceEvidencePresentation: "contact-sheet",
+    sourceEvidenceLimit: 60,
+    sourceEvidenceSheetSize: 12,
+    sourceEvidencePresentation: "numbered-contact-sheets",
     assetEvidenceLimit: kind === "initial_build" ? 8 : 2,
     assetEvidencePresentation: "contact-sheet",
     sourceInventoryMode: "representative-customer-index",
@@ -101,6 +109,7 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
     taskSkillIdentity: profile.taskSkill.identity,
     systemPrompt: profile.systemPrompt,
     sourceEvidenceLimit: profile.sourceEvidenceLimit,
+    sourceEvidenceSheetSize: profile.sourceEvidenceSheetSize,
     sourceEvidencePresentation: profile.sourceEvidencePresentation,
     assetEvidenceLimit: profile.assetEvidenceLimit,
     assetEvidencePresentation: profile.assetEvidencePresentation,
@@ -117,6 +126,9 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
       sourcePageId: reference.sourcePageId,
       sourcePageUrl: reference.sourcePageUrl,
       sourcePageTitle: reference.sourcePageTitle,
+      pageRole: reference.pageRole,
+      sheet: reference.sheet,
+      cell: reference.cell,
       width: reference.width,
       height: reference.height,
       proofScope: reference.proofScope,
@@ -145,32 +157,40 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
 export function managerReferenceContext(profile: ManagerAuthoringProfile) {
   const sourceEvidence = profile.sourceEvidenceReferences ?? [];
   const assetEvidence = profile.assetEvidenceReferences ?? [];
+  // One image per distinct contact sheet, in sheet order.
+  const sheets = [...new Map(sourceEvidence.map((reference) => [reference.contentHash, reference])).values()];
   const evidenceContext = sourceEvidence.length ? [
     {
       type: "input_text" as const,
       text: JSON.stringify({
         kind: "retained-first-party-visual-evidence",
-        instruction: "These paired pixels come from retained first-party website media. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. width and height are intrinsic pixels. proofScope documented-on-this-page is the only supplied scope that can support a completed-work caption for that page's named subject. proofScope site-illustration describes a visible subject and is not proof of this business's completed work. Do not infer people, work, credentials, locations, or meaning that the pixels and supplied scope do not support. photoNotes summarize where each image was published, stock evidence and whether it is large enough for a wide placement.",
-        references: sourceEvidence.map(({ resourceId, sourceId, sourcePageId, sourcePageUrl, sourcePageTitle, width, height, proofScope, photoNotes, mimeType, contentHash }) => ({
+        instruction: "This is the photo inventory of the business's retained website: every distinct usable photo up to the sheet ceiling, shown on the numbered contact sheets that follow (cell is the # printed on the sheet). Any listed photo can be adopted now with adopt_source_asset using its sourceId, resourceId and sourcePageId; list_source_resources with role=image lists lower-ranked retained images beyond these sheets. pageRole and sourcePageUrl say where each photo was published. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. width and height are intrinsic pixels. proofScope documented-on-this-page is the only supplied scope that can support a completed-work caption for that page's named subject. proofScope site-illustration describes a visible subject and is not proof of this business's completed work. Do not infer people, work, credentials, locations, or meaning that the pixels and supplied scope do not support. photoNotes summarize where each image was published, stock evidence and whether it is large enough for a wide placement.",
+        sheets: sheets.map((reference, index) => ({
+          sheet: reference.sheet ?? index + 1,
+          mimeType: reference.mimeType,
+          contentHash: reference.contentHash
+        })),
+        references: sourceEvidence.map(({ resourceId, sourceId, sourcePageId, sourcePageUrl, sourcePageTitle, pageRole, sheet, cell, width, height, proofScope, photoNotes }) => ({
+          ...(cell ? { cell } : {}),
+          ...(sheet ? { sheet } : {}),
           resourceId,
           sourceId,
           sourcePageId,
+          ...(pageRole ? { pageRole } : {}),
           sourcePageUrl,
           sourcePageTitle,
           width,
           height,
           proofScope,
-          ...(photoNotes?.length ? { photoNotes } : {}),
-          mimeType,
-          contentHash
+          ...(photoNotes?.length ? { photoNotes } : {})
         }))
       })
     },
-    {
+    ...sheets.map((reference) => ({
       type: "input_image" as const,
-      image_url: sourceEvidence[0]!.dataUrl,
+      image_url: reference.dataUrl,
       detail: "high" as const
-    }
+    }))
   ] : [];
   const assetContext = assetEvidence.length ? [
     {

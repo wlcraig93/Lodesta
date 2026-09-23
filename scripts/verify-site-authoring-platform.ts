@@ -18,7 +18,8 @@ import {
   prepareSiteArtifact,
   representativeRoutePaths,
   sanitizeAgentCss,
-  sanitizeAgentHtml
+  sanitizeAgentHtml,
+  slugTokenMismatch
 } from "../packages/site-verification";
 import { expectedSiteSandboxManifest } from "../packages/site-contracts/platform-manifest";
 import {
@@ -1955,6 +1956,17 @@ assert.deepEqual(
   },
   "A checkpointed sandbox cleanup race does not offer the owner a fresh explicit retry."
 );
+
+// A real slug word used only in inflected forms is not a misspelling of a
+// one-letter neighbor on the same page (Good Morning, September 23 2026).
+assert.equal(slugTokenMismatch(
+  "/articles/protect-trees-from-construction",
+  "Protecting Trees During Construction. Root protection zones keep a construction project from damaging oaks."
+), undefined, "An inflected slug word was reported as a misspelling of a neighboring word.");
+assert.deepEqual(slugTokenMismatch(
+  "/services/tree-trimming-and-tree-prunning",
+  "Tree trimming and pruning for oaks and elms."
+), { token: "prunning", word: "pruning" }, "A misspelled route token was not reported.");
 
 process.stdout.write(`${JSON.stringify({
   ok: true,

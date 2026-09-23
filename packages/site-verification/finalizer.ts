@@ -374,11 +374,14 @@ const textBoundaryTags = new Set([
 ]);
 const nonBodyTextTags = new Set(["script", "style", "svg", "noscript"]);
 
-function slugTokenMismatch(path: string, corpus: string) {
+export function slugTokenMismatch(path: string, corpus: string) {
   const words = corpus.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 6);
   const segment = path.split("/").filter(Boolean).at(-1) ?? "";
   for (const token of segment.split("-")) {
-    if (token.length < 6 || words.includes(token) || /\d/.test(token)) continue;
+    if (token.length < 6 || /\d/.test(token)) continue;
+    // An inflected form on the page ("protecting", "protection") shows the
+    // token is a real word in use, not a misspelling of a neighbor ("project").
+    if (words.some((word) => word.startsWith(token))) continue;
     const word = words.find((candidate) => oneCharacterApart(token, candidate));
     if (word) return { token, word };
   }

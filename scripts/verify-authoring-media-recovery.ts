@@ -650,6 +650,61 @@ try {
   assert.equal(reapedCleanupSession.publicBuildInputId, cleanupRun.publicBuildInputId);
   assert.equal((await repository.getSite(input.siteId))!.currentWorkspaceRevisionId, retainedParent.id,
     "Reaper cleanup changed the site's retained parent.");
+  // Railway can end a sandbox's session during bootstrap ("tcp-proxy files
+  // WebSocket closed (code 1000: session ended)"). Retrying on the same dead
+  // sandbox fails again; bootstrap must move to a freshly provisioned sandbox.
+  const droppedSession = siteAgentSessionSchema.parse({
+    ...session,
+    id: "session_sandbox_session_ended",
+    sandboxId: undefined,
+    publicBuildInputId: input.id,
+    currentWorkspaceRevisionId: undefined,
+    sandboxDestroyAttempts: 0
+  });
+  const droppedRun = fixtureRun({
+    id: "run_sandbox_session_ended",
+    sessionId: droppedSession.id,
+    siteId: input.siteId,
+    publicBuildInputId: input.id,
+    owner,
+    deploymentId: deployment.id
+  });
+  await repository.saveAgentSession(droppedSession);
+  await repository.saveAgentRun(droppedRun);
+  const droppedBase = createSandbox({ store, initialFiles, label: "session-ended" });
+  const droppedBootstraps: string[] = [];
+  const droppedDestroys: string[] = [];
+  const provisioned = ["sandbox_session_ended_a", "sandbox_session_ended_b"];
+  const droppedSandbox = {
+    ...droppedBase,
+    provision: async () => provisioned.shift()!,
+    bootstrap: async (sandboxId: string, buildInput: SitePublicBuildInput) => {
+      droppedBootstraps.push(sandboxId);
+      if (sandboxId === "sandbox_session_ended_a") {
+        throw new Error("tcp-proxy files WebSocket closed (code 1000: session ended)");
+      }
+      return droppedBase.bootstrap(sandboxId, buildInput);
+    },
+    destroy: async (sandboxId: string) => {
+      droppedDestroys.push(sandboxId);
+      return { ok: true as const };
+    }
+  };
+  const droppedWorkflow = new SiteAuthoringWorkflow(
+    repository,
+    store,
+    droppedSandbox as never,
+    { run: async () => { throw new Error("fixture_manager_reached"); } } as never,
+    undefined,
+    undefined
+  );
+  const droppedResult = await droppedWorkflow.executeRun(droppedRun.id);
+  assert.deepEqual(droppedBootstraps, ["sandbox_session_ended_a", "sandbox_session_ended_a", "sandbox_session_ended_b"],
+    "A sandbox whose session ended was not replaced after one same-sandbox retry.");
+  assert(droppedDestroys.includes("sandbox_session_ended_a"), "The dead sandbox was not destroyed before replacement.");
+  assert.doesNotMatch(droppedResult.failureReason ?? "", /session ended|WebSocket/i,
+    "The ended sandbox session still failed the run after replacement.");
+
   console.log("Interrupted media recovery preserves source references and form authority; cleanup-pending edits retain their exact parent/input and defer teardown to the reaper; stale scope, missing/corrupt bytes, and storage failure fail closed before unsafe resume.");
 } finally {
   await rm(directory, { recursive: true, force: true });

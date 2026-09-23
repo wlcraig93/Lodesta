@@ -4416,10 +4416,21 @@ export class SiteAuthoringWorkflow {
     try {
       try {
         revision = await bootstrapAndRestore(starting);
-      } catch (error) {
+      } catch (firstError) {
+        let error = firstError;
+        let recovered: string | undefined;
         if (sandboxConnectionFailure(error)) {
-          revision = await bootstrapAndRestore(starting);
-        } else if (isSandboxMachineFailure(error)) {
+          try {
+            recovered = await bootstrapAndRestore(starting);
+          } catch (retryError) {
+            // A second transport failure means the sandbox itself is gone (for
+            // example Railway ending its session); a fresh one is the only fix.
+            error = retryError;
+          }
+        }
+        if (recovered !== undefined) {
+          revision = recovered;
+        } else if (isSandboxMachineFailure(error) || isSandboxTransportFailure(error)) {
           const destroyed = await this.destroySessionSandbox(starting, {
             reason: `sandbox_start_recovery:${sandboxRecoveryReason(error)}`,
             currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
@@ -4444,11 +4455,14 @@ export class SiteAuthoringWorkflow {
         }
       }
     } catch (error) {
-      if (!isSandboxCleanupPendingError(error) && !sandboxConnectionFailure(error)) {
-        await this.destroySessionSandbox(starting, {
+      if (!isSandboxCleanupPendingError(error)) {
+        const cleanup = this.destroySessionSandbox(starting, {
           reason: "sandbox_start_failed",
           currentWorkspaceRevisionId: starting.currentWorkspaceRevisionId
         });
+        // After a transport failure the sandbox may already be gone; cleanup
+        // is best effort and the expired-session reaper retries it.
+        await (sandboxConnectionFailure(error) ? cleanup.catch(() => undefined) : cleanup);
       }
       if (isSiteAuthoringTerminalError(error)) throw error;
       const retryable = isSandboxInfrastructureFailure(error) || isRailwayAuthorizationFailure(error);

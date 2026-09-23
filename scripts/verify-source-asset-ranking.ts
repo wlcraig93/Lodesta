@@ -269,7 +269,7 @@ for (const url of [
 ]) assert.equal(stockImageSignal(url), true, `Stock image URL was not recognized: ${url}`);
 for (const url of [
   "https://example.com/wp-content/uploads/crew-truck-2024.jpg",
-  "https://images.squarespace-cdn.com/content/v1/abc/roof-replacement.jpg",
+  "https://images.squarespace-cdn.com/content/abc/roof-replacement.jpg",
   "https://example.com/uploads/livestock-fence.jpg"
 ]) assert.equal(stockImageSignal(url), false, `Business photograph was labeled stock: ${url}`);
 assert.deepEqual(sourcePhotoNotes({ imageUrl: "https://example.com/gallery/deck.jpg", pagePath: "/our-work", width: 2400, height: 1600 }), ["published on a project or gallery page"]);

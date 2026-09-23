@@ -1957,6 +1957,15 @@ assert.deepEqual(
   "A checkpointed sandbox cleanup race does not offer the owner a fresh explicit retry."
 );
 
+// A rejected contact link names the confirmed channels, or says none exists.
+{
+  const linkInput = { route: "/", assets: [], declaredRoutes: new Set(["/"]), allowedFormIds: new Set<string>(), allowedExternalHrefs: new Set<string>(), allowedEmailAddresses: new Set(["owner@example.com"]) };
+  const noPhone = sanitizeAgentHtml({ ...linkInput, bodyHtml: '<main><a href="tel:+19199800981">Call</a></main>', allowedPhoneNumbers: new Set<string>() });
+  assert.match(noPhone.findings.find((item) => item.id === "fact.link_mismatch")?.message ?? "", /No phone number is confirmed for this business/);
+  const wrongPhone = sanitizeAgentHtml({ ...linkInput, bodyHtml: '<main><a href="tel:+19199800981">Call</a></main>', allowedPhoneNumbers: new Set(["5125550142"]) });
+  assert.match(wrongPhone.findings.find((item) => item.id === "fact.link_mismatch")?.message ?? "", /Confirmed phone numbers: tel:\+15125550142/);
+}
+
 // A real slug word used only in inflected forms is not a misspelling of a
 // one-letter neighbor on the same page (Good Morning, September 23 2026).
 assert.equal(slugTokenMismatch(

@@ -244,7 +244,7 @@ for (const contract of [
   /baked-in lettering.*loading="eager".*fetchPriority="high"/i,
   /Share the header, footer, tokens and sections.*sibling pages of the same kind should look consistent/i,
   /best business photograph a large, well-cropped role in the first viewport/i,
-  /photoNotes.*Licensed stock.*never as the hero/i,
+  /photoNotes.*stock or visibly generic.*never presented as this business.s own work/i,
   /Recompose for phone and tablet.*Give a form its purpose and essential safety context first/i,
   /geographic qualifiers.*emergency availability from ordinary hours/i,
   /blank initial build.*NavigationDisclosure behavior="modal".*separate semantic desktop nav/i,

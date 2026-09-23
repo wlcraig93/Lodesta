@@ -376,7 +376,7 @@ function sanitizeLink(element: Element, input: SanitizeArtifactInput, findings: 
   const href = element.attribs.href ?? "";
   const disposition = hrefDisposition(href, input);
   if (disposition === "factual_mismatch") {
-    findings.push(finding("fact.link_mismatch", "claim", `Link is not present in the retained public business context: ${href || "missing href"}.`, input.route));
+    findings.push(finding("fact.link_mismatch", "claim", linkMismatchMessage(href, input), input.route));
     element.attribs.href = "#";
     return;
   }
@@ -518,4 +518,21 @@ function dedupeFindings(findings: ArtifactGateFinding[]) {
     seen.add(key);
     return true;
   });
+}
+
+/** Tell the author which contact channels are confirmed, so it can correct or drop the link instead of searching for one. */
+function linkMismatchMessage(href: string, input: SanitizeArtifactInput) {
+  const base = `Link is not present in the retained public business context: ${href || "missing href"}.`;
+  const lower = href.trim().toLowerCase();
+  if (lower.startsWith("tel:")) {
+    return input.allowedPhoneNumbers.size
+      ? `${base} Confirmed phone numbers: ${[...input.allowedPhoneNumbers].map((digits) => `tel:+1${digits}`).join(", ")}. Link one of these or remove the link.`
+      : `${base} No phone number is confirmed for this business, so the site cannot show or link one. Use the lead form or a confirmed email instead.`;
+  }
+  if (lower.startsWith("mailto:")) {
+    return input.allowedEmailAddresses.size
+      ? `${base} Confirmed email addresses: ${[...input.allowedEmailAddresses].join(", ")}. Link one of these exactly or remove the link.`
+      : `${base} No email address is confirmed for this business, so the site cannot show or link one. Use the lead form or a confirmed phone number instead.`;
+  }
+  return `${base} External destinations must be supplied business links; remove this link or keep its text without a link.`;
 }

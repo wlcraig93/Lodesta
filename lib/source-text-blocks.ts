@@ -39,6 +39,27 @@ const maxBlocksPerPage = 600;
 const maxBlockCharacters = 4_000;
 
 export function extractSourceTextBlocks(html: string, sourceUrl: string): SourceTextBlock[] {
+  return extractSourceTextBlockElements(html, sourceUrl).map(({ block }) => block);
+}
+
+/**
+ * Ids of the blocks that sit inside an element matching `container`, e.g. an
+ * embedded third-party widget, computed over the same traversal as the blocks.
+ */
+export function sourceTextBlockIdsWithin(
+  html: string,
+  sourceUrl: string,
+  container: (element: Element) => boolean
+) {
+  return extractSourceTextBlockElements(html, sourceUrl).flatMap(({ element, block }) => {
+    for (let current: Element | undefined = element; current; current = current.parent?.type === "tag" ? current.parent : undefined) {
+      if (container(current)) return [block.id];
+    }
+    return [];
+  });
+}
+
+function extractSourceTextBlockElements(html: string, sourceUrl: string): Array<{ element: Element; block: SourceTextBlock }> {
   const sourcePageHash = hash(html);
   const document = parseDocument(html, { decodeEntities: true });
   const candidates: Element[] = [];
@@ -57,12 +78,15 @@ export function extractSourceTextBlocks(html: string, sourceUrl: string): Source
     .map(({ element, displayText }, order) => {
       const containerId = elementPath(element);
       return {
-        id: `source_block_${hash(`${sourceUrl}\n${containerId}\n${displayText}`)}`,
-        sourceUrl,
-        sourcePageHash,
-        containerId,
-        order,
-        displayText
+        element,
+        block: {
+          id: `source_block_${hash(`${sourceUrl}\n${containerId}\n${displayText}`)}`,
+          sourceUrl,
+          sourcePageHash,
+          containerId,
+          order,
+          displayText
+        }
       };
     });
 }

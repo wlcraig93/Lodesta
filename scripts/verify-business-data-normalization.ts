@@ -113,21 +113,37 @@ const proofBlock = (id: string, sourceUrl: string, displayText: string) => ({
   order: 0,
   displayText
 });
+const warrantyPage = (path: string, blocks: ReturnType<typeof proofBlock>[]) => ({
+  url: `${proofSourceUrl.replace(/\/$/, "")}${path}`,
+  purposeTags: [] as never[],
+  linkReferences: [],
+  sourceTextBlocks: blocks
+});
 const observedWarranties = selectObservedFirstPartyWarrantyBlocks([
-  {
-    url: `${proofSourceUrl}faq`,
-    sourceTextBlocks: [
-      proofBlock("kind", `${proofSourceUrl}faq`, "We guarantee to re-service your home or business free of charge, if pest problems return between our scheduled visits."),
-      proofBlock("surge", `${proofSourceUrl}faq`, "If pests return within the coverage period of your service, we'll come back and re-treat your home at no additional cost."),
-      proofBlock("generic", `${proofSourceUrl}faq`, "We guarantee friendly, thoughtful communication from the first conversation through every scheduled service visit.")
-    ]
-  },
+  warrantyPage("/faq", [
+    proofBlock("kind", `${proofSourceUrl}faq`, "We guarantee to re-service your home or business free of charge, if pest problems return between our scheduled visits."),
+    proofBlock("surge", `${proofSourceUrl}faq`, "If pests return within the coverage period of your service, we'll come back and re-treat your home at no additional cost."),
+    proofBlock("generic", `${proofSourceUrl}faq`, "We guarantee friendly, thoughtful communication from the first conversation through every scheduled service visit."),
+    proofBlock("promo", `${proofSourceUrl}faq`, "Limited time: every new roof we install this spring comes with a lifetime workmanship warranty.")
+  ]),
+  warrantyPage("/blog/2019-news", [
+    proofBlock("blog_only", `${proofSourceUrl}blog/2019-news`, "All of our installations are backed by a transferable ten year labor warranty.")
+  ]),
+  warrantyPage("/services/roofing", [
+    proofBlock("customer_quote", `${proofSourceUrl}services/roofing`, "I love that my roof came with a warranty and the crew guaranteed their work to me.")
+  ]),
   {
     url: "https://third-party.example/reviews",
+    purposeTags: [] as never[],
+    linkReferences: [],
     sourceTextBlocks: [proofBlock("external", "https://third-party.example/reviews", "We guarantee to re-service your home free of charge if pests return between scheduled visits.")]
   }
 ], proofSourceUrl);
-assert.deepEqual(observedWarranties.map((block) => block.id), ["kind", "surge"], "Only exact first-party return-service promises should become observed warranty candidates.");
+assert.deepEqual(observedWarranties.map(({ block }) => block.id), ["kind", "surge", "generic", "promo", "blog_only"],
+  "First-party guarantee and warranty statements in the business's voice must be captured; customer quotes and other sites must not.");
+const currentById = Object.fromEntries(observedWarranties.map(({ block, current }) => [block.id, current]));
+assert.deepEqual(currentById, { kind: true, surge: true, generic: true, promo: false, blog_only: false },
+  "Only undated, non-promotional guarantee text on a current core page may publish as confirmed proof.");
 
 console.log(JSON.stringify({
   ok: true,

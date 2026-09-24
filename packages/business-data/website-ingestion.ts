@@ -22,6 +22,12 @@ import {
 export { isCustomerPortalLink } from "@/packages/site-contracts";
 import { WebsiteCrawlError } from "./crawl-errors";
 import { canonicalWeeklySchedule } from "./weekly-schedule";
+import {
+  firstPartySupportFromCrawlPages,
+  isDatedOrPromotionalText,
+  sensitiveFirstPartyTopics,
+  supportedOnCurrentCorePage
+} from "./first-party-support";
 import { sha256, stableJson } from "./hash";
 import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
 import { buildWebsiteSourceMirror, websiteMirrorManifestHash, type RetainedSourceResource } from "./source-mirror";
@@ -1213,14 +1219,24 @@ export function observedProof(
     };
   });
 
-  const warranties = selectObservedFirstPartyWarrantyBlocks(pages, crawl.url).map((block) => {
+  // A verbatim guarantee/warranty the business states on a current core page
+  // is confirmed first-party proof. Dated or promotional wording, or text
+  // found only on blog/archive pages, stays observed for owner confirmation.
+  const warranties = selectObservedFirstPartyWarrantyBlocks(pages, crawl.url).map(({ block, current }) => {
     const suffix = sha256(`${block.sourceUrl}\n${block.displayText}`).slice(7, 19);
     const factId = `fact_proof_warranty_${suffix}`;
-    observedFact(factId, "Observed service guarantee", block.displayText, { sourceUrl: block.sourceUrl, sourceBlockId: block.id }, 0.88, false);
+    observedFact(
+      factId,
+      current ? "Observed service guarantee" : "Observed service guarantee (owner confirmation needed: dated, promotional, or not on a current core page)",
+      block.displayText,
+      { sourceUrl: block.sourceUrl, sourceBlockId: block.id },
+      0.88,
+      current
+    );
     return {
       id: `proof_warranty_${suffix}`,
       kind: "warranty" as const,
-      status: "observed" as const,
+      status: current ? "confirmed" as const : "observed" as const,
       publicText: block.displayText,
       verbatim: true,
       sourceFactIds: [factId]
@@ -1474,13 +1490,17 @@ export function selectObservedFirstPartyCredentials(
 const freeReturnServicePattern = /\b(?:re[-\s]?(?:treat|service)|come back|we(?:'|’)ll return)\b.{0,180}\b(?:free of charge|at no (?:additional|extra) cost|at no additional charge|for free)\b/i;
 const guaranteedReturnServicePattern = /\bguarantee\b.{0,220}\b(?:re[-\s]?(?:treat|service)|come back|return)\b/i;
 
+/**
+ * Verbatim guarantee and warranty statements in the business's own voice.
+ * `current` is true only when the exact text appears on a current core page
+ * (home, service, about, contact) and is neither dated nor promotional.
+ */
 export function selectObservedFirstPartyWarrantyBlocks(
-  pages: Array<Pick<CrawlPageSummary, "url" | "sourceTextBlocks">>,
+  pages: Array<Pick<CrawlPageSummary, "url" | "title" | "purposeTags" | "sourceTextBlocks" | "linkReferences">>,
   sourceUrl: string
-): SourceTextBlock[] {
+): Array<{ block: SourceTextBlock; current: boolean }> {
   const sourceOrigin = new URL(sourceUrl).origin;
-  const seen = new Set<string>();
-  return pages
+  const eligible = pages
     .filter((page) => sourceFactPageEligible(page, sourceUrl))
     .filter((page) => {
       try {
@@ -1488,18 +1508,35 @@ export function selectObservedFirstPartyWarrantyBlocks(
       } catch {
         return false;
       }
-    })
+    });
+  const support = firstPartySupportFromCrawlPages(eligible);
+  const seen = new Set<string>();
+  return eligible
     .flatMap((page) => page.sourceTextBlocks)
     .filter((block) => /^(?:blockquote|dd|div|figcaption|li|p)(?:[#.:]|$)/.test(block.containerId))
     .filter((block) => canonicalWordCount(block.displayText) >= 8 && block.displayText.length >= 40 && block.displayText.length <= 600)
-    .filter((block) => freeReturnServicePattern.test(block.displayText) || guaranteedReturnServicePattern.test(block.displayText))
+    .filter((block) => freeReturnServicePattern.test(block.displayText)
+      || guaranteedReturnServicePattern.test(block.displayText)
+      || businessGuaranteeStatement(block.displayText))
     .filter((block) => {
       const identity = block.displayText.normalize("NFKC").toLocaleLowerCase("en-US").replace(/\s+/g, " ").trim();
       if (seen.has(identity)) return false;
       seen.add(identity);
       return true;
     })
-    .slice(0, 4);
+    .slice(0, 6)
+    .map((block) => ({
+      block,
+      current: supportedOnCurrentCorePage(support.text(block.displayText)) && !isDatedOrPromotionalText(block.displayText)
+    }));
+}
+
+/** A guarantee or warranty stated in the business's own voice, not a customer's quotation. */
+function businessGuaranteeStatement(text: string) {
+  return sensitiveFirstPartyTopics(text).includes("guarantee")
+    && /\b(?:we|our|all|every|each|backed by|comes? with|includes?|carr(?:y|ies))\b/i.test(text)
+    && !/\b(?:I|I'm|I’m|my|me)\b/.test(text)
+    && !/[“"][^”"]{20,}[”"]/.test(text);
 }
 
 export function selectSourceLinksForGeneration(sourceUrl: string, crawl: CrawlAssessment) {

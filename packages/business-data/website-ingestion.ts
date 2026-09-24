@@ -1581,7 +1581,7 @@ function canonicalClockTime(value: string, pairedClosing?: string): string | und
   if (!match) return undefined;
   let hour = Number(match[1]);
   const minute = Number(match[2] ?? "0");
-  let meridiem = match[3]?.replace(/\./g, "");
+  let meridiem: string | undefined = match[3]?.replace(/\./g, "");
   if (!meridiem && pairedClosing) {
     const closing = pairedClosing.trim().match(/(a\.?m\.?|p\.?m\.?)$/)?.[1]?.replace(/\./g, "");
     // "8-5pm": an unlabeled opening hour greater than the closing hour is AM.

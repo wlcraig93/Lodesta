@@ -139,4 +139,59 @@ assert.equal((siteTechnicalReleasePolicy.blockingIds as readonly string[]).inclu
 assert.equal((siteTechnicalReleasePolicy.blockingIds as readonly string[]).includes("render.missing_glyph"), false);
 assert.equal(isTechnicalReleaseBlocker({ id: "route.slug_mismatch", severity: "error", area: "route", message: "x" }), false);
 
+// Legal pages: a binary completeness check over the legal body. Formatting,
+// shell lines and "last updated" boilerplate may differ; every substantive
+// provision must be present, and the exact path is still required.
+{
+  const provisions = [
+    "We collect the contact details you choose to send when you request an estimate.",
+    "We use those details only to answer your request and schedule the repair you asked for.",
+    "We never sell personal information to anyone for any purpose.",
+    "You may ask us to correct or delete your information by writing to our office.",
+    "Service providers who host this website may process data on our behalf under contract.",
+    "We keep records only as long as the law and our warranty obligations require.",
+    "Questions about this policy can be sent to the shop manager at our street address.",
+    "Children under thirteen should not submit information through this website.",
+    "We may update this policy and will post the new version on this page.",
+    "Cookies on this site remember your form progress and expire when you close the browser.",
+    "Analytics on this site count visits without identifying individual visitors.",
+    "Security measures protect submitted information while it is stored and transmitted."
+  ];
+  const shell = ["Northstar Collision Repair", "Home", "Services", "Contact", "Call (512) 555-0142 today for a free collision estimate from our team."];
+  const shellPage = (id: string, path: string) => page(id, path, [...shell, `${path} page body with enough words to be a real page.`].join("\n"));
+  const legalPage = page("privacy", "/privacy", [...shell, "Privacy Policy", "Last updated: March 3, 2026", ...provisions, "© 2026 Northstar Collision Repair"].join("\n"), [], "Privacy Policy");
+  const legalSources = [legalPage, shellPage("s1", "/services"), shellPage("s2", "/about"), shellPage("s3", "/contact")];
+  const prepareLegal = (bodyHtml: string, path = "/privacy") => prepareSiteArtifact({
+    authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+      kind: "agent-authored-artifact",
+      compilerManifest: expectedSiteSandboxManifest,
+      siteName: input.business.name,
+      sharedCss: "body{font:16px Arial,sans-serif}",
+      routes: [
+        { path: "/", title: input.business.name, description: "Collision repair in Austin.", bodyHtml: "<main><h1>Collision repair</h1><p>Repairs for Austin drivers.</p></main>" },
+        { path, title: "Privacy Policy", description: "How the shop handles information.", bodyHtml }
+      ]
+    })),
+    buildInput: input,
+    runtimeSeriesId: "site-runtime-v4",
+    sourceSnapshots: [snapshot],
+    sourcePages: legalSources
+  });
+  const legalBlocker = (bodyHtml: string, path?: string) => prepareLegal(bodyHtml, path).findings
+    .find((finding) => finding.id === "fact.legal_source_preservation" && finding.severity === "error");
+  // Reformatted (list markup, curly quotes, extra whitespace), without the site
+  // shell and without the "last updated"/copyright boilerplate: complete.
+  const reformatted = `<main><h1>Privacy Policy</h1><ul>${provisions.map((provision) => `<li>  ${provision}  </li>`).join("")}</ul></main>`;
+  assert.equal(legalBlocker(reformatted), undefined, "A complete, reformatted legal body was rejected.");
+  // One omitted provision fails, even though more than 90% of the text is kept.
+  const omitted = `<main><h1>Privacy Policy</h1>${provisions.slice(0, -1).map((provision) => `<p>${provision}</p>`).join("")}</main>`;
+  assert.match(legalBlocker(omitted)?.message ?? "", /missing 1 substantive source provision.*Security measures protect/,
+    "An omitted legal provision passed the completeness check.");
+  // A reworded provision fails.
+  const reworded = `<main><h1>Privacy Policy</h1>${provisions.map((provision, index) => `<p>${index === 2 ? "We do not sell your data." : provision}</p>`).join("")}</main>`;
+  assert.ok(legalBlocker(reworded), "A reworded legal provision passed the completeness check.");
+  // The exact path is still required.
+  assert.ok(legalBlocker(reformatted, "/privacy-policy"), "A legal page moved off its exact source path passed.");
+}
+
 console.log("First-party gate verification passed.");

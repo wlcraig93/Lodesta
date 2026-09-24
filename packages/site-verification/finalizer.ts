@@ -456,6 +456,7 @@ function validateSourceSensitiveLegalRoutes(
   const findings: ArtifactGateFinding[] = [];
   const authoredByPath = new Map(routes.map((route) => [normalizedSourcePagePath(route.path), route]));
   const richestLegalSourceByPath = new Map<string, string[]>();
+  const legalProvisionsByPath = new Map<string, string[]>();
   const richestFetchedSourceByPath = new Map<string, SourceSnapshotPage>();
 
   for (const page of sourcePages) {
@@ -486,13 +487,14 @@ function validateSourceSensitiveLegalRoutes(
   for (const page of richestFetchedSourceByPath.values()) {
     if (!isLegalSourcePagePath(page.path)) continue;
     const path = normalizedSourcePagePath(page.path);
-    const substantiveText = sourceTextLines(page.extractedText)
+    const bodyLines = sourceTextLines(page.extractedText)
       .filter((line) => (nonLegalLineFrequency.get(normalizedSourceLine(line)) ?? 0) < 3)
-      .join("\n");
+      .filter((line) => !legalBoilerplateLine(line));
     richestLegalSourceByPath.set(
       path,
-      canonicalSourceTokens(substantiveText).map((token) => token.value)
+      canonicalSourceTokens(bodyLines.join("\n")).map((token) => token.value)
     );
+    legalProvisionsByPath.set(path, bodyLines);
   }
 
   for (const document of approvedDocuments) {
@@ -521,18 +523,23 @@ function validateSourceSensitiveLegalRoutes(
       continue;
     }
 
-    // Very short utility notices do not provide enough evidence for a stable
-    // similarity decision. Their exact route is still required above.
-    if (sourceTokens.length < 30) continue;
-    const sourceShingles = tokenShingles(sourceTokens, 5);
-    const renderedShingles = tokenShingles(renderedTokens, 5);
-    const retained = [...sourceShingles].filter((shingle) => renderedShingles.has(shingle)).length;
-    const recall = sourceShingles.size ? retained / sourceShingles.size : 1;
-    if (recall < 0.85) {
+    // Binary completeness: every substantive provision of the legal body
+    // (site shell and boilerplate such as "last updated" removed) must appear
+    // in the rendered page. Whitespace, punctuation, case and markup are
+    // normalized; wording is not.
+    const rendered = ` ${renderedTokens.join(" ")} `;
+    const missing = (legalProvisionsByPath.get(path) ?? []).filter((provision) => {
+      const variants = [provision, provision.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")]
+        .map((text) => canonicalSourceTokens(text).map((token) => token.value));
+      if (variants[0]!.length < legalProvisionMinimumTokens) return false;
+      return !variants.some((tokens) => rendered.includes(` ${tokens.join(" ")} `));
+    });
+    if (missing.length) {
+      const first = missing[0]!.length > 160 ? `${missing[0]!.slice(0, 159)}…` : missing[0]!;
       findings.push(gateFinding(
         "fact.legal_source_preservation",
         "claim",
-        `Source-sensitive legal route ${path} retains only ${(recall * 100).toFixed(1)}% of the source provisions; preserve the substantive source text instead of summarizing or replacing it.`,
+        `Source-sensitive legal route ${path} is missing ${missing.length} substantive source provision${missing.length === 1 ? "" : "s"}; keep every provision of the source document verbatim instead of summarizing or replacing it. First missing provision: "${first}".`,
         path
       ));
     }
@@ -557,20 +564,22 @@ function approvedDocumentMismatchContext(sourceTokens: string[], renderedTokens:
   return `First prefix-aligned difference at normalized token offsets approved=${offset}, rendered=${start + offset} (zero-based, not source-line coordinates). Expected context: "${excerpt(sourceTokens, offset)}". Rendered context: "${excerpt(renderedTokens, start + offset)}".`;
 }
 
+/** Lines of fewer tokens are headings or labels, not provisions. */
+const legalProvisionMinimumTokens = 6;
+
+/** Document boilerplate that is not a provision: revision dates and copyright lines. */
+function legalBoilerplateLine(line: string) {
+  return /^(?:(?:last|date last)\s+(?:updated|revised|modified)|effective(?:\s+date)?|updated|revised|posted)\b[^.]{0,60}$/i.test(line.trim())
+    || /^(?:©|\(c\)|copyright)\s/i.test(line.trim())
+    || /^all rights reserved\.?$/i.test(line.trim());
+}
+
 function sourceTextLines(value: string) {
   return value.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
 }
 
 function normalizedSourceLine(value: string) {
   return value.normalize("NFKC").toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-function tokenShingles(tokens: string[], size: number) {
-  const shingles = new Set<string>();
-  for (let index = 0; index <= tokens.length - size; index += 1) {
-    shingles.add(tokens.slice(index, index + size).join(" "));
-  }
-  return shingles;
 }
 
 function fiveWordShingles(value: string) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import {
   authoringContextCharacters,
   createManagerDiscussionContext,
@@ -17,7 +17,9 @@ import {
   canonicalAuthoringProfile,
   imageCreationModel,
   providerAuthoringCapabilities,
+  runtimeStateMessage,
   siteAgentCompactionThresholdTokens,
+  siteAgentLongContextInputTokens,
   siteAgentReasoningContext,
   taskSkillFor,
   usageForModel,
@@ -415,8 +417,8 @@ const exactSearchLineRead = await mutationRuntime.execute({
   arguments: { files: [{ path: "src/search-fixture.ts", startLine: 2, endLine: 2 }] }
 });
 assert.equal(
-  (JSON.parse(String(exactSearchLineRead.modelOutput)).files as Array<{ lines?: Array<{ content: string }> }>)[0]?.lines?.[0]?.content,
-  earlySearchLine,
+  (JSON.parse(String(exactSearchLineRead.modelOutput)).files as Array<{ content?: string }>)[0]?.content,
+  `2: ${earlySearchLine}`,
   "read_files must return the complete line represented by a truncated search excerpt."
 );
 const cappedSearch = await mutationRuntime.execute({
@@ -2012,5 +2014,79 @@ await assert.rejects(
 );
 assert.equal(glyphInspectionCalls, 1, "inspect_site did not surface the glyph finding exactly once before finalization.");
 assert.equal(glyphFinishCalls, 3, "The approved three-identical-release-failure stall guard changed.");
+
+// Per-turn workspace state: the starter kit and design library are listed by
+// path only; changed files carry a hash, line count and bounded outline.
+const scaffoldSourceRoot = "workers/site-sandbox/scaffold/src";
+const starterKit = await Promise.all((await readdir(scaffoldSourceRoot, { recursive: true }))
+  .filter((path) => /\.(?:tsx?|css)$/.test(path))
+  .sort()
+  .map(async (path) => ({ path: `src/${path}`, content: await readFile(`${scaffoldSourceRoot}/${path}`, "utf8") })));
+assert(starterKit.some((file) => file.path === "src/library/sections.tsx"), "Starter kit fixture is missing the design library.");
+const starterRuntime = new WorkspaceManagerRuntime<string>({
+  kind: "initial_build",
+  publicBuildInputId: "input_state_summary",
+  toolchainVersion: "toolchain-test",
+  sandboxImageDigest: `sha256:${"a".repeat(64)}` as const,
+  initialSandboxRevision: "sandbox_state_summary_1",
+  initialFiles: starterKit,
+  applyBuild: async () => ({ revision: "unused", buildDurationMs: 0, previewPath: "/preview" }),
+  inspect: async () => ({ passed: true, inspectionHash: `sha256:${"b".repeat(64)}`, modelSummary: {}, diagnosticSummary: {}, checkpoint: "unused" })
+});
+const starterState = JSON.stringify(runtimeStateMessage(starterRuntime.stateSummary()));
+assert(starterState.length < 1_500, `Starter-kit workspace state grew to ${starterState.length} bytes.`);
+const authoredSite = Array.from({ length: 200 }, (_, index) => `export function Section${index}() { return null; }`).join("\n");
+await starterRuntime.execute({ callId: "state-write", name: "write_file", arguments: { path: "src/site.tsx", content: authoredSite } });
+await starterRuntime.execute({ callId: "state-create", name: "write_file", arguments: { path: "src/styles/hero.css", content: ".hero { color: #123; }" } });
+await starterRuntime.execute({ callId: "state-delete", name: "delete_file", arguments: { path: "src/library/legal.css" } });
+const authoredState = starterRuntime.stateSummary() as { workspace: {
+  hash: string;
+  changedFiles: Array<{ path: string; status: string; contentHash: string; lines: number; outline: string }>;
+  deletedFiles?: string[];
+  unchangedStartingFiles: { paths: string[] };
+} };
+assert.deepEqual(authoredState.workspace.changedFiles.map(({ path, status }) => ({ path, status })), [
+  { path: "src/site.tsx", status: "modified" },
+  { path: "src/styles/hero.css", status: "created" }
+]);
+assert.equal(authoredState.workspace.changedFiles[0]!.contentHash, sha256(authoredSite),
+  "Changed files keep the full hash edit_file requires.");
+assert(authoredState.workspace.changedFiles[0]!.outline.startsWith("1 Section0; 2 Section1"));
+assert(authoredState.workspace.changedFiles[0]!.outline.endsWith("…") && authoredState.workspace.changedFiles[0]!.outline.length < 1_300,
+  "Changed-file outlines must stay bounded.");
+assert.deepEqual(authoredState.workspace.deletedFiles, ["src/library/legal.css"]);
+assert(authoredState.workspace.unchangedStartingFiles.paths.includes("src/library/sections.tsx"));
+assert(!authoredState.workspace.unchangedStartingFiles.paths.includes("src/site.tsx"));
+const authoredStateText = JSON.stringify(runtimeStateMessage(authoredState));
+assert.doesNotMatch(authoredStateText, /ServicesRows|trade-bold/, "Unchanged library outlines leaked into the workspace state.");
+assert(authoredStateText.length < 3_000, `Workspace state with two authored files grew to ${authoredStateText.length} bytes.`);
+assert.match(authoredState.workspace.hash, /^sha256:[a-f0-9]{64}$/, "Continuation checks read the full workspace hash.");
+
+// Only the latest workspace state is replayed.
+const stateHistory = new DeterministicManagerHistory([]);
+stateHistory.appendRuntimeState(runtimeStateMessage({ turn: 1 }));
+stateHistory.noteNoToolResponse({ responseItems: [], responseIndex: 1 });
+stateHistory.appendRuntimeState(runtimeStateMessage({ turn: 2 }));
+const stateHistoryText = JSON.stringify(stateHistory.requestItems());
+assert.doesNotMatch(stateHistoryText, /\\"turn\\":1/);
+assert.match(stateHistoryText, /\\"turn\\":2/);
+assert.equal(stateHistory.requestItems().length, 2);
+const restoredStateHistory = new DeterministicManagerHistory([], stateHistory.drainContinuationItems());
+assert.doesNotMatch(JSON.stringify(restoredStateHistory.requestItems()), /Current deterministic workspace state/,
+  "A restored history must not replay stale workspace states; the next turn appends a fresh one.");
+
+// read_files returns numbered text lines.
+const numberedRead = await starterRuntime.execute({ callId: "numbered-read", name: "read_files", arguments: { files: [{ path: "src/site.tsx", startLine: 2, endLine: 3 }] } });
+const numberedFile = JSON.parse(String(numberedRead.modelOutput)).files[0];
+assert.equal(numberedFile.content, "2: export function Section1() { return null; }\n3: export function Section2() { return null; }");
+assert.equal(numberedFile.contentHash, sha256(authoredSite));
+assert.deepEqual([numberedFile.startLine, numberedFile.endLine, numberedFile.totalLines], [2, 3, 200]);
+assert.equal((numberedRead.diagnosticOutput.files as Array<Record<string, unknown>>)[0]!.content, undefined,
+  "Diagnostics retain read metadata, not file content.");
+
+// Compaction stays below the whole-request long-context price tier.
+assert.equal(siteAgentCompactionThresholdTokens, 256_000);
+assert.equal(siteAgentLongContextInputTokens, 272_000);
+assert(siteAgentLongContextInputTokens - siteAgentCompactionThresholdTokens >= 16_000);
 
 process.stdout.write("Site authoring manager verification passed.\n");

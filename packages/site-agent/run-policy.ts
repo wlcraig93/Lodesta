@@ -57,7 +57,12 @@ export type SupportedSiteAgentModel = "gpt-6-luna" | "gpt-6-sol";
 export const siteAgentReasoningEffort = "high" as const;
 export const siteAgentReasoningContext = "all_turns" as const;
 export const siteAgentTextVerbosity = "low" as const;
-export const siteAgentCompactionThresholdTokens = 200_000;
+// Prompts above this many total input tokens bill the whole request at the
+// long-context rate (2x input and cached input, 1.5x output).
+export const siteAgentLongContextInputTokens = 272_000;
+// Provider compaction runs on the request that crosses the threshold, so keep
+// the threshold (plus one turn of growth) below the long-context tier.
+export const siteAgentCompactionThresholdTokens = 256_000;
 
 export const siteAgentRunGuardrailDefaults = {
   initial_build: {
@@ -151,8 +156,8 @@ export function usageForModel(
   const uncachedInputTokens = inputTokens - cachedInputTokens;
   // The long-context rate applies to the whole request, including cache hits,
   // once total prompt input (not uncached input) exceeds 272K tokens.
-  const inputRateMultiplier = inputTokens > 272_000 ? 2 : 1;
-  const outputRateMultiplier = inputTokens > 272_000 ? 1.5 : 1;
+  const inputRateMultiplier = inputTokens > siteAgentLongContextInputTokens ? 2 : 1;
+  const outputRateMultiplier = inputTokens > siteAgentLongContextInputTokens ? 1.5 : 1;
   const catalogEstimateUsd = pricing
     ? (
         (uncachedInputTokens * pricing.inputUsdPerMillion

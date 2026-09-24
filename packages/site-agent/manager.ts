@@ -31,7 +31,7 @@ import {
   authoringContextCharacters,
   createManagerDiscussionContext
 } from "./context";
-import { DeterministicManagerHistory, managerPromptTelemetry } from "./history";
+import { DeterministicManagerHistory, managerPromptTelemetry, runtimeStateMessage } from "./history";
 import {
   managerBuildContext,
   websiteManagerAuthoringSystemPrompt,
@@ -1290,10 +1290,6 @@ function diagnosticErrorCode(error: unknown) { const message = typeof error === 
 function readableModelResult(value: ManagerToolExecution["modelOutput"]) { if (typeof value !== "string") return value; try { return JSON.parse(value) as unknown; } catch { return value; } }
 function toolError(error: unknown): ManagerToolExecution { const message = boundedError(error); return { modelOutput: JSON.stringify({ ok: false, error: message }), diagnosticOutput: { ok: false, error: message } }; }
 
-function runtimeStateMessage(summary: Record<string, unknown>): ResponseInputItem {
-  return { role: "user", type: "message", content: [{ type: "input_text", text: `Current deterministic workspace state:\n${JSON.stringify(summary)}` }] };
-}
-
 function withRollingPromptCacheBreakpoint(items: ResponseInputItem[]) {
   if (!items.length) return items;
   const last = items.at(-1);
@@ -1373,7 +1369,7 @@ export const websiteManagerTools: Tool[] = [
       caseSensitive: { type: "boolean" }
     }
   }),
-  tool("read_files", "Read one or more authored src/ or read-only source-site/ files, each optionally by line window. Use exact paths returned by list_files or approvedSourceIndex contentFiles; never synthesize a source-site path. A mixed batch retains every successful read and returns ok=true, complete=false with each failed path identified; ok=false means no requested file was readable.", {
+  tool("read_files", "Read one or more authored src/ or read-only source-site/ files, each optionally by line window. Use exact paths returned by list_files or approvedSourceIndex contentFiles; never synthesize a source-site path. A mixed batch retains every successful read and returns ok=true, complete=false with each failed path identified; ok=false means no requested file was readable. Each file's content is numbered text, one \"N: line\" per line; the \"N: \" prefix is the line number for edit_file, not file content.", {
     type: "object", additionalProperties: false, required: ["files"],
     properties: {
       files: {

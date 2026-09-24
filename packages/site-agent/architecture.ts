@@ -1034,6 +1034,10 @@ export function createArchitectureContentInventory(
     imagesForSourcePath: (sourcePath) => (input.routeImages ?? [])
       .filter((image) => image.proofScope === "documented-on-this-page"
         && inventoryRouteKey(image.sourcePath) === inventoryRouteKey(sourcePath))
+      .map((image) => image.resourceId),
+    portraitsForSourcePath: (sourcePath) => (input.routeImages ?? [])
+      .filter((image) => image.width && image.height && image.height > image.width
+        && inventoryRouteKey(image.sourcePath) === inventoryRouteKey(sourcePath))
       .map((image) => image.resourceId)
   });
 }

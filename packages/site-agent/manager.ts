@@ -1536,7 +1536,7 @@ export const websiteManagerTools: Tool[] = [
       expectedRevision: { type: ["integer", "null"], minimum: 1 }
     }
   }),
-  tool("create_image", `Generate a supporting image or edit 1-4 available non-logo assets with ${imageCreationModel.label}. Do not generate or edit official logos through this tool. Use this only when it materially improves the site; return value includes the new asset ID and image pixels.`, {
+  tool("create_image", `Generate a supporting image or edit 1-4 available non-logo assets with ${imageCreationModel.label}. Do not generate or edit official logos through this tool. Prefer the business's real photos: use this only when no suitable real photo exists for the placement and an image materially improves the site, never to replace a small real photo (show it at its supplied size) or a type-led hero; return value includes the new asset ID and image pixels.`, {
     type: "object", additionalProperties: false, required: ["action", "purpose", "prompt", "sourceAssetIds", "size", "alt"],
     properties: {
       action: { type: "string", enum: ["generate", "edit"] },

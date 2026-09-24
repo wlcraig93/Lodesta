@@ -228,6 +228,60 @@ assert.ok(inventory.sensitiveTopicIndex.every((entry) => entry.sourcePaths.lengt
 assert.match(module, /^\/\*\*[\s\S]*export const contentInventory = \{/);
 assert.doesNotThrow(() => JSON.parse(module.slice(module.indexOf("{"), module.lastIndexOf("} as const") + 1)) as FirstPartyContentInventory);
 
+// Signature assets: the strongest real material, first, verbatim and gate-consistent.
+{
+  const home = page("/", "Home", [
+    "Pat Lane, Owner",
+    "Pat has repaired septic systems in Smith County for over 20 years and still runs every pump truck.",
+    "Pat lives in Tyler with his family and is a proud Army veteran.",
+    "Our crews pump, inspect and repair tanks across East Texas.",
+    "They were on time and their price was fair.",
+    "We are family owned and licensed and insured."
+  ]);
+  home.externalLinks = ["https://www.youtube.com/watch?v=abc123", "https://open.spotify.com/show/xyz", "https://www.facebook.com/lane"];
+  const plans = page("/plans", "Plans", [
+    "Maintenance Plans",
+    "Basic Care",
+    "$ 25 Monthly",
+    "Pumping every three years",
+    "Annual inspection",
+    "Priority Care",
+    "$ 40 Monthly",
+    "Everything in Basic Care",
+    "Same-week scheduling",
+    "Pricing notes",
+    "Service plans start at $25/month with no long-term contract.",
+    "Get $50 off your first pump-out through December 31, 2026.",
+    "Our crews explain what they find before any work starts."
+  ], ["Plans", "Maintenance Plans", "Pricing notes"]);
+  const blog = page("/blog/septic-myths", "Septic myths", ["Save $10 on a tank additive at the hardware store this weekend only for readers."]);
+  const signature = createFirstPartyContentInventory({
+    pages: [home, plans, blog],
+    publicFacts: [proofFact("fact_proof_founding", "Observed founding year", "since 2004")],
+    portraitsForSourcePath: (path) => (path === "/" ? ["resource_owner_portrait"] : [])
+  }).signatureAssets;
+  assert.deepEqual(signature.leaders, [{
+    name: "Pat Lane",
+    role: "owner",
+    bio: [
+      "Pat has repaired septic systems in Smith County for over 20 years and still runs every pump truck.",
+      "Pat lives in Tyler with his family and is a proud Army veteran."
+    ],
+    photoResourceIds: ["resource_owner_portrait"],
+    sourcePath: "/"
+  }]);
+  assert.deepEqual(signature.plans.map((plan) => [plan.name, plan.includes]), [
+    ["Basic Care", ["Pumping every three years", "Annual inspection"]],
+    ["Priority Care", ["Everything in Basic Care", "Same-week scheduling"]]
+  ]);
+  const offers = signature.offers.map((offer) => offer.text);
+  assert.equal(offers[0], "Service plans start at $25/month with no long-term contract.", "a recurring plan price leads the offers");
+  assert.ok(!offers.some((offer) => /December 31|hardware store/.test(offer)), "dated offers and non-core pages are excluded");
+  assert.ok(!signature.standing.some((line) => /on time/.test(line.text)), "a review-voice sentence is not the business's standing");
+  assert.deepEqual(signature.standing.map((line) => line.text), ["since 2004", "We are family owned and licensed and insured."]);
+  assert.deepEqual(signature.media.map((item) => item.kind), ["video", "podcast"]);
+}
+
 // Bounded: category caps hold on a large mirror.
 const manyFaqPage = page("/faq-large", "FAQ", ["Frequently Asked Questions", ...Array.from({ length: 60 }, (_, index) => [
   `How does option number ${index + 1} work for my yard?`,

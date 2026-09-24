@@ -578,7 +578,9 @@ const filteredBlock = page("page_filtered_block", "/deep-service", "Workshop Ove
   "Wheel alignment"
 ].join("\n"));
 const filteredBlockPreview = scopePreview([filteredBlock]);
-assert.equal(filteredBlockPreview, "Workshop Overhaul\nBrake adjustment\n[…]\nWheel alignment");
+assert.equal(filteredBlockPreview,
+  "Workshop Overhaul\nBrake adjustment\nOur services are guaranteed safe for children. [first-party guarantee, safety]\n[…]\nWheel alignment",
+  "A first-party sensitive-topic line must be shown tagged, not withheld.");
 const oversizedBlock = page("page_large_block", "/deep-service", "Workshop Overhaul", [
   "Workshop Overhaul", "A substantive source explanation must remain available when its surrounding section is too large for an atomic preview.",
   ...Array.from({ length: 75 }, (_, index) => `Documented short source task ${index}`)
@@ -683,8 +685,8 @@ const genericGatedClaimBoundaryEvidence = createArchitectureEvidenceFiles(
 )[1]!.content;
 assert.match(genericGatedClaimBoundaryEvidence, /storm surge barrier may use certified components/,
   "A historical business-name literal still suppresses unrelated storm-surge technical prose.");
-assert.doesNotMatch(genericGatedClaimBoundaryEvidence, /Our team is certified/,
-  "Removing a business-name literal weakened the generic gated business-claim filter.");
+assert.match(genericGatedClaimBoundaryEvidence, /Our team is certified to provide this service for every property and project\. \[first-party credential\]/,
+  "A first-party credential line must be shown with its topic tag instead of withheld.");
 const authorDigestEvidence = createArchitectureEvidenceFiles(pages, plan, { retainedContentMode: "indexed-pull-preview-author-digest" });
 assert.deepEqual(authorDigestEvidence.map((file) => file.path), ["src/approved-architecture.ts", "src/approved-source-index.ts"]);
 assert.match(authorDigestEvidence[1].content, /"evidencePreviews": \[/);

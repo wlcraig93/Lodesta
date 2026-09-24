@@ -17,7 +17,7 @@ import {
   isMalformedSourceLinkPath
 } from "@/packages/business-data/source-page-classification";
 import type { ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
-import { containsGatedBusinessClaim } from "./claim-gates";
+import { sensitiveFirstPartyTopics } from "@/packages/business-data/first-party-support";
 import {
   contentInventoryIsEmpty,
   contentInventoryModule,
@@ -1367,7 +1367,7 @@ function retainedEvidencePreview(
     for (const line of section) {
       if (excludedPreviewLine(line, input)) {
         if (excerpt.at(-1) !== "[…]") excerpt.push("[…]");
-      } else excerpt.push(line);
+      } else excerpt.push(`${line}${sensitivePreviewTag(line)}`);
     }
     const block = excerpt.join("\n");
     // Oversized sections retain ordinary paragraph sampling. Only eligible
@@ -1414,7 +1414,9 @@ function retainedEvidencePreview(
     const remaining = maxCharacters - prefixCharacters;
     if (remaining < 4) break;
     if (candidate.wholeBlock && candidate.line.length > remaining) continue;
-    const line = truncatePreviewLine(candidate.line, remaining);
+    const tag = candidate.wholeBlock ? "" : sensitivePreviewTag(candidate.line);
+    if (remaining - tag.length < 4) continue;
+    const line = `${truncatePreviewLine(candidate.line, remaining - tag.length)}${tag}`;
     if (!candidate.shortAttribution && !candidate.wholeBlock && line.length < 45) continue;
     selected.push({ index: candidate.index, line, wholeBlock: candidate.wholeBlock });
     totalCharacters = prefixCharacters + line.length;
@@ -1428,8 +1430,19 @@ function excludedPreviewLine(line: string, input: { authorDigest?: boolean; incl
   return isStructuredImageResourceLine(line)
     || /^(?:https?:\/\/|follow\b|read more\b|navigate\b|home\b|customer login\b|call now\b|contact us\b|back to\b)/i.test(line)
     || /^(?:[A-Z0-9&'’ -]{20,})$/.test(line)
-    || containsGatedBusinessClaim(line)
     || Boolean(input.authorDigest && isLowSignalAuthorDigestLine(line, input));
+}
+
+/**
+ * First-party lines on sensitive topics (prices, guarantees, credentials,
+ * availability, offers, ratings, cadence, safety) are shown, never withheld,
+ * with a trailing topic tag. The tag is provenance for the reader, not copy:
+ * such a line may be quoted verbatim as the business's own words, while a new
+ * sensitive claim in the author's voice still needs an exact public fact.
+ */
+function sensitivePreviewTag(line: string) {
+  const topics = sensitiveFirstPartyTopics(line);
+  return topics.length ? ` [first-party ${topics.join(", ")}]` : "";
 }
 
 function retainedTestimonialPairPreview(
@@ -1439,7 +1452,9 @@ function retainedTestimonialPairPreview(
   const sourceLines = lines(page.extractedText);
   const pairs: string[] = [];
   let totalCharacters = 0;
-  const maximumPairs = Math.max(1, Math.min(2, Math.floor(input.maxLines / 2)));
+  // The character budget bounds the preview; the pair count only stops a
+  // review-heavy page from becoming one long list.
+  const maximumPairs = Math.max(2, Math.min(6, input.maxLines));
   for (let index = 1; index < sourceLines.length && pairs.length < maximumPairs; index += 1) {
     const attribution = sourceLines[index]!;
     if (!isLikelyTestimonialAttribution(attribution)) continue;

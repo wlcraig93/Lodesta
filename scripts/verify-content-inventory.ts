@@ -157,40 +157,49 @@ assert.equal(inventory.testimonials.find((testimonial) => testimonial.attributio
   "We had a limb hanging over the fence. The crew arrived on time and they guarantee every job at no extra cost, which sold us.");
 assert.equal(inventory.testimonials.find((testimonial) => testimonial.attribution === "Dana R.")?.quote,
   "When our basement flooded at midnight they sent an emergency crew, explained every safety step, and the price was exactly what they quoted.");
-// An unattributed, unconfirmed quotation that states a sensitive claim is still withheld.
-assert.ok(!quotes.some((quote) => /lowest price in town/.test(quote)));
+// An unattributed first-party quotation on sensitive topics is shown tagged, never withheld.
+const unattributedClaim = inventory.testimonials.find((testimonial) => /lowest price in town/.test(testimonial.quote));
+assert.ok(unattributedClaim, "A first-party sensitive-topic quotation was withheld instead of tagged.");
+assert.ok(["credential", "guarantee"].every((topic) => unattributedClaim.sensitiveTopics?.includes(topic as never)));
+assert.equal(unattributedClaim.sourcePath, "/reviews");
 // Legal pages are not mined.
 assert.ok(!quotes.some((quote) => /sell your data/.test(quote)));
 
-// FAQs: verbatim Q/A; sensitive answers withheld.
+// FAQs: verbatim Q/A; sensitive answers shown with their topic tags.
 assert.deepEqual(inventory.faqs.find((entry) => entry.question.startsWith("What should I do"))?.answer,
   "Please remove all personal belongings and make sure there is enough fuel to move the vehicle around the shop.");
 assert.equal(inventory.faqs.find((entry) => entry.question === "How do I reset my breaker?")?.answer,
   "Push the breaker handle all the way to the off position and then turn it back on.");
 assert.equal(inventory.faqs.find((entry) => entry.question === "Is Grounding really important?")?.answer, "YES");
-for (const withheldQuestion of [/warranty/i, /licensed/i, /operating hours/i, /price match/i]) {
-  assert.ok(!inventory.faqs.some((entry) => withheldQuestion.test(entry.question)), `withheld FAQ ${withheldQuestion}`);
+for (const sensitiveQuestion of [/warranty/i, /licensed/i, /operating hours/i, /price match/i]) {
+  const entry = inventory.faqs.find((candidate) => sensitiveQuestion.test(candidate.question));
+  assert.ok(entry, `sensitive FAQ withheld instead of tagged: ${sensitiveQuestion}`);
+  assert.ok(entry.sensitiveTopics?.length, `sensitive FAQ ${sensitiveQuestion} is not tagged`);
 }
+assert.equal(inventory.faqs.find((entry) => entry.question === "How do I reset my breaker?")?.sensitiveTopics, undefined,
+  "An ordinary FAQ was tagged as sensitive.");
 
-// People: names and roles; credential statements withheld while the name stays.
+// People: names and roles; credential statements shown with their topic tag.
 assert.deepEqual(inventory.people.find((person) => person.name === "Tracy")?.role, "owner");
 assert.ok(inventory.people.some((person) => person.role === "team members" && person.name === "Kayla, Lizann, Lanie, Yanet"));
 const tyler = inventory.people.find((person) => person.name === "Tyler Nichols");
 assert.equal(tyler?.role, "owner and operator");
-assert.equal(tyler?.statement, undefined);
+assert.ok(tyler?.statement, "A person's first-party credential statement was withheld.");
+assert.ok(tyler?.sensitiveTopics?.includes("credential"));
 assert.ok(!inventory.people.some((person) => /consultation/i.test(person.name)));
 
-// Projects: case-study structure, services used, documented photos; prices withheld.
+// Projects: case-study structure, services used, documented photos; prices tagged.
 const raptor = inventory.projects.find((project) => project.title === "2024 Ford F-150 Raptor");
 assert.ok(raptor?.summary?.includes("XPEL Fusion"));
-assert.ok(!raptor?.summary?.includes("$"));
+assert.ok(raptor?.sensitiveTopics?.includes("price") === raptor?.summary?.includes("$"),
+  "A priced project summary must carry the price tag.");
 assert.deepEqual(raptor?.servicesUsed, ["Paint Correction", "Paint Protection Film"]);
 assert.deepEqual(raptor?.imageResourceIds, ["resource_raptor_1", "resource_raptor_2"]);
 assert.equal(raptor?.routePath, "/our-work");
 assert.ok(inventory.projects.some((project) => project.title === "Fiber Optic Line Clearing Project"));
 assert.ok(!inventory.projects.some((project) => /April 7/.test(project.title)), "schedule notices are not projects");
 
-// Service lists: inclusions kept verbatim; priced lists and contact rows are not.
+// Service lists: inclusions kept verbatim; priced lists are tagged; contact rows are not lists.
 const dangerous = inventory.serviceLists.find((list) => list.lead === "Dangerous Trees");
 assert.deepEqual(dangerous?.items, [
   "Dangerous trees include:",
@@ -198,30 +207,24 @@ assert.deepEqual(dangerous?.items, [
   "trees with dead limbs overhanging driveways or streets;",
   "large trees growing too close to power lines."
 ]);
-assert.ok(!inventory.serviceLists.some((list) => list.items.some((item) => /\$/.test(item))));
+assert.ok(inventory.serviceLists.filter((list) => list.items.some((item) => /\$/.test(item)))
+  .every((list) => list.sensitiveTopics?.includes("price")), "A priced service list is not tagged.");
 assert.ok(!inventory.serviceLists.some((list) => /Reach the office/.test(list.lead)));
 
 // Fact references carry non-testimonial proof by public fact ID.
 assert.deepEqual(inventory.factReferences, [{ publicFactId: "fact_proof_credential_1", label: "Observed license or certification", value: "ISA Certified Arborist TX-5204A" }]);
 
-// Fact safety: no withheld sensitive statement reaches the author-facing module.
+// Sensitive first-party statements reach the author tagged, with the verbatim-only rule.
 const module = contentInventoryModule(inventory);
-for (const sensitive of [
-  "lowest price in town",
-  "10 year warranty",
-  "fully insured",
-  "Monday through Saturday",
-  "match the price",
-  "licensed by the state",
-  "$2,400",
-  "$5,000",
-  "same day"
-]) {
-  assert.ok(!module.includes(sensitive), `sensitive text leaked: ${sensitive}`);
+for (const sensitive of ["lowest price in town", "10 year warranty", "licensed by the state"]) {
+  assert.ok(module.includes(sensitive), `tagged first-party text missing: ${sensitive}`);
 }
-const topics = new Set(inventory.withheld.map((entry) => entry.topic));
-for (const topic of ["guarantee", "credential", "availability", "price"] as const) assert.ok(topics.has(topic), `withheld topic ${topic}`);
-assert.ok(inventory.withheld.every((entry) => entry.sourcePaths.length > 0 && entry.count >= entry.sourcePaths.length));
+assert.match(module, /sensitiveTopics[\s\S]*reuse such a sentence only verbatim[\s\S]*needs an exact publicFact/);
+// Widget text still never appears.
+assert.ok(!module.includes("same day"), "Third-party widget text reached the author.");
+const topics = new Set(inventory.sensitiveTopicIndex.map((entry) => entry.topic));
+for (const topic of ["guarantee", "credential", "availability", "price"] as const) assert.ok(topics.has(topic), `sensitive topic index lacks ${topic}`);
+assert.ok(inventory.sensitiveTopicIndex.every((entry) => entry.sourcePaths.length > 0 && entry.count >= entry.sourcePaths.length));
 assert.match(module, /^\/\*\*[\s\S]*export const contentInventory = \{/);
 assert.doesNotThrow(() => JSON.parse(module.slice(module.indexOf("{"), module.lastIndexOf("} as const") + 1)) as FirstPartyContentInventory);
 

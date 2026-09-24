@@ -46,6 +46,24 @@ export class DeterministicManagerHistory {
     this.pending.push(item);
   }
 
+  /**
+   * A response cut off at the per-response output limit. Its partial items
+   * (including any unfinished tool call) are not replayed or executed; the
+   * author receives a turn error and continues in smaller pieces.
+   */
+  noteTruncatedResponse(input: { responseIndex: number; maxOutputTokens: number }) {
+    const message: ResponseInputItem = {
+      role: "user",
+      type: "message",
+      content: [{
+        type: "input_text",
+        text: `Your previous response was cut off at the ${input.maxOutputTokens.toLocaleString("en-US")}-token output limit before it finished, so none of it was applied. Write in smaller pieces: split large files or edits across several tool calls, then continue the website task.`
+      }]
+    };
+    this.tail.push(message);
+    this.pending.push(message);
+  }
+
   noteNoToolResponse(input: {
     responseItems: ResponseInputItem[];
     responseIndex: number;

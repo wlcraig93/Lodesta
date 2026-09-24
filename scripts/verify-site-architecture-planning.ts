@@ -924,7 +924,7 @@ await assert.rejects(
     return true;
   }
 );
-assert.equal(quotaAttempts, 2, "Architecture quota failures retain the existing two-attempt transport retry boundary.");
+assert.equal(quotaAttempts, 1, "An exhausted quota does not recover by waiting and must not be retried.");
 
 let statuslessQuotaAttempts = 0;
 const statuslessQuotaAgent = new WebsiteManagerAgent({
@@ -987,7 +987,22 @@ await assert.rejects(
     return true;
   }
 );
-assert.equal(transientAttempts, 2, "Provider classification must not add an architecture retry beyond transport retry.");
+assert.equal(transientAttempts, 2, "Without a deadline signal the transport keeps two attempts.");
+// With a run-deadline signal, a temporarily unavailable provider is retried
+// with backoff until the deadline aborts the request.
+{
+  let deadlineAttempts = 0;
+  const controller = new AbortController();
+  const deadlineAgent = new WebsiteManagerAgent({
+    create: async () => {
+      deadlineAttempts += 1;
+      if (deadlineAttempts === 4) controller.abort(new Error("workflow_deadline_exhausted"));
+      throw Object.assign(new Error("429 rate limit temporarily unavailable"), { status: 429, headers: { "retry-after": "0" } });
+    }
+  });
+  await assert.rejects(() => deadlineAgent.architect({ inventory, signal: controller.signal }));
+  assert.equal(deadlineAttempts, 4, "A temporarily unavailable provider stopped retrying before the run deadline.");
+}
 
 let invalidJsonAttempts = 0;
 const invalidJsonAgent = new WebsiteManagerAgent({

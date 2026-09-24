@@ -3167,6 +3167,7 @@ export class SiteAuthoringWorkflow {
         firstSuccessfulBuildMs: managerResult.telemetry.firstSuccessfulBuildMs,
         modelRequests: managerResult.telemetry.modelRequests,
         noToolResponses: managerResult.telemetry.noToolResponses,
+        truncatedResponses: managerResult.telemetry.truncatedResponses,
         toolCalls: managerResult.telemetry.toolCalls,
         unchangedPathRereads: managerResult.telemetry.unchangedPathRereads,
         parallelToolViolations: managerResult.telemetry.parallelToolViolations,

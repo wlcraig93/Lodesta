@@ -185,7 +185,7 @@ export function finalizePreparedArtifact(input: {
   const findings = dedupeFindings([
     ...input.prepared.findings,
     ...input.browserGate.findings
-  ]).map(advisoryUnlessTechnicalBlocker).map(boundedFindingMessage);
+  ]).map(withReleaseSeverity).map(boundedFindingMessage);
   const fileRecords = input.prepared.files.map((file) => ({
     path: file.path,
     contentType: file.contentType,
@@ -258,9 +258,14 @@ export function isTechnicalReleaseBlocker(finding: ArtifactGateFinding) {
   return (siteTechnicalReleasePolicy.blockingIds as readonly string[]).includes(finding.id);
 }
 
-function advisoryUnlessTechnicalBlocker(finding: ArtifactGateFinding): ArtifactGateFinding {
+/**
+ * The one canonical release classification. Finalization and every authoring
+ * inspection path map findings through this, so the author never sees an
+ * "error" that release would treat as advisory.
+ */
+export function withReleaseSeverity<T extends ArtifactGateFinding>(finding: T): T {
   if (finding.severity !== "error" || isTechnicalReleaseBlocker(finding)) return finding;
-  return { ...finding, severity: "warning" };
+  return { ...finding, severity: "warning" as const };
 }
 
 function validateSiteStructure(input: {

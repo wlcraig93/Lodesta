@@ -886,9 +886,11 @@ function visualInspectionResult(
   const rawVisualFindings = Array.isArray(inspection.modelSummary.findings)
     ? inspection.modelSummary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
     : [];
-  const visualFindings = Array.isArray(modelSummary.findings)
-    ? modelSummary.findings.filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)))
-    : [];
+  const summaryAdvisories = "advisories" in modelSummary && Array.isArray(modelSummary.advisories) ? modelSummary.advisories : [];
+  const visualFindings = [
+    ...(Array.isArray(modelSummary.findings) ? modelSummary.findings : []),
+    ...(qualityLed ? summaryAdvisories : [])
+  ].filter((finding): finding is Record<string, unknown> => Boolean(finding && typeof finding === "object" && !Array.isArray(finding)));
   const mechanicalSummary = mechanicalInspection ? compactInspectionSummary(mechanicalInspection.modelSummary) : undefined;
   const mechanicalBlockers = mechanicalSummary && Array.isArray(mechanicalSummary.blockers) ? mechanicalSummary.blockers : [];
   const mechanicalAdvisories = mechanicalSummary && Array.isArray(mechanicalSummary.advisories) ? mechanicalSummary.advisories : [];
@@ -905,7 +907,7 @@ function visualInspectionResult(
   // advisory lists. Keep raw diagnostics and the actual inspection unchanged.
   const visualEvidence = visualFindings;
   const mechanicalForModel = qualityLed ? mechanicalBlockers : [...mechanicalBlockers, ...mechanicalAdvisories];
-  const findings = [...visualEvidence, ...mechanicalForModel.filter((finding) =>
+  const modelFindings = [...visualEvidence, ...mechanicalForModel.filter((finding) =>
     // Drop only a complete subset of an existing visual record. A different
     // message, source, selector or affected-route set remains separate evidence.
     !finding || typeof finding !== "object" || Array.isArray(finding)
@@ -923,6 +925,10 @@ function visualInspectionResult(
     !qualityLed
       || (finding && typeof finding === "object" && !Array.isArray(finding) && isQualityLedModelFacingFinding(finding as Record<string, unknown>))
   );
+  // Quality-led feedback separates release blockers from advisory defects so
+  // the author is never told to "correct" a non-blocking measurement.
+  const findings = qualityLed ? modelFindings.filter((finding) => recordValue(finding).severity === "error") : modelFindings;
+  const advisories = qualityLed ? modelFindings.filter((finding) => recordValue(finding).severity !== "error") : undefined;
   const summary = {
     ...modelSummary,
     ok: mechanicalInspection?.passed !== false,
@@ -931,7 +937,8 @@ function visualInspectionResult(
     buildPerformed,
     previewPath,
     findings,
-    returnedFindingCount: findings.length,
+    ...(advisories ? { advisories } : {}),
+    returnedFindingCount: findings.length + (advisories?.length ?? 0),
     mechanicalInspection: mechanicalInspection ? {
       passed: mechanicalInspection.passed,
       inspectionHash: mechanicalInspection.inspectionHash
@@ -1074,6 +1081,10 @@ export function componentDiagnosticRouteFamilyQualityLedVisualSummary(summary: R
     ? summarized.findings.filter((finding) => Boolean(finding && typeof finding === "object" && !Array.isArray(finding))) as Array<Record<string, unknown>>
     : [];
   const selected = returned.filter(isQualityLedModelFacingFinding);
+  // Findings carry release severity: errors are exactly the release blockers.
+  // Measured quality defects are returned separately as advisories.
+  const blockers = selected.filter((finding) => finding.severity === "error");
+  const advisories = selected.filter((finding) => finding.severity !== "error");
   return {
     ...summarized,
     evaluationFindingCount: findings.length,
@@ -1081,10 +1092,13 @@ export function componentDiagnosticRouteFamilyQualityLedVisualSummary(summary: R
     actionableFindingCount: errors.length + defects.length,
     returnedFindingCount: selected.length,
     findingsTruncated: errors.length + defects.length > selected.length,
-    findings: selected,
+    findings: blockers,
+    advisories,
     authorFeedbackPolicy: "route-family-quality-led",
-    feedbackGuidance: selected.length
-      ? "Correct each returned error and defect. Repair a shared cause once. Reinspect that one exact route only if the measurement is still unclear, then finish."
+    feedbackGuidance: blockers.length
+      ? `Correct each returned error; each one blocks release. Repair a shared cause once. Reinspect that one exact route only if the measurement is still unclear, then finish.${advisories.length ? " advisories are measured quality evidence that do not block release: repair one only when the screenshots confirm a material defect." : ""}`
+      : advisories.length
+      ? "No release blockers. advisories are measured quality evidence that do not block release: repair one only when the screenshots confirm a material defect, then finish."
       : "No measured defects. Judge the attached screenshots; fix any material visual, photo, or phone-layout problem you see, then finish."
   };
 }

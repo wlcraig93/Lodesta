@@ -34,6 +34,7 @@ import {
 } from "../packages/site-agent";
 import { sourceSnapshotSchema, type BusinessState, type SourceSnapshot } from "../packages/site-contracts";
 import { researchBusiness, sha256, stableJson } from "../packages/business-data";
+import { withReleaseSeverity } from "../packages/site-verification";
 import { researchAddress, researchLocality, SiteAuthoringWorkflow } from "../packages/site-platform/workflow";
 import {
   componentDiagnosticRouteFamilyQualityLedVisualSummary,
@@ -619,6 +620,7 @@ assert.equal(modelFeedback.blockingFindings, undefined);
 assert.equal(modelFeedback.advisoryFindings, undefined);
 assert.equal(modelFeedback.findings.length, 2);
 assert.equal(modelFeedback.returnedFindingCount, 2);
+assert.deepEqual(modelFeedback.advisories, [], "Quality-led inspection must return advisories under their own key.");
 assert.deepEqual(modelFeedback.findings.map((finding: { id: string }) => finding.id).sort(),
   [mechanicalBlocker.id, visualError.id].sort());
 assert(modelFeedback.findings.every((finding: { id: string }) =>
@@ -636,6 +638,16 @@ assert(combinedFeedback.diagnosticOutput.advisoryFindings.some((finding: { id?: 
   "Diagnostics must retain advisories omitted from the quality-led model list.");
 assert.equal(modelFeedback.visualScope, "targeted");
 assert.equal(modelFeedback.mechanicalScope, "all-routes");
+
+// Inspection uses the release classification: a neutralized sanitizer finding
+// is advisory to the author exactly as it is at release; facts still block.
+assert.equal(withReleaseSeverity({ id: "html.forbidden_tag", severity: "error", area: "html", message: "Neutralized tag." }).severity, "warning");
+assert.equal(withReleaseSeverity({ id: "fact.sdk_value_mismatch", severity: "error", area: "claim", message: "Phone mismatch." }).severity, "error");
+const workflowSource = await readFile(new URL("../packages/site-platform/workflow.ts", import.meta.url), "utf8");
+assert.match(workflowSource, /const findings = prepared\.findings\.map\(withReleaseSeverity\)/,
+  "Mechanical inspection must classify findings with the release severity mapping.");
+assert.match(workflowSource, /browserGate\.findings\.filter\([^\n]+\n\s*\]\.map\(withReleaseSeverity\)/,
+  "Visual inspection must classify findings with the release severity mapping.");
 
 const requiredDestinations = {
   path: "src/required-destinations.tsx",
@@ -655,16 +667,16 @@ const qualityLedFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary
   routes: ["/", "/about", "/contact", "/services"],
   inspectedRoutes: ["/", "/about", "/contact", "/services"]
 });
-assert.match(String(qualityLedFeedback.feedbackGuidance), /Correct each returned error and defect.*Repair a shared cause once.*Reinspect that one exact route only if the measurement is still unclear, then finish/i);
-assert.doesNotMatch(String(qualityLedFeedback.feedbackGuidance), /whole-site approval|Compare the inspected routes|IA similarity/i);
-assert.deepEqual(qualityLedFeedback.findings.map((item) => item.id).sort(), [
-  "accessibility.axe.complete",
-  "render.form_text",
-  "render.tiny_text"
-]);
-assert(qualityLedFeedback.findings.some((item) => item.severity === "error"));
-assert(qualityLedFeedback.findings.some((item) => item.id === "render.tiny_text" || item.id === "render.form_text"));
-assert(!qualityLedFeedback.findings.some((item) =>
+assert.match(String(qualityLedFeedback.feedbackGuidance), /Correct each returned error; each one blocks release.*Repair a shared cause once.*Reinspect that one exact route only if the measurement is still unclear, then finish/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /advisories are measured quality evidence that do not block release/i);
+assert.doesNotMatch(String(qualityLedFeedback.feedbackGuidance), /whole-site approval|Compare the inspected routes|IA similarity|error and defect/i);
+assert.deepEqual(qualityLedFeedback.findings.map((item) => item.id).sort(), ["accessibility.axe.complete"],
+  "Quality-led findings must contain only release blockers.");
+assert.deepEqual(qualityLedFeedback.advisories.map((item) => item.id).sort(), ["render.form_text", "render.tiny_text"],
+  "Measured quality defects must be returned under a separate advisories key.");
+assert(qualityLedFeedback.findings.every((item) => item.severity === "error"));
+assert(qualityLedFeedback.advisories.every((item) => item.severity === "warning"));
+assert(![...qualityLedFeedback.findings, ...qualityLedFeedback.advisories].some((item) =>
   item.id === "advisory.claim_evidence" || item.id === "advisory.ia_repetition" || item.id === "advisory.asset_reuse"
     || item.id === "render.internal_provenance_copy"));
 assert.equal(qualityLedFeedback.evaluationFindingCount, 7);
@@ -680,13 +692,22 @@ const proseEvidenceFeedback = componentDiagnosticRouteFamilyQualityLedVisualSumm
   routes: ["/", "/guide", "/case-study", "/contact"],
   inspectedRoutes: ["/", "/guide", "/case-study", "/contact"]
 });
-assert.equal(proseEvidenceFeedback.findings.filter((finding) => finding.severity === "warning").length, 1,
+assert.deepEqual(proseEvidenceFeedback.advisories.map((item) => item.id), ["render.contrast"],
   "Quality-led prose advisories were returned to the author.");
-assert.equal(proseEvidenceFeedback.findings.filter((finding) => finding.severity === "error").length, 1,
+assert.deepEqual(proseEvidenceFeedback.findings.map((item) => item.id), ["fact.sdk_value_mismatch"],
   "An exact fact mismatch was dropped from the quality-led author list.");
-assert.deepEqual(proseEvidenceFeedback.findings.map((item) => item.id).sort(), ["fact.sdk_value_mismatch", "render.contrast"]);
-assert(!proseEvidenceFeedback.findings.some((finding) =>
+assert(![...proseEvidenceFeedback.findings, ...proseEvidenceFeedback.advisories].some((finding) =>
   finding.id === "advisory.claim_evidence" || finding.id === "advisory.metadata_claim_evidence"));
+const advisoryOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
+  findings: [
+    { id: "render.tiny_text", severity: "warning", area: "render", message: "utility text below 12px", route: "/" }
+  ],
+  routes: ["/"],
+  inspectedRoutes: ["/"]
+});
+assert.equal(advisoryOnlyFeedback.findings.length, 0);
+assert.match(String(advisoryOnlyFeedback.feedbackGuidance), /No release blockers/i,
+  "Advisory-only feedback must not tell the author to correct errors.");
 const iaHeuristicOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
   findings: [
     { id: "advisory.ia_repetition", severity: "warning", area: "content", message: "Service routes share structural signals.", route: "/services" }

@@ -142,6 +142,7 @@ import {
   createSourceMediaContactSheet,
   createArtifactThumbnail,
   isTechnicalReleaseBlocker,
+  withReleaseSeverity,
   logThumbnailFailure,
   prepareSiteArtifact,
   runArtifactBrowserGate
@@ -3430,7 +3431,9 @@ export class SiteAuthoringWorkflow {
       sourcePages: input.sourcePages
     });
     input.signal?.throwIfAborted();
-    const findings = prepared.findings;
+    // Inspection classifies exactly like release: only technical release
+    // blockers are errors; everything else reaches the author as advisory.
+    const findings = prepared.findings.map(withReleaseSeverity);
     const errors = findings.filter((finding) => finding.severity === "error");
     const warnings = findings.filter((finding) => finding.severity === "warning");
     const blockerFeedback = verificationBlockerFeedback(errors);
@@ -3595,7 +3598,7 @@ export class SiteAuthoringWorkflow {
       ...prepared.findings,
       ...releaseGate.findings,
       ...browserGate.findings.filter((finding) => !releaseFindingKeys.has(findingIdentityKey(finding)))
-    ];
+    ].map(withReleaseSeverity);
     const browserCaptureMs = Date.now() - browserStartedAt;
     input.onPhase?.("browser_navigation_capture", browserCaptureMs);
     const visualEvidenceStartedAt = Date.now();

@@ -1446,7 +1446,8 @@ function retainedTestimonialPairPreview(
     const sourceExcerpt = sourceLines[index - 1]!;
     if (sourceExcerpt.length < 45 || isLikelyTestimonialAttribution(sourceExcerpt)) continue;
     if (/^(?:https?:\/\/|follow\b|read more\b|navigate\b|home\b|customer login\b|call now\b|contact us\b)/i.test(sourceExcerpt)) continue;
-    if (containsGatedBusinessClaim(sourceExcerpt)) continue;
+    // An attributed customer quotation is kept even when it mentions an
+    // emergency, safety or a guarantee: it is quoted, not restated as a claim.
     const separator = `\n— ${attribution}`;
     const remaining = input.maxCharacters - totalCharacters;
     const excerptBudget = remaining - separator.length;

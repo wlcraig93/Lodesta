@@ -22,8 +22,11 @@ const reviews = page("/reviews", "Reviews", [
   "We had a limb hanging over the fence. The crew arrived on time and they guarantee every job at no extra cost, which sold us.",
   "Wendy P.",
   "Kept us informed the whole way and the crew cleaned up every twig before leaving the property.",
-  "Mo"
-], ["Reviews", "Happy With Our Service?", "Ted L.", "Hilda H.", "Wendy P."]);
+  "Mo",
+  "When our basement flooded at midnight they sent an emergency crew, explained every safety step, and the price was exactly what they quoted.",
+  "Dana R.",
+  "“They are licensed and insured and guarantee the lowest price in town, so call us anytime day or night.”"
+], ["Reviews", "Happy With Our Service?", "Ted L.", "Hilda H.", "Wendy P.", "Dana R."]);
 
 const collapsedTestimonials = page("/what-our-customers-say-about-us", "What our customers say", [
   "What our customers say about us",
@@ -147,8 +150,14 @@ assert.ok(!quotes.some((quote) => /heavy machinery/.test(quote)));
 // Review-platform widget text is never collected.
 assert.deepEqual(inventory.thirdPartyReviewSurfaces, ["/testimonials"]);
 assert.ok(!quotes.some((quote) => /same day|Stewart/.test(quote)));
-// A customer quote that states an unsupported guarantee is withheld unless bound to a public fact.
-assert.ok(!inventory.testimonials.some((testimonial) => testimonial.attribution === "Wendy P."));
+// A customer's attributed words are kept verbatim whatever they mention
+// (guarantee, emergency, safety, price): they are quoted speech, not a claim.
+assert.equal(inventory.testimonials.find((testimonial) => testimonial.attribution === "Wendy P.")?.quote,
+  "We had a limb hanging over the fence. The crew arrived on time and they guarantee every job at no extra cost, which sold us.");
+assert.equal(inventory.testimonials.find((testimonial) => testimonial.attribution === "Dana R.")?.quote,
+  "When our basement flooded at midnight they sent an emergency crew, explained every safety step, and the price was exactly what they quoted.");
+// An unattributed, unconfirmed quotation that states a sensitive claim is still withheld.
+assert.ok(!quotes.some((quote) => /lowest price in town/.test(quote)));
 // Legal pages are not mined.
 assert.ok(!quotes.some((quote) => /sell your data/.test(quote)));
 
@@ -197,7 +206,7 @@ assert.deepEqual(inventory.factReferences, [{ publicFactId: "fact_proof_credenti
 // Fact safety: no withheld sensitive statement reaches the author-facing module.
 const module = contentInventoryModule(inventory);
 for (const sensitive of [
-  "guarantee every job",
+  "lowest price in town",
   "10 year warranty",
   "fully insured",
   "Monday through Saturday",

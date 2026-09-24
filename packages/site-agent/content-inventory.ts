@@ -12,8 +12,10 @@ import { containsGatedBusinessClaim } from "./claim-gates";
  * not widen fact authority. Lines that state a sensitive claim (credentials,
  * guarantees, prices, ratings, availability, offers, cadence) are withheld and
  * only their topic and page are listed; such claims reach copy only through
- * publicFacts, which factReferences names by ID. Text rendered by third-party
- * review widgets is never collected.
+ * publicFacts, which factReferences names by ID. Attributed customer
+ * testimonials are kept whatever words they contain: they are quoted as that
+ * customer's speech, never restated as the business's claim. Text rendered by
+ * third-party review widgets is never collected.
  */
 export type FirstPartyContentInventory = {
   schemaVersion: 1;
@@ -50,13 +52,13 @@ export const contentInventoryPath = "src/content-inventory.ts" as const;
 type WithheldTopic = "price" | "offer" | "guarantee" | "credential" | "rating" | "availability" | "cadence" | "safety" | "other";
 
 const limits = {
-  testimonials: 16,
+  testimonials: 24,
   faqs: 20,
   people: 10,
   projects: 20,
   serviceLists: 16,
   listItems: 12,
-  quoteCharacters: 1_200,
+  quoteCharacters: 2_000,
   answerCharacters: 900,
   summaryCharacters: 300,
   withheldPaths: 6
@@ -107,7 +109,11 @@ export function createFirstPartyContentInventory(input: {
   const testimonials = extractTestimonials(pages.filter((entry) => !thirdParty.has(entry.path)), isChrome)
     .flatMap((testimonial) => {
       const fact = proofFacts.find((candidate) => sameQuotation(candidate.value, testimonial.quote));
-      if (!fact && isSensitive(testimonial.quote)) {
+      // A customer's attributed words are that customer's speech, not the
+      // business's claim: quote them exactly even when they mention an
+      // emergency, safety, a guarantee, a license or a price. Only an
+      // unattributed, unconfirmed quotation that states such a claim is withheld.
+      if (!fact && !testimonial.attribution && isSensitive(testimonial.quote)) {
         withhold(testimonial.quote, testimonial.sourcePath);
         return [];
       }
@@ -185,9 +191,13 @@ export function contentInventoryModule(inventory: FirstPartyContentInventory) {
  * own pages, grouped by kind, each with its sourcePath and the approved
  * routePath that consolidates it. Source material, never render-time data:
  * do not import this module. Quote testimonials and FAQ answers exactly with
- * their attribution; paraphrase the rest into customer copy. Credentials,
- * guarantees, prices, ratings, availability and offers are withheld here and
- * need exact publicFacts (factReferences names the ones that exist).
+ * their attribution; paraphrase the rest into customer copy. A testimonial may
+ * mention an emergency, safety, a guarantee, a license or a price: quote it
+ * exactly as that customer's attributed words (a blockquote with its cite or
+ * figcaption), never restate it as a claim in the business's voice.
+ * Credentials, guarantees, prices, ratings, availability and offers outside
+ * testimonials are withheld here and need exact publicFacts (factReferences
+ * names the ones that exist).
  */
 export const contentInventory = ${JSON.stringify(inventory, null, 2)} as const;
 `;

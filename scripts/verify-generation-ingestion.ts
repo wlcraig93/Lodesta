@@ -415,6 +415,14 @@ const reviewSummary = {
 };
 const testimonialBlocks = selectObservedFirstPartyTestimonials([reviewSummary], reviewSummary.url);
 assert.equal(testimonialBlocks.length, 2, "Generic reviews-page marketing copy was mistaken for a customer quotation, or explicit quotations were lost.");
+const manyReviewsSummary = {
+  ...summarizeCrawlHtml(`<!doctype html><title>Reviews</title><main><h1>Reviews</h1>
+    ${Array.from({ length: 30 }, (_, index) => `<blockquote>“Visit ${index + 1}: the crew arrived when promised and left the whole yard exactly as they found it.”</blockquote>`).join("\n")}
+  </main>`, "https://testimonial-source.example/reviews"),
+  source: "primary" as const
+};
+assert.equal(selectObservedFirstPartyTestimonials([manyReviewsSummary], manyReviewsSummary.url).length, 24,
+  "First-party testimonials are retained up to the widened cap of 24.");
 const proofFacts: Parameters<typeof observedProof>[2] = [];
 const retainedProof = observedProof({
   ...activeCrawlShell(reviewSummary.url),
@@ -429,6 +437,10 @@ assert(proofFacts.every((fact) => fact.kind === "proof" && fact.publicEligible &
 // and the business's own structured reviews without platform widgets,
 // credentials, bare-address email links, and static-export .html pages.
 const intakeOrigin = "https://intake-authority.example";
+// A customer's own words may mention an emergency, safety, a guarantee, a
+// license or a price; that is attributed speech, not the business's claim.
+const sensitiveTestimonial = "Our well quit on a holiday weekend and they came out for an emergency call, walked us through every safety check, and honored their guarantee on the pump. Licensed, careful, and the $450 price was exactly what they quoted.";
+const longTestimonial = `${"We had tried two other companies before calling, and neither could find why the pressure kept dropping overnight. ".repeat(6)}They found the cracked fitting in an hour.`;
 const intakeFooter = `<div class="site-footer-contact"><p>Call <a href="tel:+19195550181">(919) 555-0181</a> · Office <a href="tel:919-555-0199">919-555-0199</a></p></div>`;
 const intakeDocuments = new Map<string, string>([
   ["/", `<!doctype html><html><head><title>Dependable Well Service | Intake Authority</title>
@@ -471,6 +483,8 @@ const intakeDocuments = new Map<string, string>([
     <section class="cards">
       <div class="card"><div class="quote"><p>Stewart came out on a Saturday, found the failed pressure switch, and had water running within the hour.</p></div><div class="who"><h3>Ted L.</h3></div></div>
       <div class="card"><div class="quote"><p>They replaced our old jet pump with a submersible and cleaned up everything afterwards.</p><p>We will call them again.</p></div><div class="who"><h3>Hilda H.</h3></div></div>
+      <div class="card"><div class="quote"><p>${sensitiveTestimonial}</p></div><div class="who"><h3>Dana R.</h3></div></div>
+      <div class="card"><div class="quote"><p>${longTestimonial}</p></div><div class="who"><h3>Morgan K.</h3></div></div>
     </section>
     <div class="rplg"><div class="rplg-review"><div class="rplg-review-text"><p>Great platform review text that was copied from the Google listing by a widget plugin.</p></div><div class="rplg-review-name"><h4>Widget Person</h4></div></div></div>
     <blockquote>“The crew explained the whole replacement and left the yard exactly as they found it.”</blockquote>
@@ -522,6 +536,14 @@ assert(intakeTestimonials.includes("They replaced our old jet pump with a submer
 assert(intakeTestimonials.includes("They restored our water the same afternoon and explained every part they replaced."),
   "The business's own structured-data review was not retained.");
 assert(intakeTestimonials.includes("“The crew explained the whole replacement and left the yard exactly as they found it.”"));
+assert(intakeTestimonials.includes(sensitiveTestimonial),
+  "A verbatim attributed first-party testimonial was withheld for mentioning an emergency, safety, a guarantee, a license or a price.");
+assert(longTestimonial.length > 600 && intakeTestimonials.includes(longTestimonial.replace(/\s+/g, " ").trim()),
+  "A long verbatim first-party testimonial was dropped.");
+const danaFact = intake.state.facts.find((fact) => fact.kind === "proof" && fact.value === sensitiveTestimonial);
+assert.equal(danaFact?.label, "Observed testimonial from Dana R.");
+assert.equal(danaFact?.publicEligible, true);
+assert.equal(intakeProof.find((item) => item.publicText === sensitiveTestimonial)?.status, "confirmed");
 assert.equal(intakeTestimonials.some((text) => /widget plugin|on the platform/i.test(text)), false,
   "Review-platform widget or platform-authored review content was copied as a first-party testimonial.");
 const tedFact = intake.state.facts.find((fact) => fact.kind === "proof" && String(fact.value).startsWith("Stewart came out"));
@@ -549,7 +571,9 @@ assert.deepEqual(
   ["+19195550181", "+19195550199"],
   "Displayed phones did not reach publicFacts, so their tel: links would be rejected."
 );
-for (const text of ["NC Well Contractor License #4417", "serving the county since 2006", "Family owned and operated", "They restored our water the same afternoon and explained every part they replaced."]) {
+assert(intakeBuildInput.business.proof.some((item) => item.kind === "testimonial" && item.publicText === sensitiveTestimonial),
+  "A sensitive-worded verbatim testimonial did not reach the public build input.");
+for (const text of ["NC Well Contractor License #4417", "serving the county since 2006", "Family owned and operated", "They restored our water the same afternoon and explained every part they replaced.", sensitiveTestimonial]) {
   assert(intakeBuildInput.publicFacts.some((fact) => fact.kind === "proof" && fact.value === text), `Supported fact did not reach the author: ${text}`);
 }
 

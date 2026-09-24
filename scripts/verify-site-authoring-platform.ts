@@ -1012,6 +1012,56 @@ const numberQuotation = "I reached their 24/7 phone line during a storm and desc
 assert.equal(checkQuotation(`<blockquote><p>${numberQuotation}</p><cite>EH</cite></blockquote>`, {
   pages: [{ ...quotationPage, extractedText: `${numberQuotation}\nEH` }]
 }).status, "pass", "An exact source quotation was still blocked by the duplicate numeric-marker scanner.");
+// A customer's verbatim attributed words are that customer's speech, whatever
+// sensitive words they contain (emergency, safety, guarantee, licensed, price).
+const sensitiveQuotation = "They came out for an emergency call, explained every safety step, and honored their guarantee.";
+const sensitiveQuotationTail = "Licensed, careful, and the $450 price was exactly what they quoted.";
+const sensitiveQuotationPages = [{ ...quotationPage, extractedText: `Reviews\n${sensitiveQuotation}\n${sensitiveQuotationTail}\nDana R.\nContact our team` }];
+const sensitiveFigure = `<figure><blockquote>“${sensitiveQuotation} ${sensitiveQuotationTail}”</blockquote><figcaption><strong>Dana R.</strong><span>Homeowner</span></figcaption></figure>`;
+assert.equal(checkQuotation(sensitiveFigure, { pages: sensitiveQuotationPages }).status, "pass",
+  "A verbatim attributed multi-line customer testimonial was blocked for its sensitive words.");
+assert.equal(checkQuotation(sensitiveFigure, { pages: sensitiveQuotationPages }).findings.some(isClaimAdvisory), false,
+  "A verbatim attributed customer testimonial was flagged as a business claim.");
+assert.equal(checkQuotation(sensitiveFigure.replace("Dana R.", "Jane Doe"), { pages: sensitiveQuotationPages }).findings.some(isClaimAdvisory), true,
+  "A testimonial with an invented attribution was exempted.");
+assert.equal(checkQuotation(`${sensitiveFigure}<p>We offer emergency service with a safety guarantee.</p>`, { pages: sensitiveQuotationPages }).findings.some(isClaimAdvisory), true,
+  "A customer's testimonial authorized the same claim in the business's own voice.");
+assert.equal(checkQuotation(`<blockquote><p>${sensitiveQuotation}</p><cite>Dana R.</cite></blockquote>`, {
+  pages: [{ ...quotationPage, extractedText: `“${sensitiveQuotation}” - Dana R.` }]
+}).findings.some(isClaimAdvisory), false, "An inline first-party “quote” - Name testimonial was flagged.");
+const testimonialProofFact = {
+  id: "fact_proof_testimonial_dana",
+  kind: "proof" as const,
+  label: "Observed testimonial from Dana R.",
+  value: `${sensitiveQuotation} ${sensitiveQuotationTail}`,
+  source: {
+    factId: "fact_proof_testimonial_dana",
+    sourceSnapshotId: "source_first_party",
+    observedAt: "2026-07-20T00:00:00.000Z",
+    confidence: 0.65,
+    ownerConfirmed: false
+  },
+  publicEligible: true as const
+};
+const testimonialProofInput = sitePublicBuildInputSchema.parse({
+  ...quotationInput,
+  publicFacts: [...quotationInput.publicFacts, testimonialProofFact],
+  business: {
+    ...quotationInput.business,
+    proof: [...quotationInput.business.proof, {
+      id: "proof_testimonial_dana",
+      kind: "testimonial",
+      status: "confirmed",
+      publicText: testimonialProofFact.value,
+      verbatim: true,
+      sourceFactIds: [testimonialProofFact.id]
+    }]
+  }
+});
+assert.equal(checkQuotation(sensitiveFigure, { buildInput: testimonialProofInput, pages: [] }).findings.some(isClaimAdvisory), false,
+  "A confirmed verbatim testimonial proof was flagged for its sensitive words.");
+assert.equal(checkQuotation(sensitiveFigure.replace("Dana R.", "Jane Doe"), { buildInput: testimonialProofInput, pages: [] }).findings.some(isClaimAdvisory), true,
+  "A confirmed testimonial proof authorized a different attribution.");
 
 const emergencyDescriptionFact = {
   id: "fact_emergency_description",

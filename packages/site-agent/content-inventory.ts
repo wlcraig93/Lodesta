@@ -1,7 +1,14 @@
 import { reviewAttributionName, reviewAttributionPageTopicWords } from "@/lib/review-attribution";
 import type { SitePublicBuildInput, SourceSnapshotPage } from "@/packages/site-contracts";
 import { classifySourcePagePath, isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
-import { sensitiveFirstPartyTopics, type SensitiveFirstPartyTopic } from "@/packages/business-data/first-party-support";
+import {
+  coreFirstPartyPageRoles,
+  firstPartyPageRole,
+  isDatedOrPromotionalText,
+  sensitiveFirstPartyTopics,
+  type SensitiveFirstPartyTopic
+} from "@/packages/business-data/first-party-support";
+import { canonicalSourceTokens } from "@/lib/source-text-blocks";
 
 /**
  * A compact, category-organized index of the business's own first-party
@@ -22,6 +29,11 @@ export type FirstPartyContentInventory = {
   kind: "first-party-content-inventory";
   producer: typeof contentInventoryProducer;
   pagesRead: number;
+  /**
+   * The business's strongest real material, selected deterministically from
+   * the entries below and current core pages so the author sees it first.
+   */
+  signatureAssets: SignatureAssets;
   testimonials: Array<{
     quote: string;
     attribution?: string;
@@ -31,7 +43,18 @@ export type FirstPartyContentInventory = {
     sensitiveTopics?: SensitiveFirstPartyTopic[];
   }>;
   faqs: Array<{ question: string; answer: string; sourcePath: string; routePath?: string; sensitiveTopics?: SensitiveFirstPartyTopic[] }>;
-  people: Array<{ name: string; role?: string; statement?: string; sourcePath: string; routePath?: string; sensitiveTopics?: SensitiveFirstPartyTopic[] }>;
+  people: Array<{
+    name: string;
+    role?: string;
+    statement?: string;
+    /** Verbatim lines that follow a leader's name on the same page and describe them. */
+    bio?: string[];
+    /** Portrait-shaped retained photos on the same source page; confirm the subject by its pixels. */
+    photoResourceIds?: string[];
+    sourcePath: string;
+    routePath?: string;
+    sensitiveTopics?: SensitiveFirstPartyTopic[];
+  }>;
   projects: Array<{
     title: string;
     summary?: string;
@@ -49,6 +72,32 @@ export type FirstPartyContentInventory = {
   omitted?: Partial<Record<"testimonials" | "faqs" | "people" | "projects" | "serviceLists", number>>;
 };
 
+export type SignatureAssets = {
+  /** Owners, founders and leaders with their verbatim bio and same-page portrait candidates. */
+  leaders: Array<{ name: string; role?: string; bio?: string[]; photoResourceIds?: string[]; sourcePath: string; routePath?: string }>;
+  testimonials: {
+    /** First-party testimonials available: inventory quotations plus proof facts. */
+    count: number;
+    /** Attributed, substantive quotations, copied exactly from the entries below. */
+    strongest: Array<{ quote: string; attribution?: string; publicFactId?: string; sourcePath?: string; routePath?: string }>;
+  };
+  /**
+   * Complete sentences about prices, plans, discounts or free services from
+   * current core pages that are neither dated nor promotional. Each is
+   * publishable only verbatim, as a whole sentence.
+   */
+  offers: Array<{ text: string; sourcePath: string; routePath?: string }>;
+  /** Named plans or packages and what each includes, verbatim. */
+  plans: Array<{ name: string; includes: string[]; sourcePath: string; routePath?: string }>;
+  /** Years, family or veteran ownership, credentials and awards: verbatim lines and proof facts. */
+  standing: Array<{ text: string; sourcePath?: string; routePath?: string; publicFactId?: string }>;
+  /**
+   * Video and podcast links on the business's own pages. Link one with an
+   * ordinary anchor to the exact URL; embedded players cannot load on the site.
+   */
+  media: Array<{ kind: "video" | "podcast"; url: string; sourcePath: string; routePath?: string }>;
+};
+
 export const contentInventoryProducer = "first-party-content-inventory@1" as const;
 export const contentInventoryPath = "src/content-inventory.ts" as const;
 
@@ -62,7 +111,15 @@ const limits = {
   quoteCharacters: 2_000,
   answerCharacters: 900,
   summaryCharacters: 300,
-  topicPaths: 6
+  topicPaths: 6,
+  signatureLeaders: 4,
+  signatureTestimonials: 4,
+  signatureOffers: 8,
+  signaturePlans: 4,
+  signatureStanding: 8,
+  signatureMedia: 6,
+  bioLines: 3,
+  bioCharacters: 900
 } as const;
 
 type InventoryPage = {
@@ -77,6 +134,8 @@ export function createFirstPartyContentInventory(input: {
   publicFacts?: SitePublicBuildInput["publicFacts"];
   routeForSourcePath?: (sourcePath: string) => string | undefined;
   imagesForSourcePath?: (sourcePath: string) => string[];
+  /** Portrait-shaped retained photos loaded by a source page, any proof scope. */
+  portraitsForSourcePath?: (sourcePath: string) => string[];
 }): FirstPartyContentInventory {
   const pages = inventoryPages(input.pages);
   const lineFrequency = new Map<string, number>();
@@ -133,11 +192,15 @@ export function createFirstPartyContentInventory(input: {
     ...tag([faq.question, faq.answer], faq.sourcePath)
   }));
 
-  const people = extractPeople(pages, isChrome).map((person) => ({
-    ...person,
-    ...route(person.sourcePath),
-    ...tag([person.statement], person.sourcePath)
-  }));
+  const people = extractPeople(pages, isChrome).map((person) => {
+    const photoResourceIds = person.bio ? input.portraitsForSourcePath?.(person.sourcePath).slice(0, 2) ?? [] : [];
+    return {
+      ...person,
+      ...(photoResourceIds.length ? { photoResourceIds } : {}),
+      ...route(person.sourcePath),
+      ...tag([person.statement, ...(person.bio ?? [])], person.sourcePath)
+    };
+  });
 
   const projects = extractProjects(pages, isChrome).map((project) => {
     const imageResourceIds = input.imagesForSourcePath?.(project.sourcePath).slice(0, 4) ?? [];
@@ -160,11 +223,62 @@ export function createFirstPartyContentInventory(input: {
     .filter((fact) => !testimonials.some((testimonial) => testimonial.publicFactId === fact.id))
     .map((fact) => ({ publicFactId: fact.id, label: fact.label, value: fact.value }));
 
+  const testimonialFacts = factReferences.filter((fact) => /testimonial/i.test(fact.label));
+  const leaders = people.filter((person) => person.bio || leaderRole(person.role)).slice(0, limits.signatureLeaders);
+  // Customer quotations and leader bios already carry their own sentences.
+  const quoted = [
+    ...testimonials.map((testimonial) => testimonial.quote),
+    ...proofFacts.map((fact) => fact.value),
+    ...leaders.flatMap((leader) => leader.bio ?? [])
+  ].map(normalizeLine);
+  const unquoted = <T extends { text: string }>(line: T) => {
+    const identity = normalizeLine(line.text);
+    return !quoted.some((text) => text.includes(identity));
+  };
+  const signatureAssets: SignatureAssets = {
+    leaders: leaders
+      .map(({ name, role, bio, photoResourceIds, sourcePath, routePath }) => ({
+        name,
+        ...(role ? { role } : {}),
+        ...(bio ? { bio } : {}),
+        ...(photoResourceIds ? { photoResourceIds } : {}),
+        sourcePath,
+        ...(routePath ? { routePath } : {})
+      })),
+    testimonials: {
+      count: testimonials.length + testimonialFacts.length,
+      strongest: strongestTestimonials([
+        ...testimonials.map((testimonial) => ({
+          quote: testimonial.quote,
+          ...(testimonial.attribution ? { attribution: testimonial.attribution } : {}),
+          ...(testimonial.publicFactId ? { publicFactId: testimonial.publicFactId } : {}),
+          sourcePath: testimonial.sourcePath,
+          ...(testimonial.routePath ? { routePath: testimonial.routePath } : {})
+        })),
+        ...testimonialFacts.map((fact) => {
+          const attribution = fact.label.match(/testimonial from (.+)$/i)?.[1]?.trim();
+          return { quote: fact.value, ...(attribution ? { attribution } : {}), publicFactId: fact.publicFactId };
+        })
+      ])
+    },
+    offers: extractOffers(pages).filter(unquoted).slice(0, limits.signatureOffers).map((offer) => ({ ...offer, ...route(offer.sourcePath) })),
+    plans: extractPlans(pages, isChrome).slice(0, limits.signaturePlans).map((plan) => ({ ...plan, ...route(plan.sourcePath) })),
+    standing: [
+      ...(input.publicFacts ?? []).flatMap((fact) => fact.kind === "proof" && typeof fact.value === "string"
+        && /founding|ownership|years|veteran|credential|licen|certif|award|member/i.test(fact.label)
+        ? [{ text: fact.value, publicFactId: fact.id }]
+        : []),
+      ...extractStanding(pages).filter(unquoted).map((line) => ({ ...line, ...route(line.sourcePath) }))
+    ].slice(0, limits.signatureStanding),
+    media: extractMedia(pages).slice(0, limits.signatureMedia).map((item) => ({ ...item, ...route(item.sourcePath) }))
+  };
+
   return {
     schemaVersion: 1,
     kind: "first-party-content-inventory",
     producer: contentInventoryProducer,
     pagesRead: pages.length,
+    signatureAssets,
     testimonials: capped("testimonials", testimonials, limits.testimonials),
     faqs: capped("faqs", faqs, limits.faqs),
     people: capped("people", people, limits.people),
@@ -182,8 +296,10 @@ export function createFirstPartyContentInventory(input: {
 }
 
 export function contentInventoryIsEmpty(inventory: FirstPartyContentInventory) {
+  const signature = inventory.signatureAssets;
   return !inventory.testimonials.length && !inventory.faqs.length && !inventory.people.length
-    && !inventory.projects.length && !inventory.serviceLists.length && !inventory.factReferences.length;
+    && !inventory.projects.length && !inventory.serviceLists.length && !inventory.factReferences.length
+    && !signature.offers.length && !signature.plans.length && !signature.standing.length && !signature.media.length;
 }
 
 export function contentInventoryModule(inventory: FirstPartyContentInventory) {
@@ -191,7 +307,14 @@ export function contentInventoryModule(inventory: FirstPartyContentInventory) {
  * Read-only first-party content inventory. Verbatim excerpts of this business's
  * own pages, grouped by kind, each with its sourcePath and the approved
  * routePath that consolidates it. Source material, never render-time data:
- * do not import this module. Quote testimonials and FAQ answers exactly with
+ * do not import this module. signatureAssets comes first: the business's
+ * strongest real material (its leaders with their bio and portrait
+ * candidates, its best testimonials, real offers and plans, years and
+ * credentials, videos and podcasts). Build the homepage and key pages around it rather than
+ * generic sections. An offers entry is a complete source sentence: render it
+ * whole and verbatim, because a price is verified only as that sentence.
+ * Confirm a photoResourceIds subject by its pixels before naming the person.
+ * Quote testimonials and FAQ answers exactly with
  * their attribution; paraphrase the rest into customer copy. A testimonial may
  * mention an emergency, safety, a guarantee, a license or a price: quote it
  * exactly as that customer's attributed words (a blockquote with its cite or
@@ -207,7 +330,11 @@ export const contentInventory = ${JSON.stringify(inventory, null, 2)} as const;
 }
 
 export function contentInventorySummary(inventory: FirstPartyContentInventory) {
+  const signature = inventory.signatureAssets;
   const parts = [
+    [signature.leaders.length, "signature leaders"],
+    [signature.offers.length + signature.plans.length, "signature offers or plans"],
+    [signature.media.length, "videos or podcasts"],
     [inventory.testimonials.length, "first-party testimonials"],
     [inventory.faqs.length, "FAQs"],
     [inventory.people.length, "named people"],
@@ -410,13 +537,14 @@ const rolePatterns = [
 ];
 
 function extractPeople(pages: InventoryPage[], isChrome: (line: string) => boolean) {
-  const results: Array<{ name: string; role?: string; statement?: string; sourcePath: string }> = [];
+  const results: Array<{ name: string; role?: string; statement?: string; bio?: string[]; sourcePath: string }> = [];
   const seen = new Set<string>();
   for (const entry of pages) {
     if (/blog|article|post|news/i.test(entry.path) || isProofPage(entry)) continue;
-    for (const line of entry.lines) {
-      if (isChrome(line) || line.length > 1_200) continue;
-      for (const sentence of sentences(line)) {
+    for (const [lineIndex, line] of entry.lines.entries()) {
+      if (isChrome(line)) continue;
+      // A long transcript or article line still introduces its speaker early.
+      for (const sentence of sentences(line.length > 1_200 ? line.slice(0, 1_200) : line)) {
         // A team roster sentence: "Tracy leads a team ..., including Kayla, Lizann, and Yanet."
         const roster = /\b(?:team|crew|staff|employees)\b/i.test(sentence)
           ? sentence.match(/\b([A-Z][a-z'’]+(?:,\s*(?:and\s+|&\s+)?[A-Z][a-z'’]+){2,}(?:,?\s*(?:and|&)\s+[A-Z][a-z'’]+)?)/)?.[1]
@@ -438,10 +566,12 @@ function extractPeople(pages: InventoryPage[], isChrome: (line: string) => boole
             const identity = normalizeLine(name).split(" ")[0]!;
             if (seen.has(identity)) continue;
             seen.add(identity);
+            const bio = leaderRole(role) ? leaderBio(entry, lineIndex, name, isChrome) : [];
             results.push({
               name,
               role,
               ...(sentence.length <= 400 && sentence.length > name.length + role.length + 12 ? { statement: sentence } : {}),
+              ...(bio.length ? { bio } : {}),
               sourcePath: entry.path
             });
           }
@@ -450,6 +580,205 @@ function extractPeople(pages: InventoryPage[], isChrome: (line: string) => boole
     }
   }
   return results;
+}
+
+const leaderRolePattern = /\b(?:owner|co-owner|founder|co-founder|president|ceo|operator|general manager)\b/i;
+
+function leaderRole(role: string | undefined) {
+  return Boolean(role && leaderRolePattern.test(role));
+}
+
+/**
+ * The prose lines after a leader's name line that are about them: they name
+ * the person or continue in the third person. Stops at a heading, chrome, or
+ * the first line about something else.
+ */
+function leaderBio(entry: InventoryPage, lineIndex: number, name: string, isChrome: (line: string) => boolean) {
+  const first = name.split(/\s+/)[0]!.replace(/[“”"]/g, "");
+  const aboutThem = new RegExp(`\\b${first}\\b|^(?:He|She|They|His|Her|Their)\\b`);
+  const bio: string[] = [];
+  let characters = 0;
+  for (let index = lineIndex + 1; index < entry.lines.length && bio.length < limits.bioLines; index += 1) {
+    const line = entry.lines[index]!;
+    if (line.length < 40 || isChrome(line) || entry.headings.has(normalizeLine(line)) || !aboutThem.test(line)) break;
+    if (characters + line.length > limits.bioCharacters) break;
+    bio.push(line);
+    characters += line.length;
+  }
+  return bio;
+}
+
+type SignatureTestimonial = SignatureAssets["testimonials"]["strongest"][number];
+
+/**
+ * Attributed, substantive, specific quotations first; source order breaks
+ * ties. A proof fact that repeats an inventory quotation is merged.
+ */
+function strongestTestimonials(candidates: SignatureTestimonial[]) {
+  const unique: SignatureTestimonial[] = [];
+  for (const candidate of candidates) {
+    const identity = normalizeLine(candidate.quote);
+    if (identity.length < 20 || unique.some((existing) => {
+      const other = normalizeLine(existing.quote);
+      return other.includes(identity) || identity.includes(other);
+    })) continue;
+    unique.push(candidate);
+  }
+  const score = (candidate: SignatureTestimonial) => {
+    const length = candidate.quote.length;
+    return (candidate.attribution ? 2 : 0)
+      + (length >= 100 && length <= 450 ? 2 : length >= 60 && length <= 700 ? 1 : 0)
+      + (/\b(?:same day|next day|on time|thorough|explained|honest|knowledgeable|professional)\b/i.test(candidate.quote) ? 1 : 0);
+  };
+  return unique.map((candidate, order) => ({ candidate, order, score: score(candidate) }))
+    .sort((left, right) => right.score - left.score || left.order - right.order)
+    .slice(0, limits.signatureTestimonials)
+    .map(({ candidate }) => candidate);
+}
+
+/** Current core pages (home, contact, about, services): standing statements, not posts or archives. */
+function isCoreInventoryPage(entry: InventoryPage) {
+  return coreFirstPartyPageRoles.has(firstPartyPageRole({ path: entry.path, title: entry.page.title }));
+}
+
+/**
+ * Sentences as the release gate indexes first-party text: split at line
+ * breaks and sentence punctuation, so each one verifies when rendered whole.
+ */
+function gateSentences(entry: InventoryPage) {
+  return entry.page.extractedText.split(/\n+|(?<=[.!?])\s+/)
+    .map((sentence) => sentence.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+/** The business's own statement: not a customer's first person, a quotation, or a question. */
+function businessStatement(sentence: string) {
+  if (firstPersonSingular(sentence) || /^[“"]/.test(sentence) || /\?$/.test(sentence)) return false;
+  // A review widget's sentence talks about the business as "they".
+  return !(/\b(?:they|they're|they’re|their|them)\b/i.test(sentence) && !/\b(?:we|our|us)\b/i.test(sentence));
+}
+
+const offerPattern = /\$\s?\d|\b(?:starting at|financing|discounts?|coupons?|special (?:offers?|pricing|deals?)|loyalty program|referral|\d+% off|save \d+%|free (?:estimates?|inspections?|quotes?|consultations?|re[- ]?treat(?:s|ments?)?)|at no (?:additional|extra) cost|free of charge)\b/i;
+
+/** Recurring plan prices first, then pricing and offer pages, the homepage, then the rest. */
+function offerPriority(path: string, sentence: string) {
+  if (/\$\s?\d[^.!?]*\b(?:month|mo|year|visit|quarter)\b|\bstarting at \$/i.test(sentence)) return 0;
+  if (/pric|packages?|plans?|special|offers?|coupons?|refer/i.test(path)) return 1;
+  return path === "/" ? 2 : 3;
+}
+
+/**
+ * Price, plan, discount and free-service sentences from current core pages,
+ * matching the release gate's first-party rule: a complete sentence of at
+ * least five words that is neither dated nor promotional, in the business's
+ * own voice. Pricing and plan pages first, then priced sentences.
+ */
+function extractOffers(pages: InventoryPage[]) {
+  const results: Array<{ text: string; sourcePath: string; priority: number; order: number }> = [];
+  const seen = new Set<string>();
+  for (const entry of pages) {
+    if (!isCoreInventoryPage(entry)) continue;
+    for (const sentence of gateSentences(entry)) {
+      if (sentence.length > 240 || canonicalSourceTokens(sentence).length < 5 || !businessStatement(sentence)) continue;
+      if (!offerPattern.test(sentence) || /\b(?:billion|million)\b/i.test(sentence)) continue;
+      if (isDatedOrPromotionalText(sentence)) continue;
+      // Location pages often repeat one sentence with a small variation.
+      const identity = normalizeLine(sentence);
+      if ([...seen].some((other) => other.includes(identity) || identity.includes(other))) continue;
+      seen.add(identity);
+      results.push({ text: sentence, sourcePath: entry.path, priority: offerPriority(entry.path, sentence), order: results.length });
+    }
+  }
+  return results.sort((left, right) => left.priority - right.priority || left.order - right.order)
+    .map(({ text, sourcePath }) => ({ text, sourcePath }));
+}
+
+const planPricePattern = /^\$\s?\d[\d,.]*\s*(?:\/\s*|per\s+|a\s+)?(?:mo|month|monthly|yr|year|yearly|annually|visit|quarter|quarterly)\b/i;
+
+/** Named plans: a short name line, a recurring price line, then what the plan includes. */
+function extractPlans(pages: InventoryPage[], isChrome: (line: string) => boolean) {
+  const results: Array<{ name: string; includes: string[]; sourcePath: string }> = [];
+  const seen = new Set<string>();
+  for (const entry of pages) {
+    if (!isCoreInventoryPage(entry)) continue;
+    entry.lines.forEach((line, index) => {
+      if (index === 0 || !planPricePattern.test(line)) return;
+      const name = entry.lines[index - 1]!;
+      if (name.length < 3 || name.length > 60 || /\$|\?$/.test(name)) return;
+      const includes: string[] = [];
+      for (let next = index + 1; next < entry.lines.length && includes.length < limits.listItems; next += 1) {
+        const item = entry.lines[next]!;
+        if (planPricePattern.test(item)) {
+          // The line before the next price names the next plan.
+          includes.pop();
+          break;
+        }
+        if (item.length > 160 || isChrome(item) || entry.headings.has(normalizeLine(item))) break;
+        includes.push(item);
+      }
+      const identity = normalizeLine(name);
+      if (includes.length < 2 || seen.has(identity)) return;
+      seen.add(identity);
+      results.push({ name, includes, sourcePath: entry.path });
+    });
+  }
+  return results;
+}
+
+const standingPattern = /\b(?:since (?:18|19|20)\d{2}|(?:established|founded|opened) in (?:18|19|20)\d{2}|family[- ](?:owned|run|operated)|veteran[- ](?:owned|run|operated)|(?:air force|army|navy|marine|coast guard) veteran|over (?:\d+|two|three|four|five) (?:years|decades)|\d+\+? years (?:of experience|in business|serving)|licensed and insured|fully licensed|certified|accredited|award(?:ed|s|-winning)?|member of)\b/i;
+
+/** Years, family or veteran ownership, credentials and awards in the business's own voice on core pages. */
+function extractStanding(pages: InventoryPage[]) {
+  const results: Array<{ text: string; sourcePath: string }> = [];
+  const seen = new Set<string>();
+  for (const entry of pages) {
+    if (!isCoreInventoryPage(entry)) continue;
+    for (const sentence of gateSentences(entry)) {
+      if (sentence.length > 240 || canonicalSourceTokens(sentence).length < 4 || !businessStatement(sentence)) continue;
+      if (!standingPattern.test(sentence) || isDatedOrPromotionalText(sentence)) continue;
+      const identity = normalizeLine(sentence);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      results.push({ text: sentence, sourcePath: entry.path });
+    }
+  }
+  return results;
+}
+
+function mediaKind(url: URL): "video" | "podcast" | undefined {
+  const host = url.hostname.toLowerCase().replace(/^(?:www|m)\./, "");
+  if (((host === "youtube.com" || host === "youtube-nocookie.com") && /^\/(?:watch|shorts\/|embed\/|@|channel\/|c\/|user\/)/.test(url.pathname))
+    || host === "youtu.be"
+    || (host === "vimeo.com" && /^\/\d+/.test(url.pathname))
+    || (host === "player.vimeo.com" && /^\/video\/\d+/.test(url.pathname))) return "video";
+  if ((host === "open.spotify.com" && /^\/show\//.test(url.pathname))
+    || (host === "podcasts.apple.com")
+    || (host === "music.amazon.com" && /^\/podcasts\//.test(url.pathname))) return "podcast";
+  return undefined;
+}
+
+/** Video and podcast links on the business's own current pages. */
+function extractMedia(pages: InventoryPage[]) {
+  const results: Array<{ kind: "video" | "podcast"; url: string; sourcePath: string }> = [];
+  const seen = new Set<string>();
+  for (const entry of pages) {
+    if (!isCoreInventoryPage(entry)) continue;
+    for (const href of entry.page.externalLinks) {
+      let url: URL;
+      try {
+        url = new URL(href);
+      } catch {
+        continue;
+      }
+      const kind = mediaKind(url);
+      if (!kind || seen.has(url.toString())) continue;
+      seen.add(url.toString());
+      results.push({ kind, url: url.toString(), sourcePath: entry.path });
+    }
+  }
+  // A single video first, then a channel, then podcasts.
+  const rank = (item: { kind: string; url: string }) => item.kind === "podcast" ? 2 : /\/(?:@|channel\/|c\/|user\/)/.test(new URL(item.url).pathname) ? 1 : 0;
+  return results.sort((left, right) => rank(left) - rank(right));
 }
 
 function plausiblePersonName(name: string) {

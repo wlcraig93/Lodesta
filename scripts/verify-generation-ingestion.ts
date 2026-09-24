@@ -198,7 +198,16 @@ User-agent: lodestawebsitecrawler
 Allow: /
 `);
 assert.equal(robotsAllows(`${origin}/`, exactAgent.rules), true);
+assert.equal(generationCrawlerUserAgent, "LodestaBot/1.0 (+https://lodesta.com/bot)");
 assert.match(generationCrawlerUserAgent, new RegExp(generationCrawlerProductToken));
+assert.doesNotMatch(generationCrawlerUserAgent, /crawler/i, "Firewalls commonly block user agents containing 'crawler'.");
+const legacyOptOut = parseRobotsPolicy("User-agent: *\nAllow: /\n\nUser-agent: LodestaWebsiteCrawler\nDisallow: /\n");
+assert.equal(robotsAllows(`${origin}/`, legacyOptOut.rules), false, "Opt-outs for the earlier product token must still be honored.");
+const botOptOut = parseRobotsPolicy("User-agent: *\nAllow: /\n\nUser-agent: LodestaBot\nDisallow: /private\n");
+assert.equal(robotsAllows(`${origin}/private/x`, botOptOut.rules), false);
+assert.equal(robotsAllows(`${origin}/`, botOptOut.rules), true);
+const botOverridesLegacy = parseRobotsPolicy("User-agent: LodestaWebsiteCrawler\nDisallow: /\n\nUser-agent: LodestaBot\nAllow: /\n");
+assert.equal(robotsAllows(`${origin}/`, botOverridesLegacy.rules), true, "A LodestaBot group outranks a legacy-token group.");
 assert.equal("selectedPages" in generationIngestionLimits, false);
 assert.equal("browserFallbackPages" in generationIngestionLimits, false);
 assert.equal("totalMs" in generationIngestionLimits, false);

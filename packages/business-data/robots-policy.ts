@@ -1,5 +1,7 @@
-export const generationCrawlerProductToken = "LodestaWebsiteCrawler";
-export const generationCrawlerUserAgent = `${generationCrawlerProductToken}/1.0 (+https://lodesta.com/crawler)`;
+export const generationCrawlerProductToken = "LodestaBot";
+export const generationCrawlerUserAgent = `${generationCrawlerProductToken}/1.0 (+https://lodesta.com/bot)`;
+// Site owners who opted out under the previous product token keep that opt-out.
+export const generationCrawlerRobotsTokens = [generationCrawlerProductToken, "LodestaWebsiteCrawler"] as const;
 
 export type RobotsRule = {
   kind: "allow" | "disallow";
@@ -18,7 +20,7 @@ type RobotsGroup = {
 
 export function parseRobotsPolicy(
   text: string,
-  productToken = generationCrawlerProductToken
+  productToken: string | readonly string[] = generationCrawlerRobotsTokens
 ): RobotsPolicy {
   const groups: RobotsGroup[] = [];
   const sitemaps: string[] = [];
@@ -73,8 +75,18 @@ export function robotsAllows(url: string, rules: RobotsRule[]) {
   return matches.some((rule) => rule.specificity === strongest && rule.kind === "allow");
 }
 
-function selectRules(groups: RobotsGroup[], productToken: string) {
-  const normalizedProduct = productToken.toLowerCase();
+// Tokens are tried in priority order: the first token with a specifically matching group
+// decides, so a LodestaBot group outranks a group written for an earlier token.
+function selectRules(groups: RobotsGroup[], productToken: string | readonly string[]) {
+  const tokens = typeof productToken === "string" ? [productToken] : productToken;
+  for (const token of tokens) {
+    const selected = selectRulesForToken(groups, token.toLowerCase());
+    if (selected.specific) return selected.rules;
+  }
+  return groups.filter((group) => group.agents.includes("*")).flatMap((group) => group.rules);
+}
+
+function selectRulesForToken(groups: RobotsGroup[], normalizedProduct: string) {
   const ranked = groups.map((group) => ({
     group,
     specificity: Math.max(
@@ -86,10 +98,12 @@ function selectRules(groups: RobotsGroup[], productToken: string) {
     )
   }));
   const strongestSpecific = Math.max(-1, ...ranked.map((entry) => entry.specificity));
-  const selectedSpecificity = strongestSpecific > 0 ? strongestSpecific : 0;
-  return ranked
-    .filter((entry) => entry.specificity === selectedSpecificity)
-    .flatMap((entry) => entry.group.rules);
+  return {
+    specific: strongestSpecific > 0,
+    rules: ranked
+      .filter((entry) => entry.specificity === strongestSpecific)
+      .flatMap((entry) => entry.group.rules)
+  };
 }
 
 function robotsPatternMatches(pattern: string, target: string) {

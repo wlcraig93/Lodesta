@@ -248,7 +248,10 @@ export const managerToolArguments = {
   build_preview: z.object({}).strict(),
   inspect_site: z.object({
     route: z.string().startsWith("/").max(300).nullable().optional().transform((value) => value ?? undefined),
-    selector: z.string().trim().min(1).max(500).nullable().optional().transform((value) => value ?? undefined)
+    selector: z.string().trim().min(1).max(500).nullable().optional().transform((value) => value ?? undefined),
+    viewport: z.enum(["tablet"]).nullable().optional().transform((value) => value ?? undefined),
+    full: z.array(z.string().startsWith("/").max(300)).max(6).nullable().optional()
+      .transform((value) => value?.length ? [...new Set(value)] : undefined)
   }).strict(),
   request_input: z.object({ question: z.string().min(1).max(600) }).strict(),
   finish: z.object({

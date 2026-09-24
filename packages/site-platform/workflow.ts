@@ -137,7 +137,9 @@ import {
   finalizePreparedArtifact,
   createArtifactContactSheet,
   createArtifactContactSheets,
-  createArtifactVisualFrames,
+  authorInspectionImageDetail,
+  createAuthorInspectionImages,
+  normalizeRoutePath,
   createMediaContactSheet,
   createSourceMediaContactSheet,
   createArtifactThumbnail,
@@ -2771,6 +2773,8 @@ export class SiteAuthoringWorkflow {
         selector: target.selector,
         selectionLabel: target.label,
         authorScreenshot: target.authorScreenshot,
+        fullRoutes: target.fullRoutes,
+        previousRouteRenderHashes: target.previousRouteRenderHashes,
         signal: combineAbortSignals(input.signal, inspectionSignal),
         onPhase
       }),
@@ -3530,7 +3534,9 @@ export class SiteAuthoringWorkflow {
     imageDetail?: "high";
     selector?: string;
     selectionLabel?: string;
-    authorScreenshot?: "full" | "focus";
+    authorScreenshot?: "full" | "focus" | "tablet";
+    fullRoutes?: readonly string[];
+    previousRouteRenderHashes?: Readonly<Record<string, string>>;
     signal?: AbortSignal;
     onPhase?: (phase: "browser_navigation_capture" | "visual_evidence_preparation" | "persistence", durationMs?: number) => void;
   }) {
@@ -3577,14 +3583,23 @@ export class SiteAuthoringWorkflow {
       preferredRouteLimit: 5
     });
     const authorScreenshot = input.authorScreenshot ?? "full";
-    const selectedRoutes = (retainedScope.length
-      ? retainedScope
-      : representativeRoutes).slice(
-        0,
-        input.route || input.selector
-          ? 1
-          : 5
-      );
+    const availableRoutePaths = new Set(prepared.routes.map((route) => route.path));
+    // An explicitly inspected route is shown whole, like any requested full route.
+    const requestedFullRoutes = authorScreenshot === "full"
+      ? [...new Set([...(input.fullRoutes ?? []), ...(input.route ? [input.route] : [])].map(normalizeRoutePath))]
+        .filter((route) => availableRoutePaths.has(route))
+      : [];
+    const selectedRoutes = [...new Set([
+      ...(retainedScope.length
+        ? retainedScope
+        : representativeRoutes).slice(
+          0,
+          input.route || input.selector
+            ? 1
+            : 5
+        ),
+      ...requestedFullRoutes
+    ])];
     // Every inspection runs the release browser checks on every route, so the
     // author sees each blocker finish would report, and captures screenshots of
     // the representative sample (or the requested route or close-up).
@@ -3621,9 +3636,16 @@ export class SiteAuthoringWorkflow {
     input.onPhase?.("browser_navigation_capture", browserCaptureMs);
     const visualEvidenceStartedAt = Date.now();
     input.onPhase?.("visual_evidence_preparation");
-    const visualFrames = browserGate.captures.length
-      ? await createArtifactVisualFrames(browserGate.captures, selectedRoutes)
-      : [];
+    const authorImages = browserGate.captures.length
+      ? await createAuthorInspectionImages({
+        captures: browserGate.captures,
+        routes: selectedRoutes,
+        requestedFullRoutes,
+        previousRouteRenderHashes: input.previousRouteRenderHashes
+      })
+      : undefined;
+    const visualFrames = authorImages?.images ?? [];
+    const imageDetail = input.imageDetail ?? authorInspectionImageDetail;
     const visualEvidencePreparationMs = Date.now() - visualEvidenceStartedAt;
     input.onPhase?.("visual_evidence_preparation", visualEvidencePreparationMs);
     input.onPhase?.("persistence");
@@ -3646,17 +3668,18 @@ export class SiteAuthoringWorkflow {
         requestedSelector: input.selector,
         selectionLabel: input.selectionLabel,
         authorScreenshot,
+        requestedFullRoutes: input.fullRoutes ?? [],
         focusedSelection: authorScreenshot === "focus" && Boolean(input.selector),
         inspectedRoutes: selectedRoutes,
         routes: prepared.routes.map((route) => route.path),
         findings: inspectionFindings,
         staticFindingCount: prepared.findings.length,
         browserFindingCount: inspectionFindings.length - prepared.findings.length,
-        screenshotCount: browserGate.captures.length,
-        visualEvidenceRoutes: [...new Set(visualFrames.map((frame) => frame.evidence.route))],
+        visualEvidenceRoutes: [...new Set(visualFrames.flatMap((frame) => frame.evidence.routes ?? (frame.evidence.route ? [frame.evidence.route] : [])))],
         visualEvidenceFrames: visualFrames.map((frame) => frame.evidence),
-        visualEvidenceFrameCount: visualFrames.length,
-        focusedScreenshotCount: browserGate.captures.filter((capture) => capture.frame === "focus").length
+        fullPageRoutes: authorImages?.fullPageRoutes ?? [],
+        changedRoutes: input.previousRouteRenderHashes ? authorImages?.changedRoutes ?? [] : undefined,
+        estimatedImageTokens: visualFrames.reduce((sum, frame) => sum + frame.evidence.estimatedTokens, 0)
       },
       diagnosticSummary: {
         visualOnly: true,
@@ -3666,6 +3689,9 @@ export class SiteAuthoringWorkflow {
         authorScreenshot,
         inspectedRoutes: selectedRoutes,
         visualEvidenceFrames: visualFrames.map((frame) => frame.evidence),
+        fullPageRoutes: authorImages?.fullPageRoutes ?? [],
+        changedRoutes: authorImages?.changedRoutes ?? [],
+        estimatedImageTokens: visualFrames.reduce((sum, frame) => sum + frame.evidence.estimatedTokens, 0),
         visualEvidenceBytes: visualFrames.reduce((sum, frame) => sum + frame.bytes.byteLength, 0),
         findings: inspectionFindings,
         staticFindingCount: prepared.findings.length,
@@ -3679,10 +3705,11 @@ export class SiteAuthoringWorkflow {
           advisoryEvaluationMs: 0
         }
       },
+      routeRenderHashes: authorImages?.routeRenderHashes ?? {},
       images: visualFrames.map((frame) => ({
         type: "input_image" as const,
         image_url: `data:image/png;base64,${frame.bytes.toString("base64")}`,
-        detail: "high" as const
+        detail: imageDetail
       }))
     };
   }

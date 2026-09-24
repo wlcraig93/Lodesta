@@ -184,7 +184,7 @@ for (const contract of [
   /LeadField label and control class props/,
   /LeadField adds no required\/optional decoration.*schema status visible through field labels or adjacent copy naming the required and optional fields/,
   /full-column controls/,
-  /screenshots. Look at them the way the business owner and a customer would/
+  /first-screen sheet of the other inspected pages. Look at them the way the business owner and a customer would/
 ]) assert.match(initialBuildSkill, contract);
 
 const [contracts, workflow, sourcePreparation, repository, architecture, browserGate] = await Promise.all([

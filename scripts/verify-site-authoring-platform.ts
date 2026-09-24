@@ -11,7 +11,9 @@ import { continuousAvailabilityConformanceVectors } from "../packages/site-contr
 import {
   agentAuthoredArtifactSchema,
   buildInformationArchitectureAdvisory,
-  createArtifactVisualFrames,
+  authorInspectionPatchCap,
+  createAuthorInspectionImages,
+  imagePatchCount,
   finalizePreparedArtifact,
   FactBindingValidator,
   normalizeAgentAuthoredArtifact,
@@ -51,25 +53,68 @@ assert.deepEqual(
   ["/services", "/"],
   "A bounded route-family inspection did not preserve its requested available route scope."
 );
-const frameBytes = await sharp({ create: { width: 768, height: 1024, channels: 3, background: "#123456" } }).png().toBuffer();
-const nativeFrames = await createArtifactVisualFrames([
-  { route: "/outside", key: "excluded", viewport: "tablet", stage: "settled", frame: "top", bytes: frameBytes },
-  { route: "/", key: "natural", viewport: "desktop", stage: "natural", frame: "top", bytes: frameBytes },
-  { route: "/", key: "tablet", viewport: "tablet", stage: "settled", frame: "top", bytes: frameBytes },
-  { route: "/contact", key: "focus", viewport: "mobile", stage: "settled", frame: "focus", focusSelector: "form", bytes: frameBytes },
-  { route: "/", key: "menu", viewport: "mobile", stage: "settled", frame: "navigation", pageState: { scrollX: 0, scrollY: 120 }, bytes: frameBytes }
-], ["/contact", "/", "/"]);
-assert.deepEqual(nativeFrames.map((item) => [item.evidence.imageIndex, item.evidence.route, item.evidence.frame]), [
-  [1, "/contact", "focus"], [2, "/", "top"], [3, "/", "navigation"]
-]);
-assert(nativeFrames.every((item) => item.bytes === frameBytes && item.evidence.width === 768 && item.evidence.height === 1024),
-  "Author inspection must preserve exact original bytes and dimensions, including tablet frames.");
-assert.equal(nativeFrames[0].evidence.focusSelector, "form");
-assert.equal(nativeFrames[2].evidence.pageState?.scrollY, 120);
-await assert.rejects(createArtifactVisualFrames([], ["/"]), /settled browser frames/);
-await assert.rejects(createArtifactVisualFrames([
-  { route: "/", key: "unlabeled", viewport: "desktop", stage: "settled", bytes: frameBytes }
-], ["/"]), /labeled PNG/);
+const solidPng = (width: number, height: number, background: string) =>
+  sharp({ create: { width, height, channels: 3, background } }).png().toBuffer();
+const desktopHome = await solidPng(1280, 7200, "#123456");
+const mobileHome = await solidPng(390, 11_000, "#234567");
+const reviewCaptures = [
+  { route: "/", key: "home-desktop", viewport: "desktop" as const, stage: "settled" as const, frame: "full" as const, bytes: desktopHome },
+  { route: "/", key: "home-mobile", viewport: "mobile" as const, stage: "settled" as const, frame: "full" as const, bytes: mobileHome },
+  { route: "/", key: "home-menu", viewport: "mobile" as const, stage: "settled" as const, frame: "navigation" as const, bytes: await solidPng(390, 844, "#345678") },
+  ...(await Promise.all(["/services", "/about", "/contact", "/outside"].map(async (route, index) => [
+    { route, key: `${route}-desktop`, viewport: "desktop" as const, stage: "settled" as const, frame: "full" as const, bytes: await solidPng(1280, 3000 + index, "#456789") },
+    { route, key: `${route}-mobile`, viewport: "mobile" as const, stage: "settled" as const, frame: "full" as const, bytes: await solidPng(390, 5000 + index, "#56789a") }
+  ]))).flat()
+];
+const firstInspection = await createAuthorInspectionImages({ captures: reviewCaptures, routes: ["/", "/services", "/about", "/contact"] });
+assert.deepEqual(firstInspection.images.map((image) => [image.evidence.imageIndex, image.evidence.kind, image.evidence.viewport ?? null]), [
+  [1, "full-page", "desktop"], [2, "full-page", "mobile"], [3, "navigation", "mobile"], [4, "first-viewport-sheet", null]
+], "A default inspection must return home full pages, the opened menu once, and one first-viewport sheet for the other routes.");
+assert.deepEqual(firstInspection.images[3].evidence.routes, ["/services", "/about", "/contact"]);
+assert.deepEqual(firstInspection.fullPageRoutes, ["/"]);
+assert.deepEqual(firstInspection.changedRoutes, []);
+assert(firstInspection.images.every((image) => image.evidence.detail === "high"), "Every author inspection image must carry explicit high detail.");
+assert(firstInspection.images.every((image) => imagePatchCount(image.evidence.width, image.evidence.height) <= authorInspectionPatchCap),
+  "Every author inspection image must fit the high-detail patch cap.");
+assert.equal(firstInspection.images[0].evidence.width, 640, "Desktop full pages are pre-scaled to 640px wide.");
+assert(firstInspection.images[1].evidence.width < 390, "A phone page taller than the patch cap must be pre-scaled.");
+const nativeMobile = await createAuthorInspectionImages({ captures: reviewCaptures, routes: ["/services"], requestedFullRoutes: ["/services"] });
+assert.deepEqual(nativeMobile.images.map((image) => [image.evidence.kind, image.evidence.route, image.evidence.width]), [
+  ["full-page", "/services", 640], ["full-page", "/services", 390]
+], "A requested full route and a phone page within the cap keep their native phone width.");
+for (const image of firstInspection.images) {
+  const metadata = await sharp(image.bytes).metadata();
+  assert.deepEqual([metadata.width, metadata.height], [image.evidence.width, image.evidence.height], "Evidence dimensions must match the sent image.");
+}
+assert(firstInspection.images.reduce((sum, image) => sum + image.evidence.estimatedTokens, 0) < 10_000,
+  "A default five-route inspection must stay well below the historical ~34k image tokens.");
+const changedCaptures = reviewCaptures.map((capture) => capture.route === "/about" && capture.viewport === "mobile"
+  ? { ...capture, bytes: mobileHome }
+  : capture);
+const secondInspection = await createAuthorInspectionImages({
+  captures: changedCaptures,
+  routes: ["/", "/services", "/about", "/contact"],
+  previousRouteRenderHashes: firstInspection.routeRenderHashes
+});
+assert.deepEqual(secondInspection.changedRoutes, ["/about"]);
+assert.deepEqual(secondInspection.fullPageRoutes, ["/", "/about"], "A route whose pixels changed since the previous inspection must receive full-page images.");
+assert.deepEqual(secondInspection.images.find((image) => image.evidence.kind === "first-viewport-sheet")?.evidence.routes, ["/services", "/contact"]);
+const tabletAndFocus = await createAuthorInspectionImages({
+  captures: [
+    { route: "/contact", key: "focus", viewport: "desktop", stage: "settled", frame: "focus", focusSelector: "form", bytes: await solidPng(1280, 900, "#111111") },
+    { route: "/", key: "tablet", viewport: "tablet", stage: "settled", frame: "top", bytes: await solidPng(768, 1024, "#222222") }
+  ],
+  routes: ["/", "/contact"]
+});
+assert.deepEqual(tabletAndFocus.images.map((image) => [image.evidence.kind, image.evidence.route, image.evidence.width, image.evidence.height]), [
+  ["tablet", "/", 768, 1024], ["focus", "/contact", 1280, 900]
+], "Tablet and focus frames pass through at native resolution.");
+assert.equal(tabletAndFocus.images[1].evidence.focusSelector, "form");
+await assert.rejects(createAuthorInspectionImages({ captures: [], routes: ["/"] }), /settled browser frames/);
+await assert.rejects(createAuthorInspectionImages({
+  captures: [{ route: "/", key: "unlabeled", viewport: "desktop", stage: "settled", bytes: desktopHome }],
+  routes: ["/"]
+}), /labeled PNG/);
 assert.deepEqual(
   retainedVisualInspectionRoutePaths([{ path: "/" }]),
   [],

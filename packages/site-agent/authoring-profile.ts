@@ -73,7 +73,7 @@ export type ManagerAuthoringProfile = {
   assetEvidenceReferences?: readonly ManagerAssetEvidenceReference[];
   sourceInventoryMode: "representative-customer-index";
   visualInspectionImageDetail: "high";
-  visualInspectionPresentation: "native-viewport-frames";
+  visualInspectionPresentation: "full-page-and-first-viewport-sheet";
   visualInspectionFeedback: "component-diagnostic-route-family-quality-led";
 };
 
@@ -98,7 +98,7 @@ export function canonicalAuthoringProfile(kind: ManagerTaskKind): ManagerAuthori
     assetEvidencePresentation: "contact-sheet",
     sourceInventoryMode: "representative-customer-index",
     visualInspectionImageDetail: "high",
-    visualInspectionPresentation: "native-viewport-frames",
+    visualInspectionPresentation: "full-page-and-first-viewport-sheet",
     visualInspectionFeedback: "component-diagnostic-route-family-quality-led"
   };
 }

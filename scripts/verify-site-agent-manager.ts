@@ -258,7 +258,8 @@ for (const contract of [
   /body and form text.*16px.*utility text.*12px.*essential controls.*48px/i,
   /readable focused route, content, legal, and shared-shell modules/i,
   /inspect_site with route: null.*route: '\/' inspects only home/i,
-  /desktop, tablet, phone and opened-menu screenshots/i,
+  /full-page desktop and phone images of the homepage and of pages that changed.*opened phone menu.*first-screen sheet/i,
+  /Pass full with routes whose whole page you want to see.*viewport: 'tablet'/i,
   /Correct each returned error/i,
   /finish runs full release verification/i
 ]) assert.match(initialGuidance, contract);
@@ -303,11 +304,14 @@ const inspectionTool = websiteManagerTools.find(
   (tool) => tool.type === "function" && tool.name === "inspect_site"
 );
 assert(inspectionTool?.type === "function");
-assert.match(inspectionTool.description!, /desktop, tablet, phone and opened mobile-navigation screenshots/i);
-assert.match(inspectionTool.description!, /initial build, pass null.*representative sample.*passing '\/' inspects only the homepage/i);
-assert.match(inspectionTool.description!, /exact route and CSS selector.*close up/i);
+assert.match(inspectionTool.description!, /Images \(all high detail\): full-page desktop \(scaled to 640px wide\) and phone images for the homepage and for inspected routes whose pixels changed/i);
+assert.match(inspectionTool.description!, /opened phone menu once.*one sheet of first-viewport desktop and phone frames, labelled by route/i);
+assert.match(inspectionTool.description!, /route: null inspects the representative sample; an exact route inspects only that page/i);
+assert.match(inspectionTool.description!, /full: routes that should also get full-page images. viewport: 'tablet'/i);
+assert.match(inspectionTool.description!, /route plus a CSS selector returns a native-resolution close-up/i);
+assert.doesNotMatch(inspectionTool.description!, /\bauto\b/i);
 assert(inspectionTool.parameters);
-assert.deepEqual(inspectionTool.parameters.required, ["route", "selector"]);
+assert.deepEqual(inspectionTool.parameters.required, ["route", "selector", "viewport", "full"]);
 const finishTool = websiteManagerTools.find(
   (tool) => tool.type === "function" && tool.name === "finish"
 );

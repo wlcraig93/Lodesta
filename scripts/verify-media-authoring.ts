@@ -4,7 +4,7 @@ import { summarizeCrawlHtml } from "../lib/crawler";
 import { sha256 } from "../packages/business-data";
 import { createImageBytes, imageCreationModel, managerToolArguments, websiteManagerTools } from "../packages/site-agent";
 import { assetRevisionSchema, type AssetRevisionRef } from "../packages/site-contracts";
-import { WorkspaceManagerRuntime } from "../packages/site-platform/manager-runtime";
+import { WorkspaceManagerRuntime, type RuntimeVisualInspectionTarget } from "../packages/site-platform/manager-runtime";
 import { reusableActiveSourceAssetIdentityRef, reusableActiveSourceAssetRef } from "../packages/site-platform/workflow";
 import { prepareSourcePhoto, sourcePhotoWebRecipeVersion } from "../packages/site-platform/source-photo-preparation";
 import { createMediaContactSheet } from "../packages/site-verification";
@@ -377,7 +377,7 @@ let visualBuilds = 0;
 let visualInspections = 0;
 let visualMechanicalInspections = 0;
 let visualReleaseVerifications = 0;
-let inspectedTarget: { route?: string; selector?: string; label?: string; authorScreenshot?: "full" | "focus" } | undefined;
+let inspectedTarget: RuntimeVisualInspectionTarget | undefined;
 const visualRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
   visualInspectionFeedback: "component-diagnostic-route-family-quality-led",
@@ -531,7 +531,7 @@ assert.equal(cachedInspectionFinish.diagnosticOutput.buildPerformed, false);
 assert.equal(visualBuilds, 2, "Finish rebuilt a workspace whose exact hash already had a valid preview build.");
 assert.equal(visualMechanicalInspections, 2, "Finish repeated the mechanical sweep for an unchanged workspace hash.");
 assert.equal(visualReleaseVerifications, 1, "Finish did not run the exhaustive release verification after a mechanical inspection.");
-let initialBuildTarget: { route?: string; selector?: string; label?: string; authorScreenshot?: "full" | "focus" } | undefined;
+let initialBuildTarget: RuntimeVisualInspectionTarget | undefined;
 let initialVisualCalls = 0;
 let initialBuildCalls = 0;
 let initialMechanicalCalls = 0;
@@ -635,6 +635,65 @@ assert.equal(typeof routeFull.modelOutput === "object" && Array.isArray(routeFul
 assert.deepEqual(inspectedTarget, { route: "/", selector: undefined, label: "Hero heading", authorScreenshot: "full" });
 const routeFullOutput = routeFull.modelOutput as Array<Record<string, unknown>>;
 assert.deepEqual(routeFullOutput.slice(1).map((item) => item.image_url), ["data:image/png;base64,AA==", "data:image/png;base64,AQ=="]);
+const presentationTargets: RuntimeVisualInspectionTarget[] = [];
+let presentationRender = 0;
+const presentationOptions = {
+  kind: "initial_build" as const,
+  publicBuildInputId: "input_presentation",
+  toolchainVersion: "toolchain-test",
+  sandboxImageDigest: `sha256:${"a".repeat(64)}` as const,
+  initialSandboxRevision: "sandbox_presentation_1",
+  initialFiles: [
+    { path: "src/site.tsx", content: validSiteSource },
+    { path: "src/styles.css", content: "body{}" }
+  ],
+  applyBuild: async () => ({ revision: "sandbox_presentation_2", buildDurationMs: 1, previewPath: "/preview" }),
+  inspect: async () => ({
+    passed: true,
+    inspectionHash: `sha256:${"e".repeat(64)}` as const,
+    modelSummary: { routes: ["/", "/services"] },
+    diagnosticSummary: {}
+  }),
+  inspectVisual: async (_files: unknown, _revision: string, target: RuntimeVisualInspectionTarget) => {
+    presentationTargets.push(structuredClone(target));
+    presentationRender += 1;
+    return {
+      inspectionHash: `sha256:${String(presentationRender).padStart(64, "0")}` as const,
+      modelSummary: { authorScreenshot: target.authorScreenshot, requestedFullRoutes: target.fullRoutes ?? [], routes: ["/", "/services"] },
+      diagnosticSummary: {},
+      routeRenderHashes: (target.authorScreenshot === "full" ? { "/": `render-${presentationRender}`, "/services": "render-services" } : {}) as Record<string, string>,
+      images: [{ type: "input_image" as const, image_url: "data:image/png;base64,AA==", detail: "high" as const }]
+    };
+  }
+};
+const presentationRuntime = new WorkspaceManagerRuntime<string>(presentationOptions);
+const defaultPresentation = await presentationRuntime.execute({ callId: "presentation-default", name: "inspect_site", arguments: { route: null, selector: null, viewport: null, full: null } });
+assert.equal(defaultPresentation.diagnosticOutput.ok, true);
+assert.deepEqual(presentationTargets.at(-1), { route: undefined, selector: undefined, label: undefined, authorScreenshot: "full" },
+  "The first default inspection has no previous render to compare.");
+assert((defaultPresentation.modelOutput as Array<Record<string, unknown>>).slice(1).every((item) => item.detail === "high"),
+  "inspect_site images must carry explicit high detail.");
+await presentationRuntime.execute({ callId: "presentation-tablet", name: "inspect_site", arguments: { route: null, selector: null, viewport: "tablet", full: null } });
+assert.equal(presentationTargets.at(-1)?.authorScreenshot, "tablet");
+assert.deepEqual(presentationTargets.at(-1)?.previousRouteRenderHashes, { "/": "render-1", "/services": "render-services" });
+await presentationRuntime.execute({ callId: "presentation-full", name: "inspect_site", arguments: { route: null, selector: null, viewport: null, full: ["/services", "/services"] } });
+assert.deepEqual(presentationTargets.at(-1)?.fullRoutes, ["/services"], "Requested full-page routes reach the visual inspection.");
+assert.equal(presentationTargets.length, 3, "A different full-page request reused cached evidence.");
+const presentationCss = presentationRuntime.currentFiles().find((file) => file.path === "src/styles.css")!.content;
+await presentationRuntime.execute({
+  callId: "presentation-edit",
+  name: "edit_file",
+  arguments: { path: "src/styles.css", expectedContentHash: sha256(presentationCss), edits: [{ startLine: 1, endLine: 1, content: "body{color:#123}" }] }
+});
+await presentationRuntime.execute({ callId: "presentation-after-edit", name: "inspect_site", arguments: { route: null, selector: null, viewport: null, full: null } });
+assert.deepEqual(presentationTargets.at(-1)?.previousRouteRenderHashes, { "/": "render-3", "/services": "render-services" },
+  "Render hashes must survive workspace edits so the next inspection can show changed routes.");
+const restoredPresentation = new WorkspaceManagerRuntime<string>({ ...presentationOptions, initialSnapshot: presentationRuntime.snapshot() });
+await restoredPresentation.execute({ callId: "presentation-restored", name: "inspect_site", arguments: { route: null, selector: null, viewport: "tablet", full: null } });
+assert.deepEqual(presentationTargets.at(-1)?.previousRouteRenderHashes, { "/": "render-4", "/services": "render-services" },
+  "Render hashes must survive a runtime snapshot.");
+assert.throws(() => managerToolArguments.inspect_site.parse({ route: null, selector: null, viewport: "desktop", full: null }));
+assert.throws(() => managerToolArguments.inspect_site.parse({ route: null, selector: null, viewport: null, full: ["services"] }));
 const routeNormalizationRuntime = new WorkspaceManagerRuntime<string>({
   kind: "edit",
   publicBuildInputId: "input_route_normalization",

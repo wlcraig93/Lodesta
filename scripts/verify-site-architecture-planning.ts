@@ -74,6 +74,35 @@ const validation = validateSiteArchitecturePlan(inventory, plan);
 assert.equal(validation.complete, true);
 assert.deepEqual(plan.routes.find((route) => route.path === "/ant-control")?.sourcePaths, ["/ant-control", "/ants"]);
 
+// Mechanical plan slips are normalized with findings instead of failing the
+// run: a missing purpose, a navigation item without a live route, and a
+// redirect with no target.
+{
+  const mechanicalFindings: string[] = [];
+  const mechanical = normalizeSiteArchitecturePlan({
+    ...rawPlan,
+    primaryNavigation: [...rawPlan.primaryNavigation, { label: "Gallery", path: "/gallery" }],
+    routes: [rawPlan.routes[0]!, { ...rawPlan.routes[1]!, purpose: "" }],
+    sourceDispositions: { ...rawPlan.sourceDispositions, "/ants": { disposition: "redirected", targetPath: null } }
+  }, inventory, mechanicalFindings);
+  assert.equal(validateSiteArchitecturePlan(inventory, mechanical).complete, true,
+    "A mechanically repairable plan still failed validation.");
+  assert.ok(mechanical.routes.find((route) => route.path === "/ant-control")!.purpose.length >= 12);
+  assert.ok(!mechanical.primaryNavigation.some((item) => item.path === "/gallery"));
+  assert.equal(mechanical.sourceDispositions.find((item) => item.sourcePath === "/ants")?.disposition, "retired");
+  for (const expected of [/filled the missing purpose of \/ant-control/, /dropped navigation item Gallery/, /retired \/ants: it was redirected without a target/]) {
+    assert.ok(mechanicalFindings.some((finding) => expected.test(finding)), `Missing normalization finding ${expected}`);
+  }
+  // Unsafe paths and legal pages still fail loudly.
+  const legalInventory = [...inventory, { ...inventory[0]!, path: "/privacy-policy", title: "Privacy", headings: ["Privacy"] }];
+  const legalPlan = normalizeSiteArchitecturePlan({
+    ...rawPlan,
+    sourceDispositions: { ...rawPlan.sourceDispositions, "/privacy-policy": { disposition: "redirected", targetPath: null } }
+  }, legalInventory);
+  assert.ok(validateSiteArchitecturePlan(legalInventory, legalPlan).unsafeLegalDispositions.length > 0,
+    "A legal page retired by normalization escaped the legal-page hard failure.");
+}
+
 const typoPlan = normalizeSiteArchitecturePlan({
   ...rawPlan,
   routes: [
@@ -578,7 +607,9 @@ const filteredBlock = page("page_filtered_block", "/deep-service", "Workshop Ove
   "Wheel alignment"
 ].join("\n"));
 const filteredBlockPreview = scopePreview([filteredBlock]);
-assert.equal(filteredBlockPreview, "Workshop Overhaul\nBrake adjustment\n[…]\nWheel alignment");
+assert.equal(filteredBlockPreview,
+  "Workshop Overhaul\nBrake adjustment\nOur services are guaranteed safe for children. [first-party guarantee, safety]\n[…]\nWheel alignment",
+  "A first-party sensitive-topic line must be shown tagged, not withheld.");
 const oversizedBlock = page("page_large_block", "/deep-service", "Workshop Overhaul", [
   "Workshop Overhaul", "A substantive source explanation must remain available when its surrounding section is too large for an atomic preview.",
   ...Array.from({ length: 75 }, (_, index) => `Documented short source task ${index}`)
@@ -683,8 +714,8 @@ const genericGatedClaimBoundaryEvidence = createArchitectureEvidenceFiles(
 )[1]!.content;
 assert.match(genericGatedClaimBoundaryEvidence, /storm surge barrier may use certified components/,
   "A historical business-name literal still suppresses unrelated storm-surge technical prose.");
-assert.doesNotMatch(genericGatedClaimBoundaryEvidence, /Our team is certified/,
-  "Removing a business-name literal weakened the generic gated business-claim filter.");
+assert.match(genericGatedClaimBoundaryEvidence, /Our team is certified to provide this service for every property and project\. \[first-party credential\]/,
+  "A first-party credential line must be shown with its topic tag instead of withheld.");
 const authorDigestEvidence = createArchitectureEvidenceFiles(pages, plan, { retainedContentMode: "indexed-pull-preview-author-digest" });
 assert.deepEqual(authorDigestEvidence.map((file) => file.path), ["src/approved-architecture.ts", "src/approved-source-index.ts"]);
 assert.match(authorDigestEvidence[1].content, /"evidencePreviews": \[/);
@@ -893,7 +924,7 @@ await assert.rejects(
     return true;
   }
 );
-assert.equal(quotaAttempts, 2, "Architecture quota failures retain the existing two-attempt transport retry boundary.");
+assert.equal(quotaAttempts, 1, "An exhausted quota does not recover by waiting and must not be retried.");
 
 let statuslessQuotaAttempts = 0;
 const statuslessQuotaAgent = new WebsiteManagerAgent({
@@ -956,7 +987,22 @@ await assert.rejects(
     return true;
   }
 );
-assert.equal(transientAttempts, 2, "Provider classification must not add an architecture retry beyond transport retry.");
+assert.equal(transientAttempts, 2, "Without a deadline signal the transport keeps two attempts.");
+// With a run-deadline signal, a temporarily unavailable provider is retried
+// with backoff until the deadline aborts the request.
+{
+  let deadlineAttempts = 0;
+  const controller = new AbortController();
+  const deadlineAgent = new WebsiteManagerAgent({
+    create: async () => {
+      deadlineAttempts += 1;
+      if (deadlineAttempts === 4) controller.abort(new Error("workflow_deadline_exhausted"));
+      throw Object.assign(new Error("429 rate limit temporarily unavailable"), { status: 429, headers: { "retry-after": "0" } });
+    }
+  });
+  await assert.rejects(() => deadlineAgent.architect({ inventory, signal: controller.signal }));
+  assert.equal(deadlineAttempts, 4, "A temporarily unavailable provider stopped retrying before the run deadline.");
+}
 
 let invalidJsonAttempts = 0;
 const invalidJsonAgent = new WebsiteManagerAgent({

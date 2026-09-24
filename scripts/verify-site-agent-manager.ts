@@ -34,6 +34,7 @@ import {
 } from "../packages/site-agent";
 import { sourceSnapshotSchema, type BusinessState, type SourceSnapshot } from "../packages/site-contracts";
 import { researchBusiness, sha256, stableJson } from "../packages/business-data";
+import { withReleaseSeverity } from "../packages/site-verification";
 import { researchAddress, researchLocality, SiteAuthoringWorkflow } from "../packages/site-platform/workflow";
 import {
   componentDiagnosticRouteFamilyQualityLedVisualSummary,
@@ -619,6 +620,7 @@ assert.equal(modelFeedback.blockingFindings, undefined);
 assert.equal(modelFeedback.advisoryFindings, undefined);
 assert.equal(modelFeedback.findings.length, 2);
 assert.equal(modelFeedback.returnedFindingCount, 2);
+assert.deepEqual(modelFeedback.advisories, [], "Quality-led inspection must return advisories under their own key.");
 assert.deepEqual(modelFeedback.findings.map((finding: { id: string }) => finding.id).sort(),
   [mechanicalBlocker.id, visualError.id].sort());
 assert(modelFeedback.findings.every((finding: { id: string }) =>
@@ -636,6 +638,16 @@ assert(combinedFeedback.diagnosticOutput.advisoryFindings.some((finding: { id?: 
   "Diagnostics must retain advisories omitted from the quality-led model list.");
 assert.equal(modelFeedback.visualScope, "targeted");
 assert.equal(modelFeedback.mechanicalScope, "all-routes");
+
+// Inspection uses the release classification: a neutralized sanitizer finding
+// is advisory to the author exactly as it is at release; facts still block.
+assert.equal(withReleaseSeverity({ id: "html.forbidden_tag", severity: "error", area: "html", message: "Neutralized tag." }).severity, "warning");
+assert.equal(withReleaseSeverity({ id: "fact.sdk_value_mismatch", severity: "error", area: "claim", message: "Phone mismatch." }).severity, "error");
+const workflowSource = await readFile(new URL("../packages/site-platform/workflow.ts", import.meta.url), "utf8");
+assert.match(workflowSource, /const findings = prepared\.findings\.map\(withReleaseSeverity\)/,
+  "Mechanical inspection must classify findings with the release severity mapping.");
+assert.match(workflowSource, /browserGate\.findings\.filter\([^\n]+\n\s*\]\.map\(withReleaseSeverity\)/,
+  "Visual inspection must classify findings with the release severity mapping.");
 
 const requiredDestinations = {
   path: "src/required-destinations.tsx",
@@ -655,16 +667,16 @@ const qualityLedFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary
   routes: ["/", "/about", "/contact", "/services"],
   inspectedRoutes: ["/", "/about", "/contact", "/services"]
 });
-assert.match(String(qualityLedFeedback.feedbackGuidance), /Correct each returned error and defect.*Repair a shared cause once.*Reinspect that one exact route only if the measurement is still unclear, then finish/i);
-assert.doesNotMatch(String(qualityLedFeedback.feedbackGuidance), /whole-site approval|Compare the inspected routes|IA similarity/i);
-assert.deepEqual(qualityLedFeedback.findings.map((item) => item.id).sort(), [
-  "accessibility.axe.complete",
-  "render.form_text",
-  "render.tiny_text"
-]);
-assert(qualityLedFeedback.findings.some((item) => item.severity === "error"));
-assert(qualityLedFeedback.findings.some((item) => item.id === "render.tiny_text" || item.id === "render.form_text"));
-assert(!qualityLedFeedback.findings.some((item) =>
+assert.match(String(qualityLedFeedback.feedbackGuidance), /Correct each returned error; each one blocks release.*Repair a shared cause once.*Reinspect that one exact route only if the measurement is still unclear, then finish/i);
+assert.match(String(qualityLedFeedback.feedbackGuidance), /advisories are measured quality evidence that do not block release/i);
+assert.doesNotMatch(String(qualityLedFeedback.feedbackGuidance), /whole-site approval|Compare the inspected routes|IA similarity|error and defect/i);
+assert.deepEqual(qualityLedFeedback.findings.map((item) => item.id).sort(), ["accessibility.axe.complete"],
+  "Quality-led findings must contain only release blockers.");
+assert.deepEqual(qualityLedFeedback.advisories.map((item) => item.id).sort(), ["render.form_text", "render.tiny_text"],
+  "Measured quality defects must be returned under a separate advisories key.");
+assert(qualityLedFeedback.findings.every((item) => item.severity === "error"));
+assert(qualityLedFeedback.advisories.every((item) => item.severity === "warning"));
+assert(![...qualityLedFeedback.findings, ...qualityLedFeedback.advisories].some((item) =>
   item.id === "advisory.claim_evidence" || item.id === "advisory.ia_repetition" || item.id === "advisory.asset_reuse"
     || item.id === "render.internal_provenance_copy"));
 assert.equal(qualityLedFeedback.evaluationFindingCount, 7);
@@ -680,13 +692,22 @@ const proseEvidenceFeedback = componentDiagnosticRouteFamilyQualityLedVisualSumm
   routes: ["/", "/guide", "/case-study", "/contact"],
   inspectedRoutes: ["/", "/guide", "/case-study", "/contact"]
 });
-assert.equal(proseEvidenceFeedback.findings.filter((finding) => finding.severity === "warning").length, 1,
+assert.deepEqual(proseEvidenceFeedback.advisories.map((item) => item.id), ["render.contrast"],
   "Quality-led prose advisories were returned to the author.");
-assert.equal(proseEvidenceFeedback.findings.filter((finding) => finding.severity === "error").length, 1,
+assert.deepEqual(proseEvidenceFeedback.findings.map((item) => item.id), ["fact.sdk_value_mismatch"],
   "An exact fact mismatch was dropped from the quality-led author list.");
-assert.deepEqual(proseEvidenceFeedback.findings.map((item) => item.id).sort(), ["fact.sdk_value_mismatch", "render.contrast"]);
-assert(!proseEvidenceFeedback.findings.some((finding) =>
+assert(![...proseEvidenceFeedback.findings, ...proseEvidenceFeedback.advisories].some((finding) =>
   finding.id === "advisory.claim_evidence" || finding.id === "advisory.metadata_claim_evidence"));
+const advisoryOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
+  findings: [
+    { id: "render.tiny_text", severity: "warning", area: "render", message: "utility text below 12px", route: "/" }
+  ],
+  routes: ["/"],
+  inspectedRoutes: ["/"]
+});
+assert.equal(advisoryOnlyFeedback.findings.length, 0);
+assert.match(String(advisoryOnlyFeedback.feedbackGuidance), /No release blockers/i,
+  "Advisory-only feedback must not tell the author to correct errors.");
 const iaHeuristicOnlyFeedback = componentDiagnosticRouteFamilyQualityLedVisualSummary({
   findings: [
     { id: "advisory.ia_repetition", severity: "warning", area: "content", message: "Service routes share structural signals.", route: "/services" }
@@ -1284,6 +1305,57 @@ const managerResult = await new WebsiteManagerAgent(client).run({
 assert.equal(requests.length, 2);
 assert.equal(requests[0]?.text?.verbosity, "medium", "Initial authoring must not request a minimal whole-site implementation.");
 assert.equal(requests[1]?.text?.verbosity, "medium");
+// A response cut off at the 64k output limit is an author-visible turn error:
+// nothing from it runs, the author is told to write in smaller pieces, and
+// the run continues. Transient provider errors retry while the deadline allows.
+{
+  const truncationRequests: Parameters<ManagerResponsesClient["create"]>[0][] = [];
+  let transientFailures = 2;
+  const truncationResponses = [
+    {
+      id: "response_truncated", model: "gpt-6-sol", output_text: "", status: "incomplete", error: null,
+      incomplete_details: { reason: "max_output_tokens" },
+      output: [{ type: "function_call", call_id: "call_partial", name: "write_files", arguments: "{\"files\":[{\"path\":\"src/site.tsx\",\"content\":\"export", status: "incomplete" }],
+      usage: { input_tokens: 1_000, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, output_tokens: 64_000, output_tokens_details: { reasoning_tokens: 0 } }
+    },
+    {
+      id: "response_after_truncation", model: "gpt-6-sol", output_text: "", status: "completed", error: null, incomplete_details: null,
+      output: [{ type: "function_call", call_id: "call_finish_after", name: "finish", arguments: JSON.stringify({ ownerMessage: "Candidate ready for owner review." }), status: "completed" }],
+      usage: { input_tokens: 1_000, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, output_tokens: 20, output_tokens_details: { reasoning_tokens: 5 } }
+    }
+  ];
+  const executed: string[] = [];
+  const truncationResult = await new WebsiteManagerAgent({
+    async create(params) {
+      truncationRequests.push(params);
+      if (truncationRequests.length === 2 && transientFailures > 0) {
+        transientFailures -= 1;
+        truncationRequests.pop();
+        throw Object.assign(new Error("503 temporarily unavailable"), { status: 503, headers: { "retry-after": "0" } });
+      }
+      const response = truncationResponses.shift();
+      if (!response) throw new Error("manager_truncation_fixture_exhausted");
+      return response as never;
+    }
+  }).run({
+    buildInput,
+    authoringContext: context,
+    instruction: "Build a private candidate.",
+    kind: "initial_build",
+    route: { apiProvider: "openai", modelId: "gpt-6-sol" },
+    signal: new AbortController().signal,
+    runtime: { ...runtime, async execute(call) { executed.push(call.name); return runtime.execute(call); } }
+  });
+  assert.equal(truncationResult.completion.ownerMessage, "Candidate ready for owner review.", "A truncated response ended the run.");
+  assert.deepEqual(executed, ["finish"], "A cut-off partial tool call was executed.");
+  assert.equal(truncationResult.telemetry.truncatedResponses, 1);
+  assert.equal(transientFailures, 0, "Transient provider failures beyond two attempts were not retried while the deadline allowed.");
+  const followUp = JSON.stringify(truncationRequests[1]?.input ?? []);
+  assert.match(followUp, /cut off at the 64,000-token output limit[^"]*Write in smaller pieces/,
+    "The author was not told that its response was cut off and to write in smaller pieces.");
+  assert.doesNotMatch(followUp, /call_partial/, "The partial tool call was replayed into history.");
+}
+
 const assetEvidenceReferences = Array.from({ length: 8 }, (_, index) => {
   const origin = index === 0
     ? "source_website" as const

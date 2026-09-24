@@ -12,6 +12,7 @@ import { assertPublicFetchUrl, PublicFetchUrlError } from "@/lib/url-safety";
 import { corroboratedHomepageBusinessName, preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
 import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "./crawl-errors";
 import { isLikelyCmsTemplateOrSystemSourcePage, isMalformedSourceLinkPath } from "./source-page-classification";
+import { canonicalWeekDays, canonicalWeeklySchedule } from "./weekly-schedule";
 import {
   generationCrawlerUserAgent,
   parseRobotsPolicy,
@@ -25,7 +26,9 @@ export const generationIngestionLimits = {
   requestTimeoutMs: 10_000,
   maximumResponseBytes: 32 * 1024 * 1024,
   transientRetries: 2,
-  rawResponseFuseBytes: 1024 * 1024 * 1024
+  rawResponseFuseBytes: 1024 * 1024 * 1024,
+  /** Per-site cap on content-rich pages rendered for JS-loaded galleries and reviews. */
+  maximumProactiveBrowserRenders: 8
 } as const;
 type GenerationIngestionLimitValues = { [Key in keyof typeof generationIngestionLimits]: number };
 
@@ -61,7 +64,8 @@ export const websiteGenerationIngestionSchema = z.object({
     requestTimeoutMs: z.number().int().positive(),
     maximumResponseBytes: z.number().int().positive(),
     transientRetries: z.number().int().nonnegative(),
-    rawResponseFuseBytes: z.number().int().positive()
+    rawResponseFuseBytes: z.number().int().positive(),
+    maximumProactiveBrowserRenders: z.number().int().nonnegative()
   }).strict(),
   counts: z.object({
     discovered: z.number().int().nonnegative(),
@@ -268,6 +272,7 @@ export async function crawlWebsiteForGeneration(input: {
   let fuseReached = false;
   let auxiliaryFailure = false;
   let browserRendered = 0;
+  let proactiveBrowserRenders = 0;
   let rawBytes = 0;
   let browserFallbackMs = 0;
 
@@ -409,17 +414,31 @@ export async function crawlWebsiteForGeneration(input: {
       summary.canonical ??= canonicalFromLinkHeader(fetched.linkHeader, fetched.finalUrl ?? item.url);
       let usedBrowser = false;
       let renderedCaptureKey: string | undefined;
-      if (shouldBrowserRender(summary)) {
+      // Near-empty static pages must be rendered. The homepage and gallery,
+      // portfolio, project, testimonial and review pages are also rendered,
+      // up to a per-site cap, because they commonly load photos and customer
+      // quotes with JavaScript. Third-party review widgets stay excluded as
+      // testimonials downstream. A proactive render that fails, or that shows
+      // less text than the static page, keeps the static page.
+      const requiredRender = shouldBrowserRender(summary);
+      const proactiveRender = !requiredRender
+        && proactiveBrowserRenders < limits.maximumProactiveBrowserRenders
+        && proactivelyRenderedPage(item.url, source);
+      if (requiredRender || proactiveRender) {
         const browserStarted = now();
+        if (proactiveRender) proactiveBrowserRenders += 1;
         try {
           const browserResult = await browserFetch(item.url, signal);
-          html = typeof browserResult === "string" ? browserResult : browserResult.html;
+          const renderedHtml = typeof browserResult === "string" ? browserResult : browserResult.html;
+          const renderedBytes = Buffer.from(renderedHtml);
+          if (renderedBytes.length > limits.maximumResponseBytes) throw new Error("browser_response_too_large");
+          const renderedSummary = summarizeCrawlHtml(renderedHtml, item.url);
+          if (proactiveRender && visibleTextLength(renderedSummary) < visibleTextLength(summary)) throw new Error("browser_render_not_richer");
+          html = renderedHtml;
           if (typeof browserResult !== "string") {
             for (const capture of browserResult.captures) retainCapture(capture);
           }
-          const renderedBytes = Buffer.from(html);
-          if (renderedBytes.length > limits.maximumResponseBytes) throw new Error("browser_response_too_large");
-          summary = summarizeCrawlHtml(html, item.url);
+          summary = renderedSummary;
           summary.canonical ??= canonicalFromLinkHeader(fetched.linkHeader, fetched.finalUrl ?? item.url);
           browserRendered += 1;
           usedBrowser = true;
@@ -437,8 +456,11 @@ export async function crawlWebsiteForGeneration(input: {
             initiatorUrls: [item.url]
           });
         } catch (error) {
-          auxiliaryFailure = true;
-          failures.push({ url: item.url, reason: "browser_failed", message: boundedMessage(error) });
+          // Only a required render's failure leaves the page incomplete.
+          if (requiredRender) {
+            auxiliaryFailure = true;
+            failures.push({ url: item.url, reason: "browser_failed", message: boundedMessage(error) });
+          }
         } finally {
           browserFallbackMs += Math.max(0, now() - browserStarted);
         }
@@ -455,7 +477,9 @@ export async function crawlWebsiteForGeneration(input: {
         };
       }
       const evidenceClass = classifyPageEvidence(summary, source.href);
-      const allLinks = extractDocumentLinks(html, fetched.finalUrl ?? item.url, source.hostname);
+      // A rendered page keeps every link its static HTML already exposed.
+      const allLinks = extractDocumentLinks(usedBrowser ? `${fetched.text}
+${html}` : html, fetched.finalUrl ?? item.url, source.hostname);
       const extractedText = extractDocumentText(html, summary);
       summaries.set(item.url, summary);
       documents.push({ url: item.url, finalUrl: fetched.finalUrl ?? item.url, html, extractedText, summary });
@@ -1300,9 +1324,27 @@ function classifyPageEvidence(page: CrawlPageSummary, sourceUrl: string): Eviden
   return "first_party";
 }
 
+function visibleTextLength(summary: CrawlPageSummary) {
+  return summary.sourceTextBlocks.reduce((total, block) => total + block.displayText.length, 0);
+}
+
 function shouldBrowserRender(summary: CrawlPageSummary) {
-  const text = summary.sourceTextBlocks.reduce((total, block) => total + block.displayText.length, 0);
+  const text = visibleTextLength(summary);
   return text < 200 && (summary.internalLinkCount > 0 || summary.imageCount > 0 || summary.title !== undefined);
+}
+
+/** The homepage and gallery, portfolio, project, testimonial and review pages. */
+function proactivelyRenderedPage(url: string, source: URL) {
+  let path: string;
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.replace(/^www\./, "") !== source.hostname.replace(/^www\./, "")) return false;
+    path = parsed.pathname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (path === "/" || path === "" || /^\/(?:index\.html?|home)\/?$/.test(path)) return true;
+  return /(?:^|\/|-)(?:gallery|galleries|portfolio|projects?|our-work|work|testimonials?|reviews?|case-stud(?:y|ies))(?:\/|-|\.html?|$)/.test(path);
 }
 
 export async function fetchGenerationPageWithBrowser(url: string, signal: AbortSignal, requestTimeoutMs: number, validateUrl: UrlValidator, validateNavigation: UrlValidator, maximumResponseBytes = generationIngestionLimits.maximumResponseBytes) {
@@ -1576,25 +1618,48 @@ function consensusPhone(pages: CrawlPageSummary[]) {
   return winner[0];
 }
 
+/**
+ * Hours consensus compares canonical per-day schedules. Pages that agree on
+ * every day they both state (in any display format) are consistent, so split
+ * schedules such as Mon-Fri 8-5 and Sat 9-1 survive. Only a day that two
+ * first-party statements give different times (or open vs closed) withholds
+ * hours. The most complete agreeing extraction is kept verbatim.
+ */
 function consensusHours(pages: CrawlPageSummary[]) {
   const candidates = new Map<string, Record<string, string>>();
-  const visibleCandidates = new Set<string>();
+  const known = new Map<string, string>();
+  const unparsed = new Set<string>();
+  const agrees = (schedule: Map<string, string>) => {
+    for (const [day, value] of schedule) {
+      const existing = known.get(day);
+      if (existing !== undefined && existing !== value) return false;
+    }
+    for (const [day, value] of schedule) known.set(day, value);
+    return true;
+  };
   for (const page of pages) {
     for (const block of page.sourceTextBlocks) {
       const visible = visibleWeeklyHours(block.displayText);
-      if (visible) visibleCandidates.add(visible);
+      if (visible && !agrees(new Map(canonicalWeekDays.map((day) => [day, visible])))) return undefined;
     }
     const hours = page.extractedFacts.hours;
     if (!hours || !Object.keys(hours).length) continue;
     const normalized = Object.fromEntries(Object.entries(hours).sort(([left], [right]) => left.localeCompare(right)));
-    candidates.set(JSON.stringify(normalized), normalized);
-    for (const value of Object.values(normalized)) {
-      const stored = normalizedHourRange(value);
-      if (stored) visibleCandidates.add(stored);
+    const key = JSON.stringify(normalized);
+    candidates.set(key, normalized);
+    const schedule = canonicalWeeklySchedule(normalized);
+    if (!schedule) {
+      unparsed.add(key);
+      continue;
     }
+    if (!agrees(schedule)) return undefined;
   }
-  if (candidates.size !== 1 || visibleCandidates.size > 1) return undefined;
-  return [...candidates.values()][0];
+  if (!candidates.size) return undefined;
+  // An extraction the canonical parser cannot read is only trusted alone.
+  if (unparsed.size && candidates.size > 1) return undefined;
+  return [...candidates.values()].sort((left, right) =>
+    (canonicalWeeklySchedule(right)?.size ?? 0) - (canonicalWeeklySchedule(left)?.size ?? 0)
+      || Object.keys(right).length - Object.keys(left).length)[0];
 }
 
 function normalizedTelPhone(value: string) {
@@ -1613,14 +1678,6 @@ function visiblePhoneCandidates(value: string) {
 
 function visibleWeeklyHours(value: string) {
   const match = value.match(/\bMon(?:day)?\s*[-–—]\s*Sun(?:day)?\s*:?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*[-–—]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
-  if (!match) return undefined;
-  const start = normalizedClockTime(match[1]);
-  const end = normalizedClockTime(match[2]);
-  return start && end ? `${start}-${end}` : undefined;
-}
-
-function normalizedHourRange(value: string) {
-  const match = value.match(/(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–—]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
   if (!match) return undefined;
   const start = normalizedClockTime(match[1]);
   const end = normalizedClockTime(match[2]);

@@ -122,6 +122,7 @@ export class WebsiteManagerAgent {
       firstSuccessfulBuildMs?: number;
       modelRequests: number;
       noToolResponses: number;
+      truncatedResponses: number;
       toolCalls: Record<string, number>;
       unchangedPathRereads: number;
       parallelToolViolations: number;
@@ -223,6 +224,7 @@ export class WebsiteManagerAgent {
     );
     let responseCount = continuationMatches ? input.continuation?.responseCount ?? 0 : 0;
     let noToolResponses = 0;
+    let truncatedResponses = 0;
     let firstSuccessfulBuildMs: number | undefined;
     const toolCallCounts = new Map<string, number>();
     let consecutiveFailureFingerprint: string | undefined;
@@ -321,6 +323,7 @@ export class WebsiteManagerAgent {
         }, providerCapability.descriptor, input.runId), {
           signal: input.signal,
           modelId,
+          acceptOutputLimitTruncation: true,
           onRetry: () => { transportRetries += 1; }
         });
       } catch (error) {
@@ -369,7 +372,8 @@ export class WebsiteManagerAgent {
         contextHighWaterRequest = responseCount;
       }
       mergeUsage(usage, response.usage, startedAt, modelId);
-      const calls = response.output.filter((item): item is ResponseFunctionToolCall => item.type === "function_call");
+      const truncated = response.status === "incomplete";
+      const calls = truncated ? [] : response.output.filter((item): item is ResponseFunctionToolCall => item.type === "function_call");
       const responseCompactions = response.output.filter((item) => item.type === "compaction").length;
       const parallelToolViolation = calls.length > 1;
       const modelCompletedAt = new Date().toISOString();
@@ -393,6 +397,7 @@ export class WebsiteManagerAgent {
           compactionItems: responseCompactions,
           compactionThresholdTokens: apiProvider === "openai" ? siteAgentCompactionThresholdTokens : undefined,
           transportRetries,
+          ...(truncated ? { truncatedAtOutputLimit: true } : {}),
           ...promptTelemetry
         },
         payload: modelTurnPayload(requestHistory, response, promptIdentity, route, this.reasoningEffort, {
@@ -436,6 +441,23 @@ export class WebsiteManagerAgent {
         );
       }
       if (parallelToolViolation) parallelToolViolations += 1;
+
+      // A response cut off at the output limit is an author-visible turn
+      // error, not a terminal run failure. The deadline and cost fuse remain
+      // the hard limits.
+      if (truncated) {
+        truncatedResponses += 1;
+        history.noteTruncatedResponse({ responseIndex: responseCount, maxOutputTokens });
+        await persistContinuationIncrement(input.onContinuation, {
+          kind: "continuation_prompt",
+          responseCount,
+          stablePrefixHash,
+          items: history.drainContinuationItems(),
+          workspaceHash: contentHashOrUndefined(runtimeWorkspaceHash(input.runtime.stateSummary()))
+        });
+        await input.onEvents?.([runEvent({ id: turnId, kind: "turn", name: `manager.turn.${turnIndex}`, status: "failed", turnIndex, startedAt: turnStartedAt, completedAt: new Date().toISOString(), errorCode: "output_truncated", summary: { truncatedAtOutputLimit: true } })]);
+        continue;
+      }
 
       if (!calls.length) {
         noToolResponses += 1;
@@ -635,6 +657,7 @@ export class WebsiteManagerAgent {
               firstSuccessfulBuildMs,
               modelRequests: responseCount,
               noToolResponses,
+              truncatedResponses,
               toolCalls: Object.fromEntries([...toolCallCounts.entries()].sort(([left], [right]) => left.localeCompare(right))),
               unchangedPathRereads: history.unchangedPathRereads(),
               parallelToolViolations,
@@ -963,33 +986,41 @@ async function createWithTransportRetry(
     signal?: AbortSignal;
     modelId: string;
     onRetry?: (retry: { attempt: number; delayMs: number; status?: number }) => void;
+    /** The authoring loop turns an output-limit cut-off into an author-visible turn error. */
+    acceptOutputLimitTruncation?: boolean;
   }
 ) {
-  const maximumAttempts = options.modelId === "moonshotai/kimi-k3" ? 4 : 2;
-  let lastError: unknown;
-  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+  // A temporarily unavailable provider is retried with backoff until the
+  // caller's run-deadline signal aborts; the deadline and cost fuse are the
+  // hard limits. A caller without a deadline signal keeps two attempts.
+  const maximumAttempts = options.signal ? Number.POSITIVE_INFINITY : 2;
+  for (let attempt = 0; ; attempt += 1) {
     try {
       const response = await raceModelRequestWithAbort(
         client.create(params, options.signal ? { signal: options.signal } : undefined),
         options.signal
       );
       if (response.status === "failed") throw new Error(response.error?.message ?? "manager_model_failed");
-      if (response.status === "incomplete") throw new Error(`manager_model_incomplete:${response.incomplete_details?.reason ?? "unknown"}`);
+      if (response.status === "incomplete" && !(options.acceptOutputLimitTruncation && response.incomplete_details?.reason === "max_output_tokens")) {
+        throw new Error(`manager_model_incomplete:${response.incomplete_details?.reason ?? "unknown"}`);
+      }
       return response;
     } catch (error) {
-      lastError = error;
       if (attempt + 1 >= maximumAttempts || options.signal?.aborted || !transientTransportError(error)) throw error;
       const delayMs = transportRetryDelayMs(error, attempt, options.modelId);
       options.onRetry?.({ attempt: attempt + 1, delayMs, status: transportStatus(error) });
       await abortableDelay(delayMs, options.signal);
     }
   }
-  throw lastError;
 }
 
 function raceModelRequestWithAbort<T>(request: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return request;
-  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("model_request_aborted"));
+  if (signal.aborted) {
+    // The abandoned request may still settle; never leave its rejection unhandled.
+    request.catch(() => undefined);
+    return Promise.reject(signal.reason ?? new Error("model_request_aborted"));
+  }
   return new Promise<T>((resolve, reject) => {
     const abort = () => {
       signal.removeEventListener("abort", abort);
@@ -1009,17 +1040,11 @@ function raceModelRequestWithAbort<T>(request: Promise<T>, signal?: AbortSignal)
   });
 }
 
-function transportRetryDelayMs(error: unknown, attempt: number, modelId: string) {
-  const status = transportStatus(error);
-  if (status === 429) {
-    const retryAfter = retryAfterMs(error);
-    if (retryAfter !== undefined) return Math.min(retryAfter, 60_000);
-    if (modelId === "moonshotai/kimi-k3") return [5_000, 15_000, 30_000][attempt] ?? 30_000;
-  }
-  if (modelId === "moonshotai/kimi-k3" && status !== undefined && status >= 500) {
-    return [2_000, 5_000, 15_000][attempt] ?? 15_000;
-  }
-  return 1_000;
+/** Honors Retry-After (capped at a minute); otherwise exponential backoff from one second to a minute. */
+function transportRetryDelayMs(error: unknown, attempt: number, _modelId: string) {
+  const retryAfter = transportStatus(error) === 429 ? retryAfterMs(error) : undefined;
+  if (retryAfter !== undefined) return Math.min(retryAfter, 60_000);
+  return Math.min(1_000 * 2 ** attempt, 60_000);
 }
 
 function retryAfterMs(error: unknown) {
@@ -1068,6 +1093,8 @@ function abortableDelay(delayMs: number, signal?: AbortSignal) {
 }
 
 function transientTransportError(error: unknown) {
+  // An exhausted quota or credit balance does not recover by waiting.
+  if (/insufficient_quota|quota_exceeded|billing_hard_limit|insufficient_credits|\bno credits remaining\b/i.test(boundedError(error))) return false;
   const status = error && typeof error === "object" ? (error as { status?: unknown }).status : undefined;
   if (typeof status === "number") return status === 408 || status === 409 || status === 429 || status >= 500;
   return error instanceof TypeError

@@ -14,6 +14,7 @@ import { isLegalSourcePagePath, normalizedSourcePagePath } from "@/packages/busi
 import { canonicalSourceTokens } from "@/lib/source-text-blocks";
 import { resolveApprovedSourceDocuments, type ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
 import { FactBindingValidator } from "./fact-declarations";
+import { firstPartyOutboundHrefs, firstPartySupportForBuild } from "./first-party-evidence";
 import {
   agentAuthoredArtifactSchema,
   normalizeRoutePath,
@@ -64,9 +65,23 @@ export function prepareSiteArtifact(input: {
   const authored = agentAuthoredArtifactSchema.parse(input.authoredArtifact);
   const routes = new Set(authored.routes.map((route) => normalizeRoutePath(route.path)));
   const allowedFormIds = new Set(input.buildInput.forms.map((form) => form.id));
-  const allowedExternalHrefs = allowedExternalHrefsFor(input.buildInput, input.sourceSnapshots ?? []);
-  const allowedPhoneNumbers = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => comparablePhone(String(fact.value))));
-  const allowedEmailAddresses = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value).trim().toLowerCase()));
+  // Links, phone numbers and email addresses the business itself shows on its
+  // retained first-party pages are verified destinations, alongside bound
+  // public facts. Spam/injected pages and affiliate/tracking links are never
+  // support; unsafe schemes are still rejected by the sanitizer.
+  const firstPartySupport = firstPartySupportForBuild(input.buildInput, input.sourceSnapshots ?? [], input.sourcePages ?? []);
+  const allowedExternalHrefs = new Set([
+    ...allowedExternalHrefsFor(input.buildInput, input.sourceSnapshots ?? []),
+    ...firstPartyOutboundHrefs(firstPartySupport)
+  ]);
+  const allowedPhoneNumbers = new Set([
+    ...input.buildInput.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => comparablePhone(String(fact.value))),
+    ...firstPartySupport.corePagePhones().map(comparablePhone)
+  ]);
+  const allowedEmailAddresses = new Set([
+    ...input.buildInput.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value).trim().toLowerCase()),
+    ...firstPartySupport.corePageEmails()
+  ]);
   const cssResult = sanitizeAgentCss(authored.sharedCss, input.buildInput.business.assets);
   const finalCss = `${platformFontStyles}\n${platformCapabilityStylesFor(input.runtimeSeriesId)}\n${cssResult.css}`;
   const findings: ArtifactGateFinding[] = [...cssResult.findings];
@@ -185,7 +200,7 @@ export function finalizePreparedArtifact(input: {
   const findings = dedupeFindings([
     ...input.prepared.findings,
     ...input.browserGate.findings
-  ]).map(advisoryUnlessTechnicalBlocker).map(boundedFindingMessage);
+  ]).map(withReleaseSeverity).map(boundedFindingMessage);
   const fileRecords = input.prepared.files.map((file) => ({
     path: file.path,
     contentType: file.contentType,
@@ -258,9 +273,14 @@ export function isTechnicalReleaseBlocker(finding: ArtifactGateFinding) {
   return (siteTechnicalReleasePolicy.blockingIds as readonly string[]).includes(finding.id);
 }
 
-function advisoryUnlessTechnicalBlocker(finding: ArtifactGateFinding): ArtifactGateFinding {
+/**
+ * The one canonical release classification. Finalization and every authoring
+ * inspection path map findings through this, so the author never sees an
+ * "error" that release would treat as advisory.
+ */
+export function withReleaseSeverity<T extends ArtifactGateFinding>(finding: T): T {
   if (finding.severity !== "error" || isTechnicalReleaseBlocker(finding)) return finding;
-  return { ...finding, severity: "warning" };
+  return { ...finding, severity: "warning" as const };
 }
 
 function validateSiteStructure(input: {
@@ -287,11 +307,13 @@ function validateSiteStructure(input: {
   for (const route of input.routes) {
     const mismatch = slugTokenMismatch(route.path, `${route.title} ${route.description} ${visibleBodyText(route.bodyHtml)}`);
     if (!mismatch) continue;
+    // A spelling heuristic, not a functional failure: advisory only.
     findings.push(gateFinding(
       "route.slug_mismatch",
       "route",
-      `Route path token "${mismatch.token}" is one letter away from "${mismatch.word}" on this page. Correct that token in the route path. This is a spelling repair of the approved path, not a new route.`,
-      route.path
+      `Route path token "${mismatch.token}" is one letter away from "${mismatch.word}" on this page. If it is a misspelling, correct that token in the route path; a deliberate spelling (a source path or brand word) may stay.`,
+      route.path,
+      "warning"
     ));
   }
   for (const similarity of input.similarities) {
@@ -434,6 +456,7 @@ function validateSourceSensitiveLegalRoutes(
   const findings: ArtifactGateFinding[] = [];
   const authoredByPath = new Map(routes.map((route) => [normalizedSourcePagePath(route.path), route]));
   const richestLegalSourceByPath = new Map<string, string[]>();
+  const legalProvisionsByPath = new Map<string, string[]>();
   const richestFetchedSourceByPath = new Map<string, SourceSnapshotPage>();
 
   for (const page of sourcePages) {
@@ -464,13 +487,14 @@ function validateSourceSensitiveLegalRoutes(
   for (const page of richestFetchedSourceByPath.values()) {
     if (!isLegalSourcePagePath(page.path)) continue;
     const path = normalizedSourcePagePath(page.path);
-    const substantiveText = sourceTextLines(page.extractedText)
+    const bodyLines = sourceTextLines(page.extractedText)
       .filter((line) => (nonLegalLineFrequency.get(normalizedSourceLine(line)) ?? 0) < 3)
-      .join("\n");
+      .filter((line) => !legalBoilerplateLine(line));
     richestLegalSourceByPath.set(
       path,
-      canonicalSourceTokens(substantiveText).map((token) => token.value)
+      canonicalSourceTokens(bodyLines.join("\n")).map((token) => token.value)
     );
+    legalProvisionsByPath.set(path, bodyLines);
   }
 
   for (const document of approvedDocuments) {
@@ -499,18 +523,23 @@ function validateSourceSensitiveLegalRoutes(
       continue;
     }
 
-    // Very short utility notices do not provide enough evidence for a stable
-    // similarity decision. Their exact route is still required above.
-    if (sourceTokens.length < 30) continue;
-    const sourceShingles = tokenShingles(sourceTokens, 5);
-    const renderedShingles = tokenShingles(renderedTokens, 5);
-    const retained = [...sourceShingles].filter((shingle) => renderedShingles.has(shingle)).length;
-    const recall = sourceShingles.size ? retained / sourceShingles.size : 1;
-    if (recall < 0.85) {
+    // Binary completeness: every substantive provision of the legal body
+    // (site shell and boilerplate such as "last updated" removed) must appear
+    // in the rendered page. Whitespace, punctuation, case and markup are
+    // normalized; wording is not.
+    const rendered = ` ${renderedTokens.join(" ")} `;
+    const missing = (legalProvisionsByPath.get(path) ?? []).filter((provision) => {
+      const variants = [provision, provision.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")]
+        .map((text) => canonicalSourceTokens(text).map((token) => token.value));
+      if (variants[0]!.length < legalProvisionMinimumTokens) return false;
+      return !variants.some((tokens) => rendered.includes(` ${tokens.join(" ")} `));
+    });
+    if (missing.length) {
+      const first = missing[0]!.length > 160 ? `${missing[0]!.slice(0, 159)}…` : missing[0]!;
       findings.push(gateFinding(
         "fact.legal_source_preservation",
         "claim",
-        `Source-sensitive legal route ${path} retains only ${(recall * 100).toFixed(1)}% of the source provisions; preserve the substantive source text instead of summarizing or replacing it.`,
+        `Source-sensitive legal route ${path} is missing ${missing.length} substantive source provision${missing.length === 1 ? "" : "s"}; keep every provision of the source document verbatim instead of summarizing or replacing it. First missing provision: "${first}".`,
         path
       ));
     }
@@ -535,20 +564,22 @@ function approvedDocumentMismatchContext(sourceTokens: string[], renderedTokens:
   return `First prefix-aligned difference at normalized token offsets approved=${offset}, rendered=${start + offset} (zero-based, not source-line coordinates). Expected context: "${excerpt(sourceTokens, offset)}". Rendered context: "${excerpt(renderedTokens, start + offset)}".`;
 }
 
+/** Lines of fewer tokens are headings or labels, not provisions. */
+const legalProvisionMinimumTokens = 6;
+
+/** Document boilerplate that is not a provision: revision dates and copyright lines. */
+function legalBoilerplateLine(line: string) {
+  return /^(?:(?:last|date last)\s+(?:updated|revised|modified)|effective(?:\s+date)?|updated|revised|posted)\b[^.]{0,60}$/i.test(line.trim())
+    || /^(?:©|\(c\)|copyright)\s/i.test(line.trim())
+    || /^all rights reserved\.?$/i.test(line.trim());
+}
+
 function sourceTextLines(value: string) {
   return value.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
 }
 
 function normalizedSourceLine(value: string) {
   return value.normalize("NFKC").toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-function tokenShingles(tokens: string[], size: number) {
-  const shingles = new Set<string>();
-  for (let index = 0; index <= tokens.length - size; index += 1) {
-    shingles.add(tokens.slice(index, index + size).join(" "));
-  }
-  return shingles;
 }
 
 function fiveWordShingles(value: string) {

@@ -23,11 +23,12 @@ import {
   robotsAllows
 } from "../packages/business-data/robots-policy";
 import { PublicFetchUrlError } from "../lib/url-safety";
+import { firstPartySupportFromCrawlPages } from "../packages/business-data/first-party-support";
 import { isLikelyInjectedSpamSourcePage, isMalformedSourceLinkPath } from "../packages/business-data/source-page-classification";
 import {
   assertSourceSuitableForGeneration,
   createLooseWebsiteBootstrap,
-  hasContradictoryFirstPartyLocationHours,
+  reconcileFirstPartyContactFields,
   ingestWebsite,
   observedProof,
   retainedContactConsensus,
@@ -423,6 +424,28 @@ const manyReviewsSummary = {
 };
 assert.equal(selectObservedFirstPartyTestimonials([manyReviewsSummary], manyReviewsSummary.url).length, 24,
   "First-party testimonials are retained up to the widened cap of 24.");
+// Every first-party testimonial candidate that is not kept records its reason
+// in source-preparation diagnostics.
+{
+  const shortAndDuplicate = {
+    ...summarizeCrawlHtml(`<!doctype html><title>Reviews</title><main><h1>Reviews</h1>
+      <blockquote>“Great job, thanks!”</blockquote>
+      ${Array.from({ length: 26 }, (_, index) => `<blockquote>“Visit ${index + 1}: the crew arrived when promised and left the whole yard exactly as they found it.”</blockquote>`).join("\n")}
+      <blockquote>“Visit 1: the crew arrived when promised and left the whole yard exactly as they found it.”</blockquote>
+    </main>`, "https://testimonial-diagnostics.example/reviews"),
+    source: "primary" as const
+  };
+  const diagnostics = sourcePreparationDiagnosticsFor(
+    { ...activeCrawlShell(shortAndDuplicate.url), pageSummaries: [shortAndDuplicate] },
+    { pages: [{ url: shortAndDuplicate.url, finalUrl: shortAndDuplicate.url, evidenceClass: "first_party", summary: shortAndDuplicate }] } as never
+  ).facts.filter((fact) => fact.kind === "testimonial");
+  const byDisposition = (disposition: string) => diagnostics.filter((fact) => fact.disposition === disposition).length;
+  assert.equal(byDisposition("accepted"), 24);
+  assert.equal(byDisposition("selection_limit"), 2, "Testimonials over the retained limit must record why they were left out.");
+  assert.equal(byDisposition("deduplication"), 1);
+  assert.equal(byDisposition("invalid_value_filtering"), 1, "A too-short testimonial must record why it was left out.");
+}
+
 const proofFacts: Parameters<typeof observedProof>[2] = [];
 const retainedProof = observedProof({
   ...activeCrawlShell(reviewSummary.url),
@@ -510,6 +533,47 @@ const intakeTransport = {
     return html === undefined ? response("missing", 404, "text/plain") : response(html, 200);
   }) as typeof fetch
 };
+
+// Field-level withholding and contact reconciliation: a "coming soon" notice
+// and contradictory hours no longer reject the source; the contact page's
+// email beats a stale blog address (recorded for owner review), and equally
+// prominent contradictory hours are withheld with both values recorded.
+{
+  const reconcileOrigin = "https://reconcile-contacts.example";
+  const address = "<p>1200 Canyon Road, Boise, ID 83702</p>";
+  const documents = new Map<string, string>([
+    ["/", pageHtml("Canyon Glass Repair", ["/contact", "/blog/2017-update"], "", `</p><p>Our new website is coming soon! Until then, call or email us.</p>${address}<p>Mon-Fri 8am-5pm</p><a href="mailto:office@reconcile-contacts.example">office@reconcile-contacts.example</a><p>`)],
+    ["/contact", pageHtml("Contact Canyon Glass Repair", [], "", `</p>${address}<p>Mon-Fri 9am-6pm</p><a href="mailto:office@reconcile-contacts.example">office@reconcile-contacts.example</a><p>`)],
+    ["/blog/2017-update", pageHtml("2017 shop update", [], "", `</p><a href="mailto:old-shop@reconcile-contacts.example">old-shop@reconcile-contacts.example</a><p>`)]
+  ]);
+  const reconciled = await ingestWebsite({
+    url: `${reconcileOrigin}/`,
+    now: "2026-09-24T00:00:00.000Z",
+    crawlTransport: {
+      validateUrl: async (value: string) => new URL(value).href,
+      sleep: async () => undefined,
+      browserFetch: async () => { throw new Error("browser rendering is not part of this fixture"); },
+      fetchImpl: (async (input: string | URL | Request) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        if (url.pathname === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+        const html = documents.get(url.pathname);
+        return html === undefined ? response("missing", 404, "text/plain") : response(html, 200);
+      }) as typeof fetch
+    }
+  });
+  const emails = reconciled.state.facts.filter((fact) => fact.kind === "email");
+  assert.deepEqual(emails.filter((fact) => fact.publicEligible).map((fact) => fact.value), ["office@reconcile-contacts.example"],
+    "The prominent first-party email did not publish.");
+  const staleEmail = emails.find((fact) => fact.value === "old-shop@reconcile-contacts.example");
+  assert.equal(staleEmail?.publicEligible, false, "A less prominent conflicting email was published.");
+  assert.match(staleEmail?.label ?? "", /Conflicting email \(owner review; not published\)/);
+  const hoursFacts = reconciled.state.facts.filter((fact) => fact.kind === "hours");
+  assert.equal(hoursFacts.some((fact) => fact.publicEligible), false, "Equally prominent contradictory hours were published.");
+  assert.equal(hoursFacts.filter((fact) => /Conflicting hours/.test(fact.label)).length, 2,
+    "Both contradictory hours values must be recorded for owner review.");
+  assert.equal(reconciled.state.locations[0]?.hours, undefined);
+}
+
 const intake = await ingestWebsite({ url: `${intakeOrigin}/`, now: "2026-09-23T00:00:00.000Z", crawlTransport: intakeTransport });
 assert.equal(intake.state.identity.name, "A & T Well and Pump",
   "A homepage service headline displaced the business's own LocalBusiness name.");
@@ -1169,13 +1233,107 @@ assert.equal(isLikelyInjectedSpamSourcePage({ path: "/residential/bed-bugs", tit
   const different = hoursPage("/about", "<p>Mon-Fri 9am-6pm</p>");
   assert.ok(compact.extractedFacts.hours && longForm.extractedFacts.hours && different.extractedFacts.hours,
     "The hours fixture did not extract visible hours.");
-  const hoursCrawl = (pages: typeof compact[]) => ({ ...activeCrawlShell(`${hoursOrigin}/`), pageSummaries: pages });
-  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([compact, longForm])), false,
-    "Equivalent hours in different display formats were rejected as contradictory.");
-  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([compact, different])), true,
-    "Genuinely different hours for the same address were not flagged.");
-  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([longForm, hoursPage("/visit", "<p>Saturday: 9am-1pm</p>")])), true,
-    "Closed versus open on the same day was not flagged.");
+  const reconcileHours = (pages: typeof compact[]) => reconcileFirstPartyContactFields(pages,
+    firstPartySupportFromCrawlPages(pages)).hours;
+  const equivalent = reconcileHours([compact, longForm]);
+  assert.ok(equivalent.winner && !equivalent.conflicts.length,
+    "Equivalent hours in different display formats were treated as conflicting.");
+  // Homepage versus a core service page: the more prominent homepage wins and
+  // the other value is recorded as a conflict, not published.
+  const differing = reconcileHours([compact, different]);
+  assert.equal(differing.winner?.evidence[0]?.path, "/", "The homepage's hours did not win over a less prominent page.");
+  assert.equal(differing.conflicts.length, 1);
+  // Homepage and contact page are equally prominent: a same-day conflict
+  // withholds hours and records both values for owner review.
+  const contactConflict = hoursPage("/contact", "<p>Mon-Fri 9am-6pm</p>");
+  const tied = reconcileHours([compact, contactConflict]);
+  assert.equal(tied.winner, undefined, "Equally prominent contradictory hours were published.");
+  assert.equal(tied.conflicts.length, 2);
+  assert.ok(reconcileHours([longForm, hoursPage("/visit", "<p>Saturday: 9am-1pm</p>")]).conflicts.length > 0,
+    "Closed versus open on the same day was not recorded as a conflict.");
+}
+
+// Proactive rendering: the homepage and gallery/review pages render even when
+// their static HTML has text, so JS-loaded quotes and photos are seen. A
+// failed proactive render keeps the static page without a crawl failure, and
+// the per-site cap bounds the work.
+{
+  const renderOrigin = "https://proactive-render.example";
+  const rendered: string[] = [];
+  const crawlRender = (maximumProactiveBrowserRenders: number) => crawlWebsiteForGeneration({
+    url: `${renderOrigin}/`,
+    validateUrl: async (value) => value,
+    limits: { minimumStartSpacingMs: 0, transientRetries: 0, maximumProactiveBrowserRenders },
+    sleep: async () => undefined,
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = new URL(url).pathname;
+      if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+      if (path === "/sitemap.xml") return response("", 404, "text/plain");
+      if (path === "/") return response(pageHtml("Home", ["/gallery", "/reviews", "/services"]), 200);
+      if (path === "/gallery") return response(pageHtml("Gallery"), 200);
+      if (path === "/reviews") return response(pageHtml("Reviews"), 200);
+      if (path === "/services") return response(pageHtml("Services"), 200);
+      throw new Error(`unexpected_render_fixture_url:${url}`);
+    },
+    browserFetch: async (url) => {
+      const path = new URL(url).pathname;
+      rendered.push(path);
+      if (path === "/reviews") throw new Error("render_timeout_fixture");
+      return pageHtml(path === "/" ? "Home" : "Gallery", [], "", "</p><blockquote>“The crew rebuilt our deck in two days and left the yard spotless.”</blockquote><p>");
+    }
+  });
+  const proactive = await crawlRender(8);
+  assert.deepEqual([...rendered].sort(), ["/", "/gallery", "/reviews"], "The homepage, gallery and reviews pages were not rendered proactively; ordinary pages must not be.");
+  assert.equal(proactive.ingestion.counts.failed, 0, "A failed proactive render was recorded as a crawl failure.");
+  const gallerySummary = proactive.crawl.pageSummaries.find((page) => new URL(page.url).pathname === "/gallery");
+  assert.ok(gallerySummary?.sourceTextBlocks.some((block) => /rebuilt our deck/.test(block.displayText)),
+    "JS-loaded gallery content was not captured from the rendered page.");
+  rendered.length = 0;
+  await crawlRender(1);
+  assert.equal(rendered.length, 1, "The per-site proactive render cap was not enforced.");
+}
+
+// A text block over the size cap is split into verbatim sentence-aligned
+// pieces, never dropped whole.
+{
+  const sentences = Array.from({ length: 90 }, (_value, index) => `Our crew completed restoration project number ${index + 1} with careful cleanup and a final walkthrough.`);
+  const longHtml = `<!doctype html><title>Story</title><main><p>${sentences.join(" ")}</p></main>`;
+  const longBlocks = summarizeCrawlHtml(longHtml, "https://long-block.example/story").sourceTextBlocks;
+  assert.ok(longBlocks.length >= 2, "An oversized text block was not split.");
+  assert.ok(longBlocks.every((block) => block.displayText.length <= 4_000), "A split piece exceeds the block cap.");
+  assert.equal(longBlocks.map((block) => block.displayText).join(" "), sentences.join(" "),
+    "Splitting an oversized block lost or changed source text.");
+  assert.equal(new Set(longBlocks.map((block) => block.id)).size, longBlocks.length, "Split pieces share a block id.");
+}
+
+// Split schedules (Mon-Fri 8-5, Sat 9-1) stated in different formats on two
+// first-party pages agree day by day; only a same-day conflict withholds hours.
+{
+  const splitOrigin = "https://split-hours.example";
+  const address = "<p>1200 Canyon Road, Boise, ID 83702</p>";
+  const crawlSplit = (contactHours: string) => crawlWebsiteForGeneration({
+    url: `${splitOrigin}/`,
+    validateUrl: async (value) => value,
+    limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+    sleep: async () => undefined,
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = new URL(url).pathname;
+      if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+      if (path === "/sitemap.xml") return response("", 404, "text/plain");
+      if (path === "/") return response(pageHtml("Home", ["/contact"], "", `</p>${address}<p>Mon-Fri 8am-5pm</p><p>Saturday: 9am-1pm</p><p>`), 200);
+      if (path === "/contact") return response(pageHtml("Contact", [], "", `</p>${address}${contactHours}<p>`), 200);
+      throw new Error(`unexpected_split_hours_fixture_url:${url}`);
+    }
+  });
+  const agreeing = await crawlSplit("<p>Monday - Friday: 8:00 AM - 5:00 PM</p><p>Sat: 9:00 AM - 1:00 PM</p><p>Sunday: Closed</p>");
+  const agreedHours = agreeing.crawl.extractedFacts.hours;
+  assert.ok(agreedHours && Object.keys(agreedHours).some((label) => /saturday/i.test(label)),
+    `Split hours stated in two formats were withheld: ${JSON.stringify(agreedHours)}`);
+  assert.ok(Object.keys(agreedHours!).some((label) => /friday/i.test(label)), "Weekday hours were lost from the split schedule.");
+  const conflicting = await crawlSplit("<p>Monday - Friday: 8:00 AM - 5:00 PM</p><p>Saturday: 10:00 AM - 2:00 PM</p>");
+  assert.equal(conflicting.crawl.extractedFacts.hours, undefined, "A same-day hours conflict was not withheld.");
 }
 
 const authorityOrigin = "https://authority-filter.example";
@@ -1906,7 +2064,12 @@ assert(comprehensive.ingestion.counts.discovered > 260, "The crawler did not ret
 assert(comprehensive.ingestion.counts.fetched >= 263, "An implicit page cap prevented complete fetching.");
 assert.equal(comprehensive.ingestion.counts.unfinished, 0);
 assert.equal(comprehensive.ingestion.counts.failed, 0);
-assert.equal(comprehensive.ingestion.counts.browserRendered, 1);
+// The near-empty JavaScript shell must render; the homepage also renders
+// proactively (JS-loaded galleries and reviews), within the per-site cap.
+assert.equal(comprehensive.ingestion.counts.browserRendered, 2);
+assert.equal(comprehensive.ingestion.pages.find((page) => page.url === `${origin}/`)?.browserRendered, true,
+  "The homepage was not rendered proactively.");
+assert.equal(comprehensive.ingestion.limits.maximumProactiveBrowserRenders, 8);
 assert.equal(comprehensive.ingestion.pages.every((page) => ["fetched", "excluded", "failed", "unfinished"].includes(page.outcome)), true);
 assert.equal(comprehensive.ingestion.pages.some((page) => page.reason === "selection_limit"), false);
 assert.equal(comprehensive.ingestion.pages.find((page) => page.url === `${origin}/private/secret`)?.reason, "robots_disallowed");

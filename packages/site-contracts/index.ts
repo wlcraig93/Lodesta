@@ -251,13 +251,15 @@ const assetProvenanceSchema = z.discriminatedUnion("origin", [
       recipeVersion: z.literal(1),
       sourceContentHash: contentHash,
       sourceMimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+      // Present only when the retained content type disagreed with the decoded bytes.
+      declaredMimeType: z.string().min(1).max(120).optional(),
       sourceWidth: z.number().int().positive(),
       sourceHeight: z.number().int().positive(),
       maxEdge: z.literal(2560),
       outputFormat: z.literal("webp"),
       quality: z.literal(90),
       effort: z.literal(4),
-      operations: z.array(z.enum(["auto_orient", "resize_inside", "encode_webp"])).min(1).max(3)
+      operations: z.array(z.enum(["decoded_type", "first_frame", "auto_orient", "resize_inside", "encode_webp"])).min(1).max(5)
     }).strict()]).optional()
   }).strict(),
   z.object({
@@ -1140,6 +1142,13 @@ export const siteAgentAssetCurationSchema = z.object({
     stockLike: z.boolean(),
     alt: z.string().max(200)
   }).strict()).max(200),
+  // Every retained candidate that was not selected (other than recorded
+  // duplicates and flat artwork) carries the reason it was left out, including
+  // curated photos whose adoption check failed.
+  skipped: z.array(z.object({
+    resourceId: curationResourceId,
+    reason: z.string().min(1).max(200)
+  }).strict()).max(400).default([]),
   selected: z.array(z.object({
     resourceId: curationResourceId,
     sourceId: identifier,

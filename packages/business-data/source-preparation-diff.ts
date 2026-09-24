@@ -10,6 +10,7 @@ import type {
 } from "./website-ingestion";
 
 export type SourcePreparationChangeClassification =
+  | "selection_limit"
   | "deduplication"
   | "invalid_value_filtering"
   | "conflict_suppression"
@@ -182,12 +183,13 @@ function preparationDiagnostics(snapshot: SourceSnapshot) {
 function isPreparationFactDiagnostic(value: unknown): value is SourcePreparationFactDiagnostic {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<SourcePreparationFactDiagnostic>;
-  return (item.kind === "hours" || item.kind === "service_area")
+  return (item.kind === "hours" || item.kind === "service_area" || item.kind === "testimonial")
     && typeof item.reason === "string"
     && Array.isArray(item.sourceUrls)
     && Array.isArray(item.evidenceClasses)
     && [
       "accepted",
+      "selection_limit",
       "deduplication",
       "invalid_value_filtering",
       "conflict_suppression",
@@ -259,6 +261,7 @@ function explanationFor(
 ) {
   const subject = change === "changed" ? "The earlier value changed" : "The earlier value was removed";
   return {
+    selection_limit: `${subject} because it exceeded a retained-item limit.`,
     deduplication: `${subject} because the later preparation retained an equivalent canonical value once.`,
     invalid_value_filtering: `${subject} because deterministic validation rejected it as invalid.`,
     conflict_suppression: `${subject} because conflicting retained evidence prevented a single reliable value.`,

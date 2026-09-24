@@ -831,9 +831,11 @@ const unsupportedLocationRole = prepareSiteArtifact({
   buildInput: input,
   runtimeSeriesId: "site-runtime-v4"
 });
+// Owner-approved 2026-09-24: location-role words are advisory evidence.
 assert(
-  errors(unsupportedLocationRole).some((finding) => finding.id === "fact.undeclared_marker"),
-  "An unsupported address-role characterization escaped the factual gate."
+  !errors(unsupportedLocationRole).some((finding) => finding.id === "fact.undeclared_marker")
+    && unsupportedLocationRole.findings.some((finding) => finding.id === "advisory.location_claim" && finding.severity === "warning"),
+  "An address-role characterization must be an advisory, not a blocking factual marker."
 );
 const locationRoleFact = {
   id: "fact_location_role",

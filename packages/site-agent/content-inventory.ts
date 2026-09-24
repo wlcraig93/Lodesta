@@ -1,6 +1,7 @@
+import { reviewAttributionName, reviewAttributionPageTopicWords } from "@/lib/review-attribution";
 import type { SitePublicBuildInput, SourceSnapshotPage } from "@/packages/site-contracts";
 import { classifySourcePagePath, isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
-import { containsGatedBusinessClaim } from "./claim-gates";
+import { sensitiveFirstPartyTopics, type SensitiveFirstPartyTopic } from "@/packages/business-data/first-party-support";
 
 /**
  * A compact, category-organized index of the business's own first-party
@@ -9,13 +10,12 @@ import { containsGatedBusinessClaim } from "./claim-gates";
  * its source page and the approved live route that consolidates that page.
  *
  * It is source material for the author, never render-time data, and it does
- * not widen fact authority. Lines that state a sensitive claim (credentials,
- * guarantees, prices, ratings, availability, offers, cadence) are withheld and
- * only their topic and page are listed; such claims reach copy only through
- * publicFacts, which factReferences names by ID. Attributed customer
- * testimonials are kept whatever words they contain: they are quoted as that
- * customer's speech, never restated as the business's claim. Text rendered by
- * third-party review widgets is never collected.
+ * not widen fact authority. First-party content on a sensitive topic
+ * (credentials, guarantees, prices, ratings, availability, offers, cadence,
+ * safety) is shown, never withheld, tagged with sensitiveTopics beside its
+ * sourcePath: the author may quote it verbatim as the business's own words,
+ * but a new sensitive claim in the author's voice still needs an exact
+ * publicFact. Text rendered by third-party review widgets is never collected.
  */
 export type FirstPartyContentInventory = {
   schemaVersion: 1;
@@ -28,9 +28,10 @@ export type FirstPartyContentInventory = {
     sourcePath: string;
     routePath?: string;
     publicFactId?: string;
+    sensitiveTopics?: SensitiveFirstPartyTopic[];
   }>;
-  faqs: Array<{ question: string; answer: string; sourcePath: string; routePath?: string }>;
-  people: Array<{ name: string; role?: string; statement?: string; sourcePath: string; routePath?: string }>;
+  faqs: Array<{ question: string; answer: string; sourcePath: string; routePath?: string; sensitiveTopics?: SensitiveFirstPartyTopic[] }>;
+  people: Array<{ name: string; role?: string; statement?: string; sourcePath: string; routePath?: string; sensitiveTopics?: SensitiveFirstPartyTopic[] }>;
   projects: Array<{
     title: string;
     summary?: string;
@@ -38,18 +39,18 @@ export type FirstPartyContentInventory = {
     imageResourceIds?: string[];
     sourcePath: string;
     routePath?: string;
+    sensitiveTopics?: SensitiveFirstPartyTopic[];
   }>;
-  serviceLists: Array<{ lead: string; items: string[]; sourcePath: string; routePath?: string }>;
+  serviceLists: Array<{ lead: string; items: string[]; sourcePath: string; routePath?: string; sensitiveTopics?: SensitiveFirstPartyTopic[] }>;
   factReferences: Array<{ publicFactId: string; label: string; value: string }>;
   thirdPartyReviewSurfaces: string[];
-  withheld: Array<{ topic: WithheldTopic; sourcePaths: string[]; count: number }>;
+  /** Where tagged sensitive-topic first-party content appears, by topic. */
+  sensitiveTopicIndex: Array<{ topic: SensitiveFirstPartyTopic; sourcePaths: string[]; count: number }>;
   omitted?: Partial<Record<"testimonials" | "faqs" | "people" | "projects" | "serviceLists", number>>;
 };
 
 export const contentInventoryProducer = "first-party-content-inventory@1" as const;
 export const contentInventoryPath = "src/content-inventory.ts" as const;
-
-type WithheldTopic = "price" | "offer" | "guarantee" | "credential" | "rating" | "availability" | "cadence" | "safety" | "other";
 
 const limits = {
   testimonials: 24,
@@ -61,7 +62,7 @@ const limits = {
   quoteCharacters: 2_000,
   answerCharacters: 900,
   summaryCharacters: 300,
-  withheldPaths: 6
+  topicPaths: 6
 } as const;
 
 type InventoryPage = {
@@ -88,12 +89,16 @@ export function createFirstPartyContentInventory(input: {
     const routePath = input.routeForSourcePath?.(sourcePath);
     return routePath ? { routePath } : {};
   };
-  const withheld = new Map<WithheldTopic, Set<string>>();
-  const withheldCounts = new Map<WithheldTopic, number>();
-  const withhold = (text: string, sourcePath: string) => {
-    const topic = sensitiveTopic(text);
-    withheld.set(topic, (withheld.get(topic) ?? new Set()).add(sourcePath));
-    withheldCounts.set(topic, (withheldCounts.get(topic) ?? 0) + 1);
+  const topicPaths = new Map<SensitiveFirstPartyTopic, Set<string>>();
+  const topicCounts = new Map<SensitiveFirstPartyTopic, number>();
+  // Tag, never withhold: returns the topics for the item and indexes them.
+  const tag = (texts: Array<string | undefined>, sourcePath: string) => {
+    const topics = [...new Set(texts.flatMap((text) => text ? sensitiveFirstPartyTopics(text) : []))];
+    for (const topic of topics) {
+      topicPaths.set(topic, (topicPaths.get(topic) ?? new Set()).add(sourcePath));
+      topicCounts.set(topic, (topicCounts.get(topic) ?? 0) + 1);
+    }
+    return topics.length ? { sensitiveTopics: topics } : {};
   };
   const proofFacts = (input.publicFacts ?? []).flatMap((fact) => fact.kind === "proof" && typeof fact.value === "string"
     ? [{ id: fact.id, label: fact.label, value: fact.value }]
@@ -107,53 +112,49 @@ export function createFirstPartyContentInventory(input: {
   };
 
   const testimonials = extractTestimonials(pages.filter((entry) => !thirdParty.has(entry.path)), isChrome)
-    .flatMap((testimonial) => {
+    .map((testimonial) => {
       const fact = proofFacts.find((candidate) => sameQuotation(candidate.value, testimonial.quote));
-      // A customer's attributed words are that customer's speech, not the
-      // business's claim: quote them exactly even when they mention an
-      // emergency, safety, a guarantee, a license or a price. Only an
-      // unattributed, unconfirmed quotation that states such a claim is withheld.
-      if (!fact && !testimonial.attribution && isSensitive(testimonial.quote)) {
-        withhold(testimonial.quote, testimonial.sourcePath);
-        return [];
-      }
-      return [{
+      // A customer's words are quoted exactly whatever they mention; sensitive
+      // topics are tagged so the author never restates them as its own claim.
+      return {
         quote: truncateAtSentence(testimonial.quote, limits.quoteCharacters),
         ...(testimonial.attribution ? { attribution: testimonial.attribution } : {}),
         sourcePath: testimonial.sourcePath,
         ...route(testimonial.sourcePath),
-        ...(fact ? { publicFactId: fact.id } : {})
-      }];
+        ...(fact ? { publicFactId: fact.id } : {}),
+        ...tag([testimonial.quote], testimonial.sourcePath)
+      };
     });
 
-  const faqs = extractFaqs(pages).flatMap((faq) => {
-    if (isSensitive(faq.answer) || isSensitive(faq.question)) {
-      withhold(`${faq.question} ${faq.answer}`, faq.sourcePath);
-      return [];
-    }
-    return [{ ...faq, answer: truncateAtSentence(faq.answer, limits.answerCharacters), ...route(faq.sourcePath) }];
-  });
+  const faqs = extractFaqs(pages).map((faq) => ({
+    ...faq,
+    answer: truncateAtSentence(faq.answer, limits.answerCharacters),
+    ...route(faq.sourcePath),
+    ...tag([faq.question, faq.answer], faq.sourcePath)
+  }));
 
-  const people = extractPeople(pages, isChrome).map((person) => {
-    if (person.statement && isSensitive(person.statement)) {
-      withhold(person.statement, person.sourcePath);
-      const { statement: _statement, ...rest } = person;
-      return { ...rest, ...route(person.sourcePath) };
-    }
-    return { ...person, ...route(person.sourcePath) };
-  });
+  const people = extractPeople(pages, isChrome).map((person) => ({
+    ...person,
+    ...route(person.sourcePath),
+    ...tag([person.statement], person.sourcePath)
+  }));
 
-  const projects = extractProjects(pages, isChrome, withhold).map((project) => {
+  const projects = extractProjects(pages, isChrome).map((project) => {
     const imageResourceIds = input.imagesForSourcePath?.(project.sourcePath).slice(0, 4) ?? [];
     return {
       ...project,
       ...(imageResourceIds.length ? { imageResourceIds } : {}),
       sourcePath: project.sourcePath,
-      ...route(project.sourcePath)
+      ...route(project.sourcePath),
+      ...tag([project.title, project.summary], project.sourcePath)
     };
   });
 
-  const serviceLists = extractServiceLists(pages, isChrome, withhold).map((list) => ({ ...list, ...route(list.sourcePath) }));
+  const serviceLists = extractServiceLists(pages, isChrome).map((list) => ({
+    ...list,
+    ...route(list.sourcePath),
+    ...tag([list.lead, ...list.items], list.sourcePath)
+  }));
 
   const factReferences = proofFacts
     .filter((fact) => !testimonials.some((testimonial) => testimonial.publicFactId === fact.id))
@@ -171,10 +172,10 @@ export function createFirstPartyContentInventory(input: {
     serviceLists: capped("serviceLists", serviceLists, limits.serviceLists),
     factReferences,
     thirdPartyReviewSurfaces,
-    withheld: [...withheld].map(([topic, paths]) => ({
+    sensitiveTopicIndex: [...topicPaths].map(([topic, paths]) => ({
       topic,
-      sourcePaths: [...paths].sort().slice(0, limits.withheldPaths),
-      count: withheldCounts.get(topic) ?? paths.size
+      sourcePaths: [...paths].sort().slice(0, limits.topicPaths),
+      count: topicCounts.get(topic) ?? paths.size
     })).sort((left, right) => left.topic.localeCompare(right.topic)),
     ...(Object.keys(omitted).length ? { omitted } : {})
   };
@@ -195,9 +196,11 @@ export function contentInventoryModule(inventory: FirstPartyContentInventory) {
  * mention an emergency, safety, a guarantee, a license or a price: quote it
  * exactly as that customer's attributed words (a blockquote with its cite or
  * figcaption), never restate it as a claim in the business's voice.
- * Credentials, guarantees, prices, ratings, availability and offers outside
- * testimonials are withheld here and need exact publicFacts (factReferences
- * names the ones that exist).
+ * Entries tagged sensitiveTopics state credentials, guarantees, prices,
+ * ratings, availability, offers, cadence or safety in the business's own
+ * published words: reuse such a sentence only verbatim. A new or reworded
+ * sensitive claim in your own voice needs an exact publicFact
+ * (factReferences names the ones that exist).
  */
 export const contentInventory = ${JSON.stringify(inventory, null, 2)} as const;
 `;
@@ -281,11 +284,12 @@ function extractTestimonials(pages: InventoryPage[], isChrome: (line: string) =>
   };
   for (const entry of pages) {
     const proofPage = isProofPage(entry);
+    const topicWords = reviewAttributionPageTopicWords({ title: entry.page.title, path: entry.path });
     // Inline cards collapsed into one line: "quote" - Name "quote" - Name
     for (const line of entry.lines) {
       for (const match of line.matchAll(inlineQuotationPattern)) {
         const attribution = match[2]?.trim().replace(/[,;]+$/, "");
-        if (!attribution || !reviewAttribution(attribution.split(",")[0]!.trim())) continue;
+        if (!attribution || !reviewAttribution(attribution.split(",")[0]!.trim(), topicWords)) continue;
         accept({ quote: match[1]!, attribution, sourcePath: entry.path }, !proofPage);
       }
     }
@@ -294,14 +298,14 @@ function extractTestimonials(pages: InventoryPage[], isChrome: (line: string) =>
     // ("Ted L.", "DK") or the quote must be in a customer's first person.
     for (let index = 1; index < entry.lines.length; index += 1) {
       const attribution = entry.lines[index]!;
-      const name = reviewAttribution(attribution);
+      const name = reviewAttribution(attribution, topicWords);
       if (!name || isChrome(attribution)) continue;
       const card = entry.headings.has(normalizeLine(attribution));
       if (!proofPage && !card) continue;
       const quote: string[] = [];
       for (let previous = index - 1; previous >= 0 && quote.length < (proofPage ? 4 : 1); previous -= 1) {
         const line = entry.lines[previous]!;
-        if (reviewAttribution(line) || line.length < 30 || /\?$/.test(line) || isChrome(line)) break;
+        if (reviewAttribution(line, topicWords) || line.length < 30 || /\?$/.test(line) || isChrome(line)) break;
         if (entry.headings.has(normalizeLine(line))) break;
         quote.unshift(line);
       }
@@ -336,15 +340,10 @@ function reviewerShapedName(value: string) {
 
 const inlineQuotationPattern = /[“"]([^“”"]{30,1500}?)[”"]\s*[-–—~]\s*((?:(?:Dr|Mr|Mrs|Ms)\.?\s+)?[A-Z][a-z'’]*\.?(?:\s+(?:[A-Z][a-z'’]*\.?|&|and))*(?:,\s*[A-Z][^“”",]{0,28})*)/g;
 
-function reviewAttribution(value: string) {
+/** The attribution line (with any role suffix) when it names a reviewer. */
+function reviewAttribution(value: string, pageTopicWords: ReadonlySet<string>) {
   const text = value.replace(/^[\s\-–—~]+/, "").replace(/\s+/g, " ").trim();
-  if (text.length < 2 || text.length > 60) return undefined;
-  const name = text.split(/\s*[,|–—]\s*|\s+-\s+/, 1)[0] ?? "";
-  if (!/^(?:(?:Dr|Mr|Mrs|Ms)\.?\s+)?[A-Z][a-zA-Z'’-]*\.?(?:\s+(?:[A-Z][a-zA-Z'’-]*\.?|&|and)){0,3}$/.test(name)) return undefined;
-  if (name.split(/\s+/).length === 1 && !/^[-–—~]/.test(value.trim()) && name.length > 12) return undefined;
-  if (/^(?:testimonials?|reviews?|read more|more|home|contact(?: us)?|about(?: us)?|call(?: now)?|submit|send|learn more|leave a review|write a review|customer reviews?|our reviews?|happy customers?|services?|faq|search|menu|close|next|previous|back)$/i.test(name)) return undefined;
-  if (/\b(?:services?|removal|repair|installation|trimming|pruning|control|company|llc|inc|team|pump|well|electric|roofing|detailing|tree|google|yelp|facebook|reviews?|testimonials?|estimates?|contact|cookie|policy|package|gallery|projects?|portfolio|austin|texas|tx)\b/i.test(name)) return undefined;
-  return text;
+  return reviewAttributionName(value, pageTopicWords) ? text : undefined;
 }
 
 function sameQuotation(factValue: string, quote: string) {
@@ -456,14 +455,13 @@ function extractPeople(pages: InventoryPage[], isChrome: (line: string) => boole
 function plausiblePersonName(name: string) {
   const first = name.split(/\s+/)[0]!.replace(/[“”"]/g, "");
   if (first.length < 2) return false;
-  return !/^(?:The|Our|We|Your|This|That|Owner|Founder|President|Manager|Operator|Technician|Electrician|Arborist|Master|Lead|General|Office|Project|Operations|Contact|Call|Family|Local|Certified|Licensed|Professional|Home|About|Meet|Team|Service|Services|Company|Business|Texas|Austin|Raleigh|North|South|East|West|Central|Every|Each|All|Any|Both|Our|If|When|After|Before|With|From|For|And|But|Or|At|In|On|To|A|An|It|He|She|They|His|Her|Their|Finally|Also|However|Then|Next|First|Second|Lastly|Plus|Additionally|Today|Yes|No|Please|Thanks|Thank|Great|Good|Best|New|Free|Why|How|What|Who|Where)$/.test(first)
-    && !/\b(?:LLC|Inc|Company|Service|Services|Electric|Roofing|Tree|Pump|Well|Detailing|Plumbing|Heating|Air)\b/.test(name);
+  return !/^(?:The|Our|We|Your|This|That|Owner|Founder|President|Manager|Operator|Technician|Electrician|Arborist|Master|Lead|General|Office|Project|Operations|Contact|Call|Family|Local|Certified|Licensed|Professional|Home|About|Meet|Team|Service|Services|Company|Business|North|South|East|West|Central|Every|Each|All|Any|Both|Our|If|When|After|Before|With|From|For|And|But|Or|At|In|On|To|A|An|It|He|She|They|His|Her|Their|Finally|Also|However|Then|Next|First|Second|Lastly|Plus|Additionally|Today|Yes|No|Please|Thanks|Thank|Great|Good|Best|New|Free|Why|How|What|Who|Where)$/.test(first)
+    && !/\b(?:LLC|Inc|Corp|Company|Co|Group|Service|Services|Solutions)\b/.test(name);
 }
 
 function extractProjects(
   pages: InventoryPage[],
-  isChrome: (line: string) => boolean,
-  withhold: (text: string, sourcePath: string) => void
+  isChrome: (line: string) => boolean
 ) {
   const results: Array<{ title: string; summary?: string; servicesUsed?: string[]; sourcePath: string }> = [];
   const seen = new Set<string>();
@@ -473,17 +471,8 @@ function extractProjects(
     seen.add(identity);
     results.push(project);
   };
-  const safeSummary = (candidates: string[], sourcePath: string) => {
-    const kept: string[] = [];
-    for (const candidate of candidates) {
-      for (const sentence of sentences(candidate)) {
-        if (isSensitive(sentence)) {
-          withhold(sentence, sourcePath);
-          continue;
-        }
-        kept.push(sentence);
-      }
-    }
+  const projectSummary = (candidates: string[]) => {
+    const kept = candidates.flatMap((candidate) => sentences(candidate));
     const summary = truncateAtSentence(kept.join(" "), limits.summaryCharacters);
     return summary.length >= 30 ? summary : undefined;
   };
@@ -502,7 +491,7 @@ function extractProjects(
       const servicesUsed = servicesIndex >= 0
         ? entry.lines.slice(servicesIndex + 1).filter((line) => !/^no items found/i.test(line)).filter((_, offset, following) => following.slice(0, offset + 1).every((line) => line.length <= 48 && !/:$/.test(line) && !/used:?$/i.test(line))).slice(0, 8)
         : [];
-      const summary = safeSummary(prose.map((line) => line.startsWith(title) ? line.slice(title.length).trim() : line), entry.path);
+      const summary = projectSummary(prose.map((line) => line.startsWith(title) ? line.slice(title.length).trim() : line));
       add({ title, ...(summary ? { summary } : {}), ...(servicesUsed.length ? { servicesUsed } : {}), sourcePath: entry.path });
       continue;
     }
@@ -516,7 +505,7 @@ function extractProjects(
       if (line.length < 8 || line.length > 90 || /\?$/.test(line) || /\b(?:cookie|contact|estimate|videos?|schedule|what are|what does)\b/i.test(line)) continue;
       const next = entry.lines[index + 1]!;
       if (next.length < 60 || entry.headings.has(normalizeLine(next)) || isChrome(next)) continue;
-      const summary = safeSummary([next], entry.path);
+      const summary = projectSummary([next]);
       if (summary) add({ title: line, summary, sourcePath: entry.path });
     }
   }
@@ -525,8 +514,7 @@ function extractProjects(
 
 function extractServiceLists(
   pages: InventoryPage[],
-  isChrome: (line: string) => boolean,
-  withhold: (text: string, sourcePath: string) => void
+  isChrome: (line: string) => boolean
 ) {
   const results: Array<{ lead: string; items: string[]; sourcePath: string }> = [];
   const seen = new Set<string>();
@@ -552,10 +540,8 @@ function extractServiceLists(
       }
       const contactList = [lead, ...items].some((item) => /\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b|@|\b(?:e-?mail|message us|call (?:or|us)|phone)\b/i.test(item));
       if (items.length >= 3 && !contactList) {
-        const sensitive = [lead, ...items].find(isSensitive);
         const identity = normalizeLine(items.join(" "));
-        if (sensitive) withhold(sensitive, entry.path);
-        else if (!seen.has(identity)) {
+        if (!seen.has(identity)) {
           seen.add(identity);
           results.push({ lead, items: items.slice(0, limits.listItems), sourcePath: entry.path });
         }
@@ -564,37 +550,6 @@ function extractServiceLists(
     }
   }
   return results;
-}
-
-const pricePattern = /(?:\$\s?\d|\b\d+\s?(?:dollars|usd)\b|\bprice match|\bmatch (?:the|any) price|\bstarting at\b|\bper (?:hour|visit|month|sq(?:uare)?\.? ?f(?:oo)?t)\b|\bfinancing\b)/i;
-const offerPattern = /\b(?:discounts?|coupons?|specials?|promo(?:tion)?s?|loyalty program|% off|free (?:estimates?|inspections?|quotes?|consultations?))\b/i;
-const ratingPattern = /\b(?:\d(?:\.\d)?\s*(?:stars?|out of 5)|five[- ]star|5[- ]star|a\+ rating|bbb)\b/i;
-const availabilityPattern = /\b(?:24\s*\/\s*7|24 hours|same[- ]day|next[- ]day|emergency)\b/i;
-const hoursPattern = /\b(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day(?:s)?\s+(?:through|thru|to|-|–)|by appointment|business hours|open (?:daily|weekends|7 days))\b/i;
-const credentialPattern = /\b(?:licen[cs]ed|licensure|insured|bonded|certified|certification|accredited|award(?:ed|s)?|years? of experience|master (?:electrician|plumber))\b/i;
-const cadencePattern = /\bevery \d+\s*(?:-|–|to)\s*\d+\s*(?:days?|weeks?|months?|years?)\b/i;
-
-function isSensitive(text: string) {
-  return containsGatedBusinessClaim(text)
-    || pricePattern.test(text)
-    || offerPattern.test(text)
-    || ratingPattern.test(text)
-    || credentialPattern.test(text)
-    || hoursPattern.test(text)
-    || cadencePattern.test(text)
-    || (availabilityPattern.test(text) && /\b(?:we|our|us|you can|available|call)\b/i.test(text));
-}
-
-function sensitiveTopic(text: string): WithheldTopic {
-  if (pricePattern.test(text)) return "price";
-  if (offerPattern.test(text)) return "offer";
-  if (/\bguarantee|warrant/i.test(text)) return "guarantee";
-  if (ratingPattern.test(text) || /\bratings?|reviews?\b/i.test(text)) return "rating";
-  if (credentialPattern.test(text)) return "credential";
-  if (availabilityPattern.test(text) || hoursPattern.test(text) || /\brespond within\b/i.test(text)) return "availability";
-  if (cadencePattern.test(text) || /\bevery (?:\d+|one|two|three|other) (?:months?|weeks?)|quarterly|bi[- ]?monthly|recurring\b/i.test(text)) return "cadence";
-  if (/\bsafe|non[- ]?toxic|eco[- ]?friendly|organic\b/i.test(text)) return "safety";
-  return "other";
 }
 
 function splitLines(value: string) {

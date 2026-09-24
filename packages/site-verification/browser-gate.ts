@@ -972,11 +972,14 @@ async function runArtifactBrowserGateOnce(input: {
             ));
           }
           if (metrics.missingGlyphExamples.length > 0) {
+            // Advisory: an emoji or uncovered glyph renders with the visitor's
+            // system font. Verbatim first-party quotations keep their exact text.
             routeFindings.push(finding(
               "render.missing_glyph",
-              `Visible text is not portable under Lodesta's pinned managed fonts. Use ordinary supported text, or replace a decorative character with accessible authored inline SVG. Never silently remove owner-authoritative text. Examples: ${metrics.missingGlyphExamples.map((example) => `${example.selector} ${example.character} (${example.codepoint}) with ${example.family}: ${example.reason}`).join("; ")}.`,
+              `Visible text is not portable under Lodesta's pinned managed fonts and will fall back to the visitor's system font. In your own copy, prefer ordinary supported text, or replace a decorative character with accessible authored inline SVG. Keep a verbatim first-party quotation exactly as written; never silently remove owner-authoritative text. Examples: ${metrics.missingGlyphExamples.map((example) => `${example.selector} ${example.character} (${example.codepoint}) with ${example.family}: ${example.reason}`).join("; ")}.`,
               route.path,
-              "render"
+              "render",
+              "warning"
             ));
           }
           for (const href of metrics.links) {

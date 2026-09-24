@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { explicitServiceAreaListEvidence, type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
 import { assertPublicFetchUrl } from "@/lib/url-safety";
+import { reviewAttributionName, reviewAttributionPageTopicWords } from "@/lib/review-attribution";
 import type { SourceTextBlock } from "@/lib/source-text-blocks";
 import {
   assetRevisionSchema,
@@ -20,6 +21,16 @@ import {
 } from "@/packages/site-contracts";
 export { isCustomerPortalLink } from "@/packages/site-contracts";
 import { WebsiteCrawlError } from "./crawl-errors";
+import { canonicalWeeklySchedule } from "./weekly-schedule";
+import {
+  firstPartySupportFromCrawlPages,
+  isDatedOrPromotionalText,
+  reconcileFirstPartyValues,
+  sensitiveFirstPartyTopics,
+  supportedOnCurrentCorePage,
+  type FirstPartyPageEvidence,
+  type FirstPartySupport
+} from "./first-party-support";
 import { sha256, stableJson } from "./hash";
 import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
 import { buildWebsiteSourceMirror, websiteMirrorManifestHash, type RetainedSourceResource } from "./source-mirror";
@@ -44,10 +55,11 @@ export type WebsiteIngestionResult = {
 };
 
 export type SourcePreparationFactDiagnostic = {
-  kind: "hours" | "service_area";
+  kind: "hours" | "service_area" | "testimonial";
   value: unknown;
   disposition:
     | "accepted"
+    | "selection_limit"
     | "deduplication"
     | "invalid_value_filtering"
     | "conflict_suppression"
@@ -215,9 +227,28 @@ export async function ingestWebsite(input: {
   const displayedPhones = selectDisplayedFirstPartyPhones(
     crawl.pageSummaries.filter((page) => firstPartyPageUrls.has(page.url) && sourceFactPageEligible(page, sourceUrl))
   );
+  const factPages = crawl.pageSummaries.filter((page) => firstPartyPageUrls.has(page.url) && sourceFactPageEligible(page, sourceUrl));
+  const lastModifiedByUrl = new Map(generationIngestion.pages.flatMap((page) => page.sitemapLastModified
+    ? [[page.url, page.sitemapLastModified] as const, [(page.summary as CrawlPageSummary | undefined)?.url ?? page.url, page.sitemapLastModified] as const]
+    : []));
+  const contactReconciliation = reconcileFirstPartyContactFields(factPages, firstPartySupportFromCrawlPages(factPages, lastModifiedByUrl));
+  const reconciledLocation = contactReconciliation.address.winner
+    ? contactReconciliation.address.winner.value
+    : contactReconciliation.address.conflicts.length ? undefined : scopedContactAndLocation.address;
   const facts = {
     ...crawl.extractedFacts,
-    ...scopedContactAndLocation
+    ...scopedContactAndLocation,
+    description: contactReconciliation.description.winner?.value
+      ?? (contactReconciliation.description.conflicts.length ? undefined : crawl.extractedFacts.description),
+    email: contactReconciliation.email.winner?.value
+      ?? (contactReconciliation.email.conflicts.length ? undefined : scopedContactAndLocation.email),
+    address: reconciledLocation,
+    // Coordinates belong to the page whose address won.
+    geo: reconciledLocation && sameValue(formatAddress(reconciledLocation), formatAddress(scopedContactAndLocation.address))
+      ? scopedContactAndLocation.geo
+      : undefined,
+    hours: contactReconciliation.hours.winner?.value
+      ?? (contactReconciliation.hours.conflicts.length ? undefined : scopedContactAndLocation.hours)
   };
   // An unselected page title or hostname is not an observed business name.
   const crawlName = clean(crawl.extractedFacts.name);
@@ -302,7 +333,26 @@ export async function ingestWebsite(input: {
     sourceUrl,
     evidenceClass: "first_party"
   })!;
-  addFact("description", "Business description", clean(facts.description), 0.7, sameValue(facts.description, crawl.extractedFacts.description));
+  // Any verbatim first-party value may publish. Conflicting values are
+  // reconciled by prominence and recency; the losers (or every value, when
+  // the top candidates tie) are recorded for owner review and not published.
+  const firstPartyEvidence = (evidence: readonly FirstPartyPageEvidence[]) => ({
+    sourceUrl: evidence.find((page) => !page.injected)?.url ?? sourceUrl,
+    evidenceClass: "first_party" as const
+  });
+  const recordConflicts = <T>(
+    kind: BusinessFact["kind"],
+    label: string,
+    conflicts: Array<{ value: T; evidence: readonly FirstPartyPageEvidence[] }>,
+    display: (value: T) => unknown
+  ) => {
+    for (const conflict of conflicts) {
+      addFact(kind, `Conflicting ${label.toLowerCase()} (owner review; not published)`, display(conflict.value), 0.5, false, firstPartyEvidence(conflict.evidence));
+    }
+  };
+  addFact("description", "Business description", clean(facts.description), 0.7, Boolean(contactReconciliation.description.winner)
+    || sameValue(facts.description, crawl.extractedFacts.description));
+  recordConflicts("description", "Business description", contactReconciliation.description.conflicts, clean);
   const phoneFactId = addFact(
     "phone",
     "Phone",
@@ -327,17 +377,22 @@ export async function ingestWebsite(input: {
     "Email",
     clean(facts.email),
     0.78,
-    sameValue(facts.email, crawl.extractedFacts.email) || sameValue(facts.email, retainedContacts.email)
+    Boolean(contactReconciliation.email.winner)
+      || sameValue(facts.email, crawl.extractedFacts.email) || sameValue(facts.email, retainedContacts.email)
   );
+  recordConflicts("email", "Email", contactReconciliation.email.conflicts, clean);
   const addressText = formatAddress(facts.address);
-  const addressFactId = addFact("address", "Address", addressText, 0.8, sameValue(addressText, formatAddress(crawl.extractedFacts.address)));
+  const addressFactId = addFact("address", "Address", addressText, 0.8, Boolean(contactReconciliation.address.winner)
+    || sameValue(addressText, formatAddress(crawl.extractedFacts.address)));
+  recordConflicts("address", "Address", contactReconciliation.address.conflicts, formatAddress);
   const hoursFactId = addFact(
     "hours",
     "Hours",
     facts.hours && Object.keys(facts.hours).length ? facts.hours : undefined,
     0.75,
-    sameValue(facts.hours, crawl.extractedFacts.hours)
+    Boolean(contactReconciliation.hours.winner) || sameValue(facts.hours, crawl.extractedFacts.hours)
   );
+  recordConflicts("hours", "Hours", contactReconciliation.hours.conflicts, (value) => value);
 
   const crawlServiceAreas = verifiedServiceAreas(crawl, generationIngestion);
   const offerings: BusinessOffering[] = selectSourceOfferingFacts(
@@ -929,6 +984,34 @@ export function sourcePreparationDiagnosticsFor(
       evidenceClasses: [...candidate.classes].sort()
     });
   }
+  // Every first-party testimonial candidate that was not kept carries its reason.
+  const firstPartyPages = crawl.pageSummaries.filter((page) => evidenceClassByUrl.get(page.url) === "first_party");
+  const kept = selectObservedFirstPartyTestimonials(firstPartyPages, crawl.url, ({ candidate, reason }) => {
+    facts.push({
+      kind: "testimonial",
+      value: candidate.text.slice(0, 300),
+      disposition: reason === "duplicate" ? "deduplication" : reason === "selection_limit" ? "selection_limit" : "invalid_value_filtering",
+      reason: {
+        too_short: "The candidate had fewer than six words or 30 characters.",
+        too_long: "The candidate exceeded the 2,000-character testimonial bound.",
+        placeholder: "The candidate was template or placeholder copy.",
+        duplicate: "The same testimonial was already retained.",
+        selection_limit: "The candidate exceeded the retained testimonial limit."
+      }[reason],
+      sourceUrls: [candidate.sourceUrl],
+      evidenceClasses: ["first_party"]
+    });
+  });
+  for (const testimonial of kept) {
+    facts.push({
+      kind: "testimonial",
+      value: testimonial.text.slice(0, 300),
+      disposition: "accepted",
+      reason: "A verbatim first-party testimonial was retained.",
+      sourceUrls: [testimonial.sourceUrl],
+      evidenceClasses: ["first_party"]
+    });
+  }
   return { schemaVersion: 1, facts };
 }
 
@@ -1211,14 +1294,24 @@ export function observedProof(
     };
   });
 
-  const warranties = selectObservedFirstPartyWarrantyBlocks(pages, crawl.url).map((block) => {
+  // A verbatim guarantee/warranty the business states on a current core page
+  // is confirmed first-party proof. Dated or promotional wording, or text
+  // found only on blog/archive pages, stays observed for owner confirmation.
+  const warranties = selectObservedFirstPartyWarrantyBlocks(pages, crawl.url).map(({ block, current }) => {
     const suffix = sha256(`${block.sourceUrl}\n${block.displayText}`).slice(7, 19);
     const factId = `fact_proof_warranty_${suffix}`;
-    observedFact(factId, "Observed service guarantee", block.displayText, { sourceUrl: block.sourceUrl, sourceBlockId: block.id }, 0.88, false);
+    observedFact(
+      factId,
+      current ? "Observed service guarantee" : "Observed service guarantee (owner confirmation needed: dated, promotional, or not on a current core page)",
+      block.displayText,
+      { sourceUrl: block.sourceUrl, sourceBlockId: block.id },
+      0.88,
+      current
+    );
     return {
       id: `proof_warranty_${suffix}`,
       kind: "warranty" as const,
-      status: "observed" as const,
+      status: current ? "confirmed" as const : "observed" as const,
       publicText: block.displayText,
       verbatim: true,
       sourceFactIds: [factId]
@@ -1266,19 +1359,27 @@ type TestimonialSourcePage = Pick<CrawlPageSummary, "url" | "purposeTags" | "sou
  * the business's own structured-data reviews. Blocks rendered inside embedded
  * review-platform widgets are that platform's content and are never used.
  */
+export type SkippedTestimonial = {
+  candidate: ObservedTestimonial;
+  reason: "too_short" | "too_long" | "placeholder" | "duplicate" | "selection_limit";
+};
+
 export function selectObservedFirstPartyTestimonials(
   pages: TestimonialSourcePage[],
-  sourceUrl: string
+  sourceUrl: string,
+  onSkip?: (skipped: SkippedTestimonial) => void
 ): ObservedTestimonial[] {
   const sourceHost = new URL(sourceUrl).hostname.replace(/^www\./, "");
   const seen = new Set<string>();
   const testimonials: ObservedTestimonial[] = [];
   const accept = (candidate: ObservedTestimonial) => {
     const text = candidate.text.replace(/\s+/g, " ").trim();
-    if (canonicalWordCount(text) < 6 || text.length < 30 || text.length > maxObservedTestimonialCharacters) return;
-    if (isPlaceholderOrTemplateCopy(text)) return;
+    const skip = (reason: SkippedTestimonial["reason"]) => onSkip?.({ candidate: { ...candidate, text }, reason });
+    if (canonicalWordCount(text) < 6 || text.length < 30) return skip("too_short");
+    if (text.length > maxObservedTestimonialCharacters) return skip("too_long");
+    if (isPlaceholderOrTemplateCopy(text)) return skip("placeholder");
     const identity = normalizedText(text);
-    if (seen.has(identity)) return;
+    if (seen.has(identity)) return skip("duplicate");
     seen.add(identity);
     testimonials.push({ ...candidate, text });
   };
@@ -1291,22 +1392,24 @@ export function selectObservedFirstPartyTestimonials(
     // A review page is all review content; elsewhere only a section the
     // business itself labels "Testimonials"/"Reviews" (a heading or a tab
     // label) is, e.g. a homepage testimonial strip or an About-page tab.
+    const topicWords = reviewAttributionPageTopicWords({ title: page.title, path: new URL(page.url).pathname });
     const reviewSections = page.purposeTags.includes("reviews")
       ? [pageBlocks]
-      : labeledTestimonialSections(pageBlocks);
+      : labeledTestimonialSections(pageBlocks, topicWords);
     for (const blocks of reviewSections) {
       for (const [index, block] of blocks.entries()) {
         const blockquote = /^blockquote(?:[#.:]|$)/.test(block.containerId.split(" > ").at(-1) ?? "");
         const visiblyQuoted = /(?:^|\s)[“"][^”"]{20,}[”"](?:\s|$)/u.test(block.displayText);
-        const author = blocks[index + 1] ? reviewAttributionName(blocks[index + 1]!.displayText) : undefined;
+        const author = blocks[index + 1] ? reviewAttributionName(blocks[index + 1]!.displayText, topicWords) : undefined;
         if (blockquote || visiblyQuoted) accept({ text: block.displayText, sourceUrl: block.sourceUrl, sourceBlockId: block.id, ...(author ? { author } : {}) });
       }
-      for (const card of attributedReviewCards(blocks)) accept(card);
+      for (const card of attributedReviewCards(blocks, topicWords)) accept(card);
     }
     for (const review of page.extractedFacts?.structuredReviews ?? []) {
       accept({ text: review.text, sourceUrl: page.url, ...(review.author ? { author: review.author } : {}) });
     }
   }
+  for (const candidate of testimonials.slice(maxObservedTestimonials)) onSkip?.({ candidate, reason: "selection_limit" });
   return testimonials.slice(0, maxObservedTestimonials);
 }
 
@@ -1323,7 +1426,7 @@ const reviewPlatformMarker = /\b(?:posted on (?:google|yelp|facebook)|based on \
  * or other short section label. A review-platform widget marker ends the
  * section: widget content is the platform's, not the business's.
  */
-function labeledTestimonialSections(blocks: SourceTextBlock[]) {
+function labeledTestimonialSections(blocks: SourceTextBlock[], topicWords: ReadonlySet<string>) {
   const sections: SourceTextBlock[][] = [];
   for (let index = 0; index < blocks.length; index += 1) {
     if (!testimonialSectionLabel.test(blocks[index]!.displayText.trim())) continue;
@@ -1332,7 +1435,7 @@ function labeledTestimonialSections(blocks: SourceTextBlock[]) {
       const block = blocks[next]!;
       const text = block.displayText.trim();
       if (reviewPlatformMarker.test(text)) break;
-      if (sourceBlockHeadingLevel(block) && !reviewAttributionName(text)) break;
+      if (sourceBlockHeadingLevel(block) && !reviewAttributionName(text, topicWords)) break;
       if (testimonialSectionLabel.test(text)) break;
       section.push(block);
     }
@@ -1355,8 +1458,8 @@ function sameSourceHost(url: string, sourceHost: string) {
  * attribution inside the same card container, where that container holds no
  * other attribution.
  */
-function attributedReviewCards(blocks: SourceTextBlock[]): ObservedTestimonial[] {
-  const attributions = blocks.map((block) => reviewAttributionName(block.displayText));
+function attributedReviewCards(blocks: SourceTextBlock[], topicWords: ReadonlySet<string>): ObservedTestimonial[] {
+  const attributions = blocks.map((block) => reviewAttributionName(block.displayText, topicWords));
   const cards: ObservedTestimonial[] = [];
   for (let index = 1; index < blocks.length; index += 1) {
     const author = attributions[index];
@@ -1394,16 +1497,6 @@ function sharedContainerPath(left: string, right: string) {
     shared.push(leftSegments[index]);
   }
   return shared.join(" > ");
-}
-
-function reviewAttributionName(value: string) {
-  const text = value.replace(/^[\s\-–—~]+/, "").replace(/\s+/g, " ").trim();
-  if (text.length < 2 || text.length > 60) return undefined;
-  const name = text.split(/\s*[,|–—]\s*|\s+-\s+/, 1)[0] ?? "";
-  if (!/^(?:(?:Dr|Mr|Mrs|Ms)\.?\s+)?[A-Z][a-zA-Z'’-]*\.?(?:\s+(?:[A-Z][a-zA-Z'’-]*\.?|&|and)){0,3}$/.test(name)) return undefined;
-  if (/^(?:testimonials?|reviews?|read more|more|home|contact(?: us)?|about(?: us)?|call(?: now)?|submit|send|learn more|leave a review|write a review|customer reviews?|our reviews?|happy customers?)$/i.test(name)) return undefined;
-  if (/\b(?:services?|removal|repair|installation|trimming|pruning|control|company|llc|inc|team|pump|well|electric|roofing|detailing|tree|google|yelp|facebook|reviews?|testimonials?)\b/i.test(name)) return undefined;
-  return name;
 }
 
 type ObservedCredential = {
@@ -1481,13 +1574,17 @@ export function selectObservedFirstPartyCredentials(
 const freeReturnServicePattern = /\b(?:re[-\s]?(?:treat|service)|come back|we(?:'|’)ll return)\b.{0,180}\b(?:free of charge|at no (?:additional|extra) cost|at no additional charge|for free)\b/i;
 const guaranteedReturnServicePattern = /\bguarantee\b.{0,220}\b(?:re[-\s]?(?:treat|service)|come back|return)\b/i;
 
+/**
+ * Verbatim guarantee and warranty statements in the business's own voice.
+ * `current` is true only when the exact text appears on a current core page
+ * (home, service, about, contact) and is neither dated nor promotional.
+ */
 export function selectObservedFirstPartyWarrantyBlocks(
-  pages: Array<Pick<CrawlPageSummary, "url" | "sourceTextBlocks">>,
+  pages: Array<Pick<CrawlPageSummary, "url" | "title" | "purposeTags" | "sourceTextBlocks" | "linkReferences">>,
   sourceUrl: string
-): SourceTextBlock[] {
+): Array<{ block: SourceTextBlock; current: boolean }> {
   const sourceOrigin = new URL(sourceUrl).origin;
-  const seen = new Set<string>();
-  return pages
+  const eligible = pages
     .filter((page) => sourceFactPageEligible(page, sourceUrl))
     .filter((page) => {
       try {
@@ -1495,18 +1592,35 @@ export function selectObservedFirstPartyWarrantyBlocks(
       } catch {
         return false;
       }
-    })
+    });
+  const support = firstPartySupportFromCrawlPages(eligible);
+  const seen = new Set<string>();
+  return eligible
     .flatMap((page) => page.sourceTextBlocks)
     .filter((block) => /^(?:blockquote|dd|div|figcaption|li|p)(?:[#.:]|$)/.test(block.containerId))
     .filter((block) => canonicalWordCount(block.displayText) >= 8 && block.displayText.length >= 40 && block.displayText.length <= 600)
-    .filter((block) => freeReturnServicePattern.test(block.displayText) || guaranteedReturnServicePattern.test(block.displayText))
+    .filter((block) => freeReturnServicePattern.test(block.displayText)
+      || guaranteedReturnServicePattern.test(block.displayText)
+      || businessGuaranteeStatement(block.displayText))
     .filter((block) => {
       const identity = block.displayText.normalize("NFKC").toLocaleLowerCase("en-US").replace(/\s+/g, " ").trim();
       if (seen.has(identity)) return false;
       seen.add(identity);
       return true;
     })
-    .slice(0, 4);
+    .slice(0, 6)
+    .map((block) => ({
+      block,
+      current: supportedOnCurrentCorePage(support.text(block.displayText)) && !isDatedOrPromotionalText(block.displayText)
+    }));
+}
+
+/** A guarantee or warranty stated in the business's own voice, not a customer's quotation. */
+function businessGuaranteeStatement(text: string) {
+  return sensitiveFirstPartyTopics(text).includes("guarantee")
+    && /\b(?:we|our|all|every|each|backed by|comes? with|includes?|carr(?:y|ies))\b/i.test(text)
+    && !/\b(?:I|I'm|I’m|my|me)\b/.test(text)
+    && !/[“"][^”"]{20,}[”"]/.test(text);
 }
 
 export function selectSourceLinksForGeneration(sourceUrl: string, crawl: CrawlAssessment) {
@@ -1543,22 +1657,85 @@ export function assertSourceSuitableForGeneration(
     .filter((page) => page.source === "primary" && firstPartyUrls.has(page.url))
     .flatMap((page) => [page.title ?? "", page.metaDescription ?? "", ...page.sourceTextBlocks.map((block) => block.displayText)])
     .join("\n");
+  // Closure wording stays a hard stop for operator review. A parked
+  // for-sale domain is not a business source. Field-level problems
+  // (contradictory hours, "website coming soon" notices) no longer reject the
+  // whole source: contact reconciliation withholds only the affected field.
   const closed = /\b(?:permanently closed|temporarily closed until further notice|no longer (?:open|operating|in business)|ceased operations|closed (?:our|its) doors|business has closed|location is permanently closed)\b/i.test(primaryFirstPartyText);
-  const parked = /\b(?:this domain is for sale|buy this domain|domain may be for sale|website is coming soon)\b/i.test(primaryFirstPartyText);
-  const contradictory = hasContradictoryFirstPartyLocationHours(crawl, firstPartyUrls);
+  const parked = /\b(?:this domain is for sale|buy this domain|domain may be for sale)\b/i.test(primaryFirstPartyText);
   const ambiguousLocationIndex = isAmbiguousLocationIndex(crawl, ingestion);
-  if (closed || parked || contradictory || ambiguousLocationIndex) {
+  if (closed || parked || ambiguousLocationIndex) {
     throw new WebsiteCrawlError(
       "source_unsuitable",
       closed
-        ? "The first-party source indicates that the business or location is closed."
+        ? "The first-party source indicates that the business or location is closed. An operator must review it before generation."
         : parked
-          ? "The supplied address is a parked or placeholder website rather than an active first-party business source."
-          : contradictory
-            ? "The first-party source gives contradictory hours for the same named street address."
-            : "The supplied URL is a multi-location directory. Use a specific first-party location URL or explicitly create a corporate multi-location project."
+          ? "The supplied address is a parked domain for sale rather than an active first-party business source."
+          : "The supplied URL is a multi-location directory. Use a specific first-party location URL or explicitly create a corporate multi-location project."
     );
   }
+}
+
+type ReconciledField<T> = ReturnType<typeof reconcileFirstPartyValues<T>>;
+
+/**
+ * Per-field reconciliation of verbatim first-party contact values across the
+ * business's own pages: header/contact/homepage beats another core page body,
+ * which beats blog or archive pages; recency then breaks ties.
+ */
+export function reconcileFirstPartyContactFields(
+  pages: ReadonlyArray<Pick<CrawlPageSummary, "url" | "title" | "purposeTags" | "sourceTextBlocks" | "linkReferences" | "extractedFacts">>,
+  support: FirstPartySupport
+): {
+  description: ReconciledField<string>;
+  email: ReconciledField<string>;
+  address: ReconciledField<NonNullable<ExtractedBusinessFacts["address"]>>;
+  hours: ReconciledField<Record<string, string>>;
+} {
+  const evidenceByUrl = new Map(support.pages.map((page) => [page.url, page]));
+  const corePageCount = support.pages.filter((page) => page.core && !page.injected).length;
+  const candidates = <T>(value: (page: (typeof pages)[number]) => T | undefined) => pages.flatMap((page) => {
+    const candidate = value(page);
+    const evidence = evidenceByUrl.get(page.url);
+    return candidate === undefined || !evidence ? [] : [{ value: candidate, evidence: [evidence] }];
+  });
+  const text = (value: unknown) => clean(value);
+  return {
+    description: reconcileFirstPartyValues({
+      candidates: candidates((page) => text(page.extractedFacts.description)),
+      same: (left, right) => normalizedText(left) === normalizedText(right),
+      corePageCount
+    }),
+    email: reconcileFirstPartyValues({
+      candidates: candidates((page) => text(page.extractedFacts.email)?.toLowerCase()),
+      same: (left, right) => left === right,
+      corePageCount
+    }),
+    address: reconcileFirstPartyValues({
+      candidates: candidates((page) => formatAddress(page.extractedFacts.address) ? page.extractedFacts.address : undefined),
+      same: (left, right) => normalizedText(formatAddress(left) ?? "") === normalizedText(formatAddress(right) ?? ""),
+      corePageCount
+    }),
+    hours: reconcileFirstPartyValues({
+      // The most complete statement of an agreeing schedule represents it.
+      candidates: candidates((page) => page.extractedFacts.hours && Object.keys(page.extractedFacts.hours).length ? page.extractedFacts.hours : undefined)
+        .sort((left, right) => (canonicalWeeklySchedule(right.value)?.size ?? 0) - (canonicalWeeklySchedule(left.value)?.size ?? 0)),
+      same: sameWeeklyHours,
+      corePageCount
+    })
+  };
+}
+
+/** Two extracted schedules agree when every day both state has the same canonical hours. */
+function sameWeeklyHours(left: Record<string, string>, right: Record<string, string>) {
+  const leftSchedule = canonicalWeeklySchedule(left);
+  const rightSchedule = canonicalWeeklySchedule(right);
+  if (!leftSchedule || !rightSchedule) return stableJson(left) === stableJson(right);
+  for (const [day, value] of leftSchedule) {
+    const other = rightSchedule.get(day);
+    if (other !== undefined && other !== value) return false;
+  }
+  return true;
 }
 
 function isAmbiguousLocationIndex(crawl: CrawlAssessment, ingestion: WebsiteGenerationIngestion) {
@@ -1587,117 +1764,6 @@ function isAmbiguousLocationIndex(crawl: CrawlAssessment, ingestion: WebsiteGene
   return childLocations.size >= 2;
 }
 
-export function hasContradictoryFirstPartyLocationHours(
-  crawl: CrawlAssessment,
-  firstPartyUrls = new Set(crawl.pageSummaries.map((page) => page.url))
-) {
-  // Compare canonical per-day schedules, not display strings: "Mon-Fri 8am-5pm"
-  // and "Monday: 8:00 AM - 5:00 PM" are the same hours. Only a day that two
-  // pages give different canonical times (or open vs closed) is contradictory;
-  // a page that omits a day is incomplete, not contradictory.
-  const scheduleByAddress = new Map<string, Map<string, string>>();
-  for (const page of crawl.pageSummaries) {
-    if (!firstPartyUrls.has(page.url)) continue;
-    const address = normalizedText(formatAddress(page.extractedFacts.address) ?? "");
-    const hours = page.extractedFacts.hours;
-    if (!address || !hours || !Object.keys(hours).length) continue;
-    const schedule = canonicalWeeklySchedule(hours);
-    if (!schedule) continue;
-    const known = scheduleByAddress.get(address) ?? new Map<string, string>();
-    for (const [day, value] of schedule) {
-      const existing = known.get(day);
-      if (existing !== undefined && existing !== value) return true;
-      known.set(day, value);
-    }
-    scheduleByAddress.set(address, known);
-  }
-  return false;
-}
-
-const canonicalWeekDays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
-
-/**
- * Expands extracted hour labels ("Monday-Friday", "Saturday") to single days
- * and each value to sorted 24-hour ranges. Returns undefined when any label or
- * value cannot be understood, so unknown formats never manufacture a conflict.
- */
-export function canonicalWeeklySchedule(hours: Record<string, string>) {
-  const schedule = new Map<string, string>();
-  for (const [label, value] of Object.entries(hours)) {
-    const days = expandHoursDayLabel(label);
-    const canonical = canonicalHoursValue(value);
-    if (!days || !canonical) return undefined;
-    for (const day of days) {
-      const existing = schedule.get(day);
-      schedule.set(day, existing && existing !== canonical
-        ? [...new Set([...existing.split(","), ...canonical.split(",")])].sort().join(",")
-        : canonical);
-    }
-  }
-  return schedule;
-}
-
-function expandHoursDayLabel(label: string) {
-  const parts = label.toLowerCase().split(/\s*[-–—]\s*/).map((part) => part.trim());
-  const indexOf = (part: string | undefined) => part
-    ? canonicalWeekDays.findIndex((day) => day === part || (part.length >= 2 && day.startsWith(part)))
-    : -1;
-  const start = indexOf(parts[0]);
-  if (start < 0 || parts.length > 2) return undefined;
-  if (parts.length === 1) return [canonicalWeekDays[start]];
-  const end = indexOf(parts[1]);
-  if (end < 0) return undefined;
-  const days: string[] = [];
-  for (let offset = 0; offset < 7; offset += 1) {
-    const index = (start + offset) % 7;
-    days.push(canonicalWeekDays[index]);
-    if (index === end) break;
-  }
-  return days;
-}
-
-function canonicalHoursValue(value: string) {
-  const compact = value.toLowerCase().replace(/\s+/g, " ").trim();
-  if (/^(?:closed)$/.test(compact)) return "closed";
-  if (/^(?:open 24 hours?|24 hours?)$/.test(compact)) return "00:00-24:00";
-  if (/^by appointment$/.test(compact)) return "appointment";
-  const ranges = compact.split(/\s*[,;]\s*/).filter(Boolean).map((range) => {
-    const match = range.match(/^(.+?)\s*(?:-|–|—|to)\s*(.+)$/);
-    if (!match) return undefined;
-    const start = canonicalClockTime(match[1]!, match[2]!);
-    const end = canonicalClockTime(match[2]!);
-    return start && end ? `${start}-${end}` : undefined;
-  });
-  if (!ranges.length || ranges.some((range) => !range)) return undefined;
-  return [...new Set(ranges as string[])].sort().join(",");
-}
-
-/** Normalizes 8am, 8:00 AM, 8 a.m., and 08:00 to "08:00". An opening time
- * without a meridiem borrows the closing time's ("8-5pm" is 8:00-17:00 only
- * when that ordering is plausible). */
-function canonicalClockTime(value: string, pairedClosing?: string): string | undefined {
-  const match = value.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/);
-  if (!match) return undefined;
-  let hour = Number(match[1]);
-  const minute = Number(match[2] ?? "0");
-  let meridiem: string | undefined = match[3]?.replace(/\./g, "");
-  if (!meridiem && pairedClosing) {
-    const closing = pairedClosing.trim().match(/(a\.?m\.?|p\.?m\.?)$/)?.[1]?.replace(/\./g, "");
-    // "8-5pm": an unlabeled opening hour greater than the closing hour is AM.
-    const closingHour = Number(pairedClosing.trim().match(/^(\d{1,2})/)?.[1] ?? NaN);
-    if (closing === "pm" && hour > closingHour && hour <= 12) meridiem = "am";
-    else meridiem = closing;
-  }
-  if (meridiem) {
-    if (hour < 1 || hour > 12) return undefined;
-    if (meridiem === "am" && hour === 12) hour = 0;
-    if (meridiem === "pm" && hour !== 12) hour += 12;
-  } else if (!match[2]) {
-    return undefined;
-  }
-  if (hour > 24 || minute > 59) return undefined;
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
 
 function isAccountLevelSocialProfile(value: string) {
   try {

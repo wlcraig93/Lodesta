@@ -15,6 +15,12 @@ import {
 } from "@/packages/site-contracts";
 import { factBindingPolicyIdentity } from "@/packages/site-contracts/platform-manifest";
 import type { ArtifactGateFinding } from "./contracts";
+import { firstPartySupportForBuild } from "./first-party-evidence";
+import {
+  isDatedOrPromotionalText,
+  supportedOnCurrentCorePage,
+  type FirstPartySupport
+} from "@/packages/business-data/first-party-support";
 import { localAddressPresentation } from "./address-presentation";
 
 export { factBindingPolicyIdentity };
@@ -63,11 +69,13 @@ export class FactBindingValidator {
     const routes = input.routes.map((route) => visibleRoute(route, input.buildInput, facts, findings, quotationSources));
     const bindings = routes.flatMap((route) => route.bindings);
     const legalSourceTextByPath = richestLegalSourceTextByPath(input.sourcePages ?? []);
+    const firstParty = firstPartyMarkerSupport(firstPartySupportForBuild(input.buildInput, input.sourceSnapshots ?? [], input.sourcePages ?? []));
 
     for (const route of routes) {
       const legalSourceText = legalSourceTextByPath.get(normalizedSourcePagePath(route.path));
       findings.push(...internalAuthoringArtifactFindings(route));
-      findings.push(...bodyMarkerFindings(route, input.buildInput, provisionalGoogleRatings, legalSourceText));
+      findings.push(...bodyMarkerFindings(route, input.buildInput, provisionalGoogleRatings, legalSourceText, firstParty));
+      findings.push(...locationWordFindings(route, firstParty));
       findings.push(...bodySensitiveFindings(route, input.buildInput, legalSourceText));
       findings.push(...metadataFindings(route, "title", route.title, input.buildInput, provisionalGoogleRatings));
       findings.push(...metadataFindings(route, "description", route.description, input.buildInput, provisionalGoogleRatings));
@@ -224,15 +232,96 @@ function internalAuthoringArtifactFindings(route: VisibleRoute) {
   ));
 }
 
+type FirstPartyMarkerSupport = {
+  /** The rendered sentence around a match is verbatim current core-page first-party text. */
+  sentence(renderedText: string, match: { start: number; end: number }): boolean;
+  /** A phone or email marker the business displays on a current core page. */
+  contact(markerText: string): boolean;
+};
+
+/**
+ * Verbatim first-party support for factual markers. The business's own
+ * complete sentence (at least five words, equal token for token to a sentence
+ * or line on a current home, service, about or contact page, and neither
+ * dated nor promotional) may carry "$89", "30 years in business" or "10 year
+ * warranty". Rendered text before the sentence (a heading joined into the
+ * same text run) is ignored, but the matched sentence must contain the marker
+ * and run to the rendered sentence end, so a dropped qualifier or an appended
+ * AI clause never matches. An AI restatement still needs a bound fact.
+ */
+function firstPartyMarkerSupport(support: FirstPartySupport): FirstPartyMarkerSupport {
+  const phones = new Set(support.corePagePhones().map((phone) => phone.replace(/\D/g, "").slice(-10)));
+  const emails = new Set(support.corePageEmails());
+  return {
+    sentence(renderedText, match) {
+      const bounds = renderedSentenceBounds(renderedText, match);
+      const sentence = renderedText.slice(bounds.start, bounds.end);
+      if (isDatedOrPromotionalText(sentence)) return false;
+      const tokens = positionedCanonicalTokens(sentence).map((token) => ({
+        ...token, start: token.start + bounds.start, end: token.end + bounds.start
+      }));
+      for (let first = 0; first < tokens.length; first += 1) {
+        if (tokens[first]!.start > match.start) break;
+        if (tokens.length - first < 5) break;
+        const candidate = renderedText.slice(tokens[first]!.start, bounds.end);
+        if (supportedOnCurrentCorePage(support.sentence(candidate))) return true;
+      }
+      return false;
+    },
+    contact(markerText) {
+      if (markerText.includes("@")) return emails.has(markerText.trim().toLowerCase());
+      const digits = markerText.replace(/\D/g, "").slice(-10);
+      return digits.length === 10 && phones.has(digits);
+    }
+  };
+}
+
+/** Offsets of the rendered sentence containing a match, bounded by sentence punctuation. */
+function renderedSentenceBounds(text: string, match: { start: number; end: number }) {
+  const boundary = /[.!?](?=\s|$)/g;
+  let start = 0;
+  let end = text.length;
+  for (const found of text.matchAll(boundary)) {
+    const index = found.index ?? 0;
+    if (index < match.start) start = index + 1;
+    else if (index >= match.end - 1) {
+      end = index + 1;
+      break;
+    }
+  }
+  return { start, end };
+}
+
+const locationWordPattern = /\b(?:main shop|headquarters|flagship location|only location)\b/gi;
+
+/** Location-role words are advisory evidence, not an exact fact marker. */
+function locationWordFindings(route: VisibleRoute, firstParty: FirstPartyMarkerSupport) {
+  return [...route.bodyText.matchAll(locationWordPattern)].flatMap((match) => {
+    const start = match.index ?? 0;
+    const span = { start, end: start + match[0].length };
+    if (route.sourceQuotationSpans.some((quote) => span.start >= quote.start && span.end <= quote.end)) return [];
+    if (firstParty.sentence(route.bodyText, span)) return [];
+    return [finding(
+      "advisory.location_claim",
+      `Check the location wording ${JSON.stringify(match[0])} against the business's locations. This is advisory: keep it when the source supports it.`,
+      route.path,
+      "warning"
+    )];
+  });
+}
+
 function bodyMarkerFindings(
   route: VisibleRoute,
   buildInput: SitePublicBuildInput,
   provisionalGoogleRatings: number[],
-  legalSourceText?: string
+  legalSourceText: string | undefined,
+  firstParty: FirstPartyMarkerSupport
 ) {
   return factualMarkers(route.bodyText).flatMap((marker) => {
     const supported = naturallySupportedFactualMarker(marker.text, buildInput, provisionalGoogleRatings)
       || legalSourceContextSupports(route.bodyText, marker, legalSourceText)
+      || firstParty.contact(marker.text)
+      || firstParty.sentence(route.bodyText, marker)
       || route.sourceQuotationSpans.some((span) => marker.start >= span.start && marker.end <= span.end)
       || route.bindings.some((binding) => binding.span
       && marker.start >= binding.span.start
@@ -678,7 +767,6 @@ function factualMarkers(text: string) {
     /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/g,
     /\$\s?\d+(?:[,.]\d{2})?/g,
     /\b\d+(?:\.\d+)?\s*(?:stars?|years? in business|year warranty)\b/gi,
-    /\b(?:main shop|headquarters|flagship location|only location)\b/gi,
     /\b\d{1,3}(?:\.\d+)?\s*°(?:\s*\d{1,2}(?:\.\d+)?\s*[′']?)?(?:\s*\d{1,2}(?:\.\d+)?\s*[″"]?)?\s*[NSEW]\b/gi
   ]) {
     for (const match of text.matchAll(pattern)) {

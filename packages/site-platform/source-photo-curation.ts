@@ -275,13 +275,48 @@ const qualityPoints: Record<PhotoCurationQuality, number> = { excellent: 300, go
 const rolePoints: Record<SourcePhotoPageRole, number> = { home: 30, service: 20, portfolio: 20, about: 15, other: 0 };
 
 function curationEligible(candidate: PhotoCurationCandidate) {
-  return Math.min(candidate.width, candidate.height) >= minimumCuratedEdge && !stockImageSignal(candidate.imageUrl);
+  return !curationIneligibleReason(candidate);
+}
+
+export type CurationSkipReason =
+  | "below_minimum_edge"
+  | "stock_url"
+  | "quality_poor"
+  | "overlay_dominant"
+  | "selection_limit";
+
+function curationIneligibleReason(candidate: PhotoCurationCandidate): CurationSkipReason | undefined {
+  if (Math.min(candidate.width, candidate.height) < minimumCuratedEdge) return "below_minimum_edge";
+  if (stockImageSignal(candidate.imageUrl)) return "stock_url";
+  return undefined;
+}
+
+/**
+ * Why each candidate the selection did not take was left out. Every retained
+ * photo is either selected, a recorded duplicate, recorded flat artwork, or
+ * listed here with its reason.
+ */
+export function curationSkipReasons(input: {
+  candidates: readonly PhotoCurationCandidate[];
+  labels?: ReadonlyMap<string, PhotoCurationLabel>;
+  selected: readonly CuratedPhoto[];
+}): Array<{ resourceId: string; reason: CurationSkipReason }> {
+  const selected = new Set(input.selected.map((photo) => photo.candidate.resourceId));
+  return input.candidates.flatMap((candidate) => {
+    if (selected.has(candidate.resourceId)) return [];
+    const label = input.labels?.get(candidate.resourceId);
+    const reason = curationIneligibleReason(candidate)
+      ?? (label?.quality === "poor" ? "quality_poor" : label?.overlay === "dominant" ? "overlay_dominant" : "selection_limit");
+    return [{ resourceId: candidate.resourceId, reason }];
+  });
 }
 
 /**
  * Deterministic selection over labeled candidates: drop unusable, stock-like,
  * overlaid images; take hero-capable photos first, then fill by
  * round-robin across subjects so the gallery covers the business's range.
+ * A candidate whose labeling batch failed is not dropped: it competes on its
+ * ranking score alone as an "unlabeled" subject.
  */
 export function selectCuratedPhotos(input: {
   candidates: readonly PhotoCurationCandidate[];
@@ -304,28 +339,51 @@ export function selectCuratedPhotos(input: {
   }
   const labels = input.labels;
   const limit = input.limit ?? sourcePhotoCurationLimit;
-  const scored = input.candidates.flatMap((candidate) => {
+  type Scored = {
+    candidate: PhotoCurationCandidate;
+    subject: CuratedPhoto["subject"];
+    quality: CuratedPhoto["quality"];
+    heroCapable: boolean;
+    peoplePresent?: boolean;
+    alt: string;
+    score: number;
+  };
+  const scored: Scored[] = input.candidates.flatMap((candidate): Scored[] => {
+    if (!curationEligible(candidate)) return [];
+    const ranking = rolePoints[candidate.pageRole] + Math.max(-50, Math.min(50, candidate.relevanceScore / 10));
     const label = labels.get(candidate.resourceId);
-    if (!label || !curationEligible(candidate)) return [];
+    if (!label) {
+      // Unlabeled (its vision batch failed): rank as a usable "fair" photo on
+      // ranking evidence alone rather than silently losing it.
+      return [{
+        candidate, subject: "unlabeled", quality: "unlabeled", heroCapable: false,
+        alt: input.fallbackAlt, score: qualityPoints.fair + ranking
+      }];
+    }
     if (label.quality === "poor" || label.overlay === "dominant") return [];
     const heroCapable = label.heroCapable && wideEnoughForHero(candidate)
       && (label.quality === "excellent" || label.quality === "good") && label.overlay === "none";
     // Candidates are already first-party and free of stock URL evidence. A
     // stock-like look is common in polished professional shoots of the
     // business's own work, so it is shown to the author but does not rank.
-    const score = qualityPoints[label.quality] + (heroCapable ? 80 : 0) + rolePoints[candidate.pageRole]
-      + Math.max(-50, Math.min(50, candidate.relevanceScore / 10));
-    return [{ candidate, label, heroCapable, score }];
+    return [{
+      candidate,
+      subject: label.subject,
+      quality: label.quality as CuratedPhoto["quality"],
+      heroCapable,
+      peoplePresent: label.peoplePresent,
+      alt: normalizedAlt(label.alt) || input.fallbackAlt,
+      score: qualityPoints[label.quality] + (heroCapable ? 80 : 0) + ranking
+    }];
   }).sort((left, right) => right.score - left.score || left.candidate.resourceId.localeCompare(right.candidate.resourceId));
-  type Scored = (typeof scored)[number];
   const selected: Scored[] = [];
   const roundRobin = (pool: Scored[], cap: number) => {
-    const buckets = new Map<PhotoCurationSubject, Scored[]>();
+    const buckets = new Map<CuratedPhoto["subject"], Scored[]>();
     for (const entry of pool) {
       if (selected.includes(entry)) continue;
-      const bucket = buckets.get(entry.label.subject) ?? [];
+      const bucket = buckets.get(entry.subject) ?? [];
       bucket.push(entry);
-      buckets.set(entry.label.subject, bucket);
+      buckets.set(entry.subject, bucket);
     }
     // Subjects are visited in the order of their best photo.
     const queues = [...buckets.values()];
@@ -342,19 +400,19 @@ export function selectCuratedPhotos(input: {
   };
   // Lead with the best hero-capable photo of each subject, then fill by
   // subject round-robin (score order within a subject).
-  const firstHeroBySubject = new Map<PhotoCurationSubject, Scored>();
+  const firstHeroBySubject = new Map<CuratedPhoto["subject"], Scored>();
   for (const entry of scored) {
-    if (entry.heroCapable && !firstHeroBySubject.has(entry.label.subject)) firstHeroBySubject.set(entry.label.subject, entry);
+    if (entry.heroCapable && !firstHeroBySubject.has(entry.subject)) firstHeroBySubject.set(entry.subject, entry);
   }
   roundRobin([...firstHeroBySubject.values()], heroSlots);
   roundRobin(scored, limit);
-  return selected.map(({ candidate, label, heroCapable }) => ({
+  return selected.map(({ candidate, subject, quality, heroCapable, peoplePresent, alt }) => ({
     candidate,
-    subject: label.subject,
-    quality: label.quality as CuratedPhoto["quality"],
+    subject,
+    quality,
     heroCapable,
-    peoplePresent: label.peoplePresent,
-    alt: normalizedAlt(label.alt) || input.fallbackAlt
+    ...(peoplePresent === undefined ? {} : { peoplePresent }),
+    alt
   }));
 }
 
@@ -473,6 +531,7 @@ export async function curateSourcePhotos(input: {
     else fallbackReason = labeled.failures[0] ?? "photo_labeling_empty";
   }
   const selected = selectCuratedPhotos({ candidates: unique, labels, fallbackAlt });
+  const skipped = curationSkipReasons({ candidates: unique, labels, selected });
   const curation: SiteAgentAssetCuration = input.retained && reused ? input.retained : {
     schemaVersion: 1,
     producer: sourcePhotoCurationProducer,
@@ -487,6 +546,7 @@ export async function curateSourcePhotos(input: {
     duplicates,
     flatArtwork,
     labels: labels ? [...labels].map(([resourceId, label]) => ({ resourceId, ...label })) : [],
+    skipped,
     selected: selected.map((photo) => ({
       resourceId: photo.candidate.resourceId,
       sourceId: photo.candidate.sourceId,

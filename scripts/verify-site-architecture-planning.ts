@@ -12,7 +12,12 @@ import {
   parseApprovedArchitectureModule,
   siteArchitectureInventoryHash,
   siteArchitectureModelId,
+  estimatePlannerTokens,
   siteArchitectureOutputJsonSchema,
+  siteArchitecturePlannerRequest,
+  siteArchitectureTargetInputTokens,
+  siteArchitectureUserPrompt,
+  type SiteArchitectureInventoryEntry,
   siteArchitecturePromptIdentity,
   siteArchitecturePromptIdentityFor,
   siteArchitectureSystemPrompt,
@@ -978,7 +983,8 @@ const invalidPlanAgent = new WebsiteManagerAgent({
       ...rawPlan,
       sourceDispositions: {
         ...rawPlan.sourceDispositions,
-        "/": { disposition: "preserved", targetPath: "/ant-control" }
+        // A retirement that also names a destination has no safe reading.
+        "/ants": { disposition: "retired", targetPath: "/ant-control" }
       }
     })) as never;
   }
@@ -1098,6 +1104,174 @@ assert.doesNotThrow(() => siteAgentArchitectureSchema.parse({
     sourceDispositions: Object.fromEntries(realInventory.map((item) => [item.path, { disposition: "preserved", targetPath: item.path }])),
     authoringGuidance: []
   } as RawSiteArchitecturePlan, realInventory));
+}
+
+// Arceneaux regression: the planner marked a blog post "preserved" while
+// naming another post as its target. Preserved means the URL stays live, so
+// normalization keeps the source live at its own path with a finding instead
+// of ending the run. The named target is not silently made a redirect.
+{
+  const postInventory = buildSiteArchitectureInventory([
+    page("page_p_home", "/", "Pest Control in Baton Rouge", "Family-owned pest control for Baton Rouge homes, with termite inspections and general pest service."),
+    page("page_p_seeing", "/seeing-is-believing", "Seeing is Believing", "A customer photographed a termite swarm near a window and our technician explained what it meant for the home."),
+    page("page_p_assassin", "/the-assassin-bug", "The Assassin Bug", "Assassin bugs hunt other insects in gardens and rarely come indoors, but their bite can be painful."),
+    page("page_p_weird", "/Weird_Post", "Weird Post", "A legacy post whose path cannot become a static route because of its casing and underscore.")
+  ]);
+  const basePlan = {
+    strategy: "Keep the homepage and the two useful posts.",
+    primaryNavigation: [{ label: "Home", path: "/" }],
+    routes: [
+      { path: "/", label: "Home", purpose: "Help Baton Rouge homeowners choose pest control and request an inspection.", pageType: "home", parentPath: null, navigation: "primary" as const },
+      { path: "/seeing-is-believing", label: "Seeing is Believing", purpose: "Show homeowners what a termite swarm near a window means.", pageType: "article", parentPath: null, navigation: "contextual" as const }
+    ],
+    authoringGuidance: []
+  };
+  const findings: string[] = [];
+  const restored = normalizeSiteArchitecturePlan({
+    ...basePlan,
+    sourceDispositions: {
+      "/": { disposition: "preserved", targetPath: "/" },
+      "/seeing-is-believing": { disposition: "preserved", targetPath: "/seeing-is-believing" },
+      "/the-assassin-bug": { disposition: "preserved", targetPath: "/seeing-is-believing" },
+      "/Weird_Post": { disposition: "redirected", targetPath: "/" }
+    }
+  }, postInventory, findings);
+  const restoredValidation = validateSiteArchitecturePlan(postInventory, restored);
+  assert.equal(restoredValidation.complete, true, JSON.stringify(restoredValidation));
+  assert.deepEqual(restored.sourceDispositions.find((item) => item.sourcePath === "/the-assassin-bug"),
+    { sourcePath: "/the-assassin-bug", disposition: "preserved", targetPath: "/the-assassin-bug" });
+  assert.deepEqual(restored.routes.find((route) => route.path === "/the-assassin-bug")?.sourcePaths, ["/the-assassin-bug"]);
+  assert.deepEqual(restored.routes.find((route) => route.path === "/seeing-is-believing")?.sourcePaths, ["/seeing-is-believing"]);
+  assert.ok(findings.some((finding) => /kept \/the-assassin-bug live at its own path.*\/seeing-is-believing/.test(finding)), findings.join("\n"));
+  assert.ok(!createArchitectureReleasePlan(restored).redirects.some((redirect) => redirect.sourcePath === "/the-assassin-bug"),
+    "A preserved source URL must not become a redirect.");
+
+  // A preserved path that cannot be a static route cannot stay live: still loud.
+  const unsafe = normalizeSiteArchitecturePlan({
+    ...basePlan,
+    sourceDispositions: {
+      "/": { disposition: "preserved", targetPath: "/" },
+      "/seeing-is-believing": { disposition: "preserved", targetPath: "/seeing-is-believing" },
+      "/the-assassin-bug": { disposition: "redirected", targetPath: "/seeing-is-believing" },
+      "/Weird_Post": { disposition: "preserved", targetPath: "/seeing-is-believing" }
+    }
+  }, postInventory);
+  const unsafeValidation = validateSiteArchitecturePlan(postInventory, unsafe);
+  assert.equal(unsafeValidation.complete, false);
+  assert.deepEqual(unsafeValidation.preservedPathChanges, [{ sourcePath: "/Weird_Post", targetPath: "/seeing-is-believing" }]);
+
+  // The same contradiction through the model boundary no longer ends the run.
+  const contradictionAgent = new WebsiteManagerAgent({
+    create: async () => architectureResponse(JSON.stringify({
+      ...rawPlan,
+      sourceDispositions: { ...rawPlan.sourceDispositions, "/": { disposition: "preserved", targetPath: "/ant-control" } }
+    })) as never
+  });
+  const contradiction = await contradictionAgent.architect({ inventory });
+  assert.equal(contradiction.validation.complete, true);
+  assert.equal(contradiction.plan.sourceDispositions.find((item) => item.sourcePath === "/")?.targetPath, "/");
+  assert.equal(contradiction.normalizationFindings.length, 1);
+}
+
+// Foothills regression: a 575-path service-by-city grid sent every page's
+// capped text to the planner and exceeded the provider context window. The
+// request is now bounded by construction: long-tail families and archives are
+// summarized with an omission ledger, core pages keep their evidence, and
+// every path still requires a disposition.
+{
+  const services = ["termite-control", "residential-pest-control", "commercial-pest-control", "wildlife-removal", "crawlspace-moisture", "outdoor-pest-control"];
+  const cities = Array.from({ length: 90 }, (_, index) => `town-${index + 1}-nc`);
+  const longText = (subject: string) => Array.from({ length: 70 }, (_, index) =>
+    `${subject} paragraph ${index + 1} explains inspection findings, treatment options, and follow-up visits for local homes.`).join("\n");
+  const largePages: SourceSnapshotPage[] = [
+    { ...page("page_l_home", "/", "Foothills Pest Services", longText("Home")), linkProminence: 600 },
+    { ...page("page_l_privacy", "/privacy-policy", "Privacy Policy", longText("Privacy")), linkProminence: 600 },
+    { ...page("page_l_contact", "/contact-us", "Contact Us", "Call or request a quote for pest service across the foothills."), linkProminence: 600 },
+    { ...page("page_l_areas", "/service-areas", "Service Areas", longText("Service areas")), linkProminence: 600 },
+    ...services.map((service) => ({ ...page(`page_l_${service}`, `/${service}`, service, longText(service)), linkProminence: 600 })),
+    ...services.flatMap((service) => cities.map((city) =>
+      page(`page_l_${service}_${city}`, `/${service}/${city}`, `${service} in ${city}`, longText(`${service} ${city}`)))),
+    ...Array.from({ length: 30 }, (_, index) =>
+      page(`page_l_cat_${index}`, `/category/topic-${index}`, `Topic ${index}`, longText(`Category ${index}`))),
+    { ...page("page_l_pdf", "/files/brochure.pdf", "", ""), outcome: "failed" as const, status: 404, wordCount: 0 }
+  ];
+  const largeInventory = buildSiteArchitectureInventory(largePages);
+  assert.ok(largeInventory.length >= 570, `fixture has ${largeInventory.length} paths`);
+  const unboundedCharacters = siteArchitectureUserPrompt(largeInventory).length;
+  assert.ok(estimatePlannerTokens(unboundedCharacters) > siteArchitectureTargetInputTokens,
+    "The fixture must exceed the planner target without bounding.");
+
+  const bounded = siteArchitecturePlannerRequest({ inventory: largeInventory, architectureMode: "commercial-core-message-target" });
+  assert.ok(bounded.bounds, "A large inventory must use bounded planner evidence.");
+  assert.ok(bounded.estimatedInputTokens <= siteArchitectureTargetInputTokens, `${bounded.estimatedInputTokens} estimated tokens`);
+  assert.ok(bounded.estimatedInputTokens * 5 < estimatePlannerTokens(unboundedCharacters));
+  const ledger = bounded.ledger!;
+  assert.equal(ledger.sourcePaths, largeInventory.length);
+  assert.equal(ledger.evidencePaths + ledger.summarizedPaths, largeInventory.length, "Every path is either evidenced or counted as summarized.");
+  assert.equal(Object.values(ledger.summarizedBy).reduce((total, count) => total + count, 0), ledger.summarizedPaths);
+  for (const service of services) assert.equal(ledger.summarizedBy[`family:/${service}/`], 88);
+  assert.equal(ledger.summarizedBy.mechanical_archive, 30);
+  assert.equal(ledger.summarizedBy.no_content, 1);
+
+  const records = JSON.parse(bounded.user.slice(bounded.user.lastIndexOf("\n\n[") + 2)) as Array<{ path: string; summarized?: string; sourceText?: string }>;
+  assert.deepEqual(records.map((record) => record.path), largeInventory.map((entry) => entry.path),
+    "Every source path appears exactly once in the bounded planner inventory.");
+  const byPath = new Map(records.map((record) => [record.path, record]));
+  for (const core of ["/", "/privacy-policy", "/service-areas", ...services.map((service) => `/${service}`)]) {
+    assert.equal(byPath.get(core)?.summarized, undefined, `${core} keeps its evidence`);
+    assert.equal(byPath.get(core)?.sourceText, largeInventory.find((entry) => entry.path === core)?.sourceText, `${core} keeps its full capped text`);
+  }
+  for (const service of services) {
+    const family = records.filter((record) => record.path.startsWith(`/${service}/`));
+    assert.equal(family.filter((record) => !record.summarized).length, 2, "Each family keeps two evidenced representatives.");
+  }
+  assert.match(bounded.user, /Omission ledger/);
+  assert.deepEqual((bounded.schema.properties.sourceDispositions.required as readonly string[]).length, largeInventory.length,
+    "Bounding never removes a path from the exhaustive disposition schema.");
+
+  // The bounded request is what reaches the provider.
+  let largeRequest: Record<string, unknown> | undefined;
+  const largeAgent = new WebsiteManagerAgent({
+    create: async (params) => {
+      largeRequest = params as unknown as Record<string, unknown>;
+      return architectureResponse(JSON.stringify({
+        strategy: "Keep a focused core and redirect the city grid to its service pages.",
+        primaryNavigation: [{ label: "Home", path: "/" }],
+        routes: [
+          { path: "/", label: "Home", purpose: "Help foothills homeowners choose pest service and request a quote.", pageType: "home", parentPath: null, navigation: "primary" },
+          { path: "/privacy-policy", label: "Privacy Policy", purpose: "Keep the existing privacy terms available to customers.", pageType: "legal", parentPath: null, navigation: "footer" }
+        ],
+        sourceDispositions: Object.fromEntries(largeInventory.map((entry) => [entry.path,
+          entry.path === "/" || entry.path === "/privacy-policy"
+            ? { disposition: "preserved", targetPath: entry.path }
+            : { disposition: "redirected", targetPath: "/" }])),
+        authoringGuidance: []
+      })) as never;
+    }
+  });
+  const largeResult = await largeAgent.architect({ inventory: largeInventory });
+  assert.equal(largeResult.validation.complete, true);
+  assert.equal(largeResult.plannerRequest.ledger?.summarizedPaths, ledger.summarizedPaths);
+  assert.ok(JSON.stringify(largeRequest?.input).length < unboundedCharacters / 5);
+
+  // An inventory too large even after summarizing everything fails before spend.
+  const hugeInventory: SiteArchitectureInventoryEntry[] = Array.from({ length: 6_000 }, (_, index) => ({
+    ...largeInventory[0]!,
+    path: `/archive-${index}/post-${index}`,
+    title: `Legacy post ${index} with a long descriptive title about pest control seasons`
+  }));
+  let hugeCalls = 0;
+  const hugeAgent = new WebsiteManagerAgent({ create: async () => { hugeCalls += 1; throw new Error("must not be called"); } });
+  await assert.rejects(() => hugeAgent.architect({ inventory: hugeInventory }), (error: unknown) => {
+    assert(error instanceof SiteAuthoringTerminalError);
+    assert.equal(error.code, "context_capacity_exhausted");
+    assert.match(error.message, /site_architecture_request_too_large:estimatedInputTokens=\d+:limit=\d+/);
+    return true;
+  });
+  assert.equal(hugeCalls, 0, "An oversized planner request is refused before any provider call.");
+
+  // Small inventories keep the complete unbounded record.
+  assert.equal(siteArchitecturePlannerRequest({ inventory }).bounds, undefined);
 }
 
 process.stdout.write(`${JSON.stringify({

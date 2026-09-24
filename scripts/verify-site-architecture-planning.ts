@@ -74,6 +74,35 @@ const validation = validateSiteArchitecturePlan(inventory, plan);
 assert.equal(validation.complete, true);
 assert.deepEqual(plan.routes.find((route) => route.path === "/ant-control")?.sourcePaths, ["/ant-control", "/ants"]);
 
+// Mechanical plan slips are normalized with findings instead of failing the
+// run: a missing purpose, a navigation item without a live route, and a
+// redirect with no target.
+{
+  const mechanicalFindings: string[] = [];
+  const mechanical = normalizeSiteArchitecturePlan({
+    ...rawPlan,
+    primaryNavigation: [...rawPlan.primaryNavigation, { label: "Gallery", path: "/gallery" }],
+    routes: [rawPlan.routes[0]!, { ...rawPlan.routes[1]!, purpose: "" }],
+    sourceDispositions: { ...rawPlan.sourceDispositions, "/ants": { disposition: "redirected", targetPath: null } }
+  }, inventory, mechanicalFindings);
+  assert.equal(validateSiteArchitecturePlan(inventory, mechanical).complete, true,
+    "A mechanically repairable plan still failed validation.");
+  assert.ok(mechanical.routes.find((route) => route.path === "/ant-control")!.purpose.length >= 12);
+  assert.ok(!mechanical.primaryNavigation.some((item) => item.path === "/gallery"));
+  assert.equal(mechanical.sourceDispositions.find((item) => item.sourcePath === "/ants")?.disposition, "retired");
+  for (const expected of [/filled the missing purpose of \/ant-control/, /dropped navigation item Gallery/, /retired \/ants: it was redirected without a target/]) {
+    assert.ok(mechanicalFindings.some((finding) => expected.test(finding)), `Missing normalization finding ${expected}`);
+  }
+  // Unsafe paths and legal pages still fail loudly.
+  const legalInventory = [...inventory, { ...inventory[0]!, path: "/privacy-policy", title: "Privacy", headings: ["Privacy"] }];
+  const legalPlan = normalizeSiteArchitecturePlan({
+    ...rawPlan,
+    sourceDispositions: { ...rawPlan.sourceDispositions, "/privacy-policy": { disposition: "redirected", targetPath: null } }
+  }, legalInventory);
+  assert.ok(validateSiteArchitecturePlan(legalInventory, legalPlan).unsafeLegalDispositions.length > 0,
+    "A legal page retired by normalization escaped the legal-page hard failure.");
+}
+
 const typoPlan = normalizeSiteArchitecturePlan({
   ...rawPlan,
   routes: [

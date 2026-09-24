@@ -292,7 +292,7 @@ const builderCdnRanking = rankSourceAssetCandidates({
   pages: [homeWithPartner, about],
   resources: [
     resource("cloudfront_photo", "https://d1abc234.cloudfront.net/uploads/crew.jpg", home.finalUrl!, "image/jpeg", 90_000),
-    resource("cloudinary_photo", "https://res.cloudinary.com/fixture/image/upload/v1/roof.jpg", home.finalUrl!, "image/jpeg", 90_000),
+    resource("cloudinary_photo", "https://res.cloudinary.com/fixture/image/upload/roof.jpg", home.finalUrl!, "image/jpeg", 90_000),
     resource("gbp_photo", "https://lh3.googleusercontent.com/p/AF1QipN-fixture=s1600", home.finalUrl!, "image/jpeg", 90_000),
     resource("partner_photo", "https://cdn.partner-supplier.example/catalog/shingle.jpg", home.finalUrl!, "image/jpeg", 90_000),
     resource("other_business_site_photo", "https://www.unrelated-business.example/images/truck.jpg", home.finalUrl!, "image/jpeg", 90_000),

@@ -589,6 +589,16 @@ export function normalizeSiteArchitecturePlan(
     item.disposition = "retired";
     item.targetPath = null;
   }
+  // A redirect or duplicate with no destination is a mechanical slip: retire
+  // the source with a finding rather than failing the whole plan. Legal pages
+  // still fail validation (they must stay preserved), and a retirement that
+  // names a destination stays a hard failure because it has no safe reading.
+  for (const item of sourceDispositions) {
+    if ((item.disposition === "redirected" || item.disposition === "canonical_duplicate") && item.targetPath === null) {
+      findings.push(`retired ${item.sourcePath}: it was ${item.disposition} without a target`);
+      item.disposition = "retired";
+    }
+  }
   const routes: SiteArchitecturePlan["routes"] = [];
   const routeIndex = new Map<string, number>();
   for (const route of raw.routes) {
@@ -681,11 +691,28 @@ export function normalizeSiteArchitecturePlan(
     .filter((item): item is SiteArchitecturePlan["primaryNavigation"][number] => Boolean(item && normalizedRoutePaths.has(item.path)))
     .filter((item, index, values) => values.findIndex((candidate) => candidate.path === item.path) === index);
 
+  for (const item of raw.primaryNavigation) {
+    if (!primaryNavigation.some((kept) => kept.path === item.path)) {
+      findings.push(`dropped navigation item ${item.label} (${item.path}): it does not target a live route`);
+    }
+  }
   const repaired = repairOneLetterRoutePaths(normalizedRoutes, primaryNavigation, sourceDispositions, inventory);
+  // A missing or trivial route purpose is filled from the route's own label.
+  const routesWithPurpose = repaired.routes.map((route) => {
+    if (route.purpose.trim().length >= 12) return route;
+    findings.push(`filled the missing purpose of ${route.path}`);
+    return { ...route, purpose: `Give visitors a useful, source-grounded answer about ${route.label}.` };
+  });
+  const liveRoutePaths = new Set(routesWithPurpose.map((route) => route.path));
+  const navigation = repaired.primaryNavigation.filter((item) => {
+    if (liveRoutePaths.has(item.path)) return true;
+    findings.push(`dropped navigation item ${item.label} (${item.path}): it does not target a live route`);
+    return false;
+  });
   return siteArchitecturePlanSchema.parse({
     ...raw,
-    primaryNavigation: repaired.primaryNavigation,
-    routes: repaired.routes,
+    primaryNavigation: navigation,
+    routes: routesWithPurpose,
     sourceDispositions: repaired.sourceDispositions
   });
 }

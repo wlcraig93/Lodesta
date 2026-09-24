@@ -271,8 +271,8 @@ assert.match(taskSkills.initial_build.objective, /specific customer copy and rou
 const toolNames = new Set(managerToolNameSchema.options);
 const offeredToolNames = new Set(websiteManagerTools.flatMap((tool) => tool.type === "function" ? [tool.name] : []));
 assert.equal("disabledTools" in canonicalAuthoringProfile("initial_build"), false, "The canonical profile must not retain a dormant image-tool selector.");
-assert.equal(canonicalAuthoringProfile("initial_build").assetEvidenceLimit, 8,
-  "The canonical profile must retain the expanded bounded asset-evidence cap.");
+assert.equal(canonicalAuthoringProfile("initial_build").assetEvidenceLimit, 40,
+  "The canonical initial-build profile must show the logo plus the full curated photo gallery.");
 for (const kind of ["edit", "rebase"] as const) {
   assert.equal(canonicalAuthoringProfile(kind).assetEvidenceLimit, 2,
     "Initial-build image exposure must not expand unrelated edit/rebase context.");

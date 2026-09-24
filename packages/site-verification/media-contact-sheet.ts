@@ -8,24 +8,52 @@ const imageWidth = 360;
 const imageHeight = 220;
 const headerHeight = 76;
 
+export type MediaContactSheetCuration = {
+  subject: string;
+  quality: string;
+  heroCapable: boolean;
+  alt: string;
+};
+
 export async function createMediaContactSheet(
-  assets: Array<{ asset: AssetRevisionRef; bytes: Buffer; sourcePageUrl?: string; sourceAssetUrl?: string }>,
-  options: { neutralSemantics?: boolean } = {}
+  assets: Array<{
+    asset: AssetRevisionRef;
+    bytes: Buffer;
+    sourcePageUrl?: string;
+    sourceAssetUrl?: string;
+    /** Number printed on the sheet. */
+    cell?: number;
+    /** Pixel labels from pre-authoring photo curation. */
+    curation?: MediaContactSheetCuration;
+  }>,
+  options: {
+    neutralSemantics?: boolean;
+    sheet?: { number: number; count: number; total: number; curated: boolean };
+  } = {}
 ) {
+  const first = assets[0]?.cell;
+  const last = assets.at(-1)?.cell;
   return createLabeledMediaContactSheet(assets.map((item) => {
     const sourceHost = options.neutralSemantics ? undefined : sourceHostFor(item.sourcePageUrl);
     const sourcePath = options.neutralSemantics ? undefined : sourcePathFor(item.sourceAssetUrl);
     return {
       bytes: item.bytes,
-      labels: ({ width, height }: { width: number; height: number }) => [
-        item.asset.assetId,
+      labels: ({ width, height }: { width: number; height: number }) => item.curation ? [
+        `${item.cell ? `#${item.cell} · ` : ""}${item.asset.assetId}`.slice(0, 46),
+        `${item.curation.subject.replaceAll("_", " ")} · ${item.curation.quality}${item.curation.heroCapable ? " · hero-capable" : ""} · ${width}×${height}`,
+        ...wrapped(`alt: ${item.curation.alt}`, 54, 3)
+      ] : [
+        `${item.cell ? `#${item.cell} · ` : ""}${item.asset.assetId}`.slice(0, 46),
         `${item.asset.kind} · ${width}×${height} · ${item.asset.origin.replaceAll("_", " ")}`,
         options.neutralSemantics ? "judge the visible pixels; semantics are unverified" : `alt: ${item.asset.alt || "(empty)"}`.slice(0, 58),
         sourcePath ? `file: ${sourcePath}` : "",
         sourceHost ? `page: ${sourceHost}` : ""
       ].filter(Boolean)
     };
-  }));
+  }), options.sheet ? {
+    title: `${options.sheet.curated ? "Curated business media" : "Available business media"} · sheet ${options.sheet.number} of ${options.sheet.count}`,
+    subtitle: `Assets #${first ?? 1}–#${last ?? assets.length} of ${options.sheet.total}. Ready to use by asset id; labels describe the pixels only.`
+  } : undefined);
 }
 
 /**
@@ -112,6 +140,25 @@ function svgText(width: number, height: number, content: string) {
     </style>
     ${content}
   </svg>`;
+}
+
+function wrapped(value: string, width: number, maximumLines: number) {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of value.split(/\s+/)) {
+    if (line && `${line} ${word}`.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) lines.push(line);
+  if (lines.length > maximumLines) {
+    lines.length = maximumLines;
+    lines[maximumLines - 1] = `${lines[maximumLines - 1]!.slice(0, width - 1)}…`;
+  }
+  return lines.map((entry) => entry.slice(0, width));
 }
 
 function escapeXml(value: string) {

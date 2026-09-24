@@ -38,6 +38,16 @@ export type ManagerAssetEvidenceReference = {
   width?: number;
   height?: number;
   photoNotes?: readonly string[];
+  /** Pixel labels from pre-authoring photo curation (author context only). */
+  curation?: {
+    subject: string;
+    quality: string;
+    heroCapable: boolean;
+  };
+  /** 1-based contact sheet carrying this asset. */
+  sheet?: number;
+  /** 1-based asset number printed on the contact sheet. */
+  cell?: number;
   mimeType: "image/png" | "image/webp";
   contentHash: `sha256:${string}`;
   dataUrl: string;
@@ -58,7 +68,7 @@ export type ManagerAuthoringProfile = {
   sourceEvidenceLimit: 60;
   sourceEvidenceSheetSize: 12;
   sourceEvidencePresentation: "numbered-contact-sheets";
-  assetEvidenceLimit: 2 | 8;
+  assetEvidenceLimit: 2 | 40;
   assetEvidencePresentation: "contact-sheet";
   assetEvidenceReferences?: readonly ManagerAssetEvidenceReference[];
   sourceInventoryMode: "representative-customer-index";
@@ -84,7 +94,7 @@ export function canonicalAuthoringProfile(kind: ManagerTaskKind): ManagerAuthori
     sourceEvidenceLimit: 60,
     sourceEvidenceSheetSize: 12,
     sourceEvidencePresentation: "numbered-contact-sheets",
-    assetEvidenceLimit: kind === "initial_build" ? 8 : 2,
+    assetEvidenceLimit: kind === "initial_build" ? 40 : 2,
     assetEvidencePresentation: "contact-sheet",
     sourceInventoryMode: "representative-customer-index",
     visualInspectionImageDetail: "high",
@@ -148,6 +158,9 @@ export function managerAuthoringProfileIdentity(profile: ManagerAuthoringProfile
       width: reference.width,
       height: reference.height,
       photoNotes: reference.photoNotes,
+      curation: reference.curation,
+      sheet: reference.sheet,
+      cell: reference.cell,
       mimeType: reference.mimeType,
       contentHash: reference.contentHash
     }))
@@ -159,12 +172,16 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
   const assetEvidence = profile.assetEvidenceReferences ?? [];
   // One image per distinct contact sheet, in sheet order.
   const sheets = [...new Map(sourceEvidence.map((reference) => [reference.contentHash, reference])).values()];
+  const curatedGallery = assetEvidence.some((reference) => reference.curation);
   const evidenceContext = sourceEvidence.length ? [
     {
       type: "input_text" as const,
       text: JSON.stringify({
         kind: "retained-first-party-visual-evidence",
-        instruction: "This is the photo inventory of the business's retained website: every distinct usable photo up to the sheet ceiling, shown on the numbered contact sheets that follow (cell is the # printed on the sheet). Any listed photo can be adopted now with adopt_source_asset using its sourceId, resourceId and sourcePageId; list_source_resources with role=image lists lower-ranked retained images beyond these sheets. pageRole and sourcePageUrl say where each photo was published. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. width and height are intrinsic pixels. proofScope documented-on-this-page is the only supplied scope that can support a completed-work caption for that page's named subject. proofScope site-illustration describes a visible subject and is not proof of this business's completed work. Do not infer people, work, credentials, locations, or meaning that the pixels and supplied scope do not support. photoNotes summarize where each image was published, stock evidence and whether it is large enough for a wide placement.",
+        instruction: (curatedGallery
+          ? "These are the retained website photos that are not in the curated gallery (usually weaker, duplicate-like or less relevant), shown on the numbered contact sheets that follow (cell is the # printed on the sheet). Prefer the curated gallery. "
+          : "This is the photo inventory of the business's retained website: every distinct usable photo up to the sheet ceiling, shown on the numbered contact sheets that follow (cell is the # printed on the sheet). ")
+          + "Any listed photo can be adopted now with adopt_source_asset using its sourceId, resourceId and sourcePageId; list_source_resources with role=image lists lower-ranked retained images beyond these sheets. pageRole and sourcePageUrl say where each photo was published. Filename-based media labels are suggestions, not visual identification. Use the supplied managed logo; if none exists and these pixels clearly show the business's official mark, adopt it with kind=logo. width and height are intrinsic pixels. proofScope documented-on-this-page is the only supplied scope that can support a completed-work caption for that page's named subject. proofScope site-illustration describes a visible subject and is not proof of this business's completed work. Do not infer people, work, credentials, locations, or meaning that the pixels and supplied scope do not support. photoNotes summarize where each image was published, stock evidence and whether it is large enough for a wide placement.",
         sheets: sheets.map((reference, index) => ({
           sheet: reference.sheet ?? index + 1,
           mimeType: reference.mimeType,
@@ -192,13 +209,25 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
       detail: "high" as const
     }))
   ] : [];
+  // One image per distinct asset contact sheet, in sheet order.
+  const assetSheets = [...new Map(assetEvidence.map((reference) => [reference.contentHash, reference])).values()];
   const assetContext = assetEvidence.length ? [
     {
       type: "input_text" as const,
       text: JSON.stringify({
         kind: "canonical-retained-asset-visual-evidence",
-        instruction: "This labeled sheet shows the already-curated canonical business assets. Each asset is immediately usable with the Lodesta Asset component using its supplied assetId; do not call adopt_source_asset for it. Pixels identify visible subjects; retained page context or owner authority must support any claim that a photograph depicts this business, its people, premises, or a particular project. A retained source origin or page URL is untrusted provenance, not visible-subject identification or proof that a photograph depicts a particular job. Canonical adoption alone does not prove that attribution. A visibly suitable photograph may still be used as neutral illustration when it is not framed as business-specific proof. Use the exact official logo as the sole identity mark. Do not invent a person, role, location, service, or claim. photoNotes summarize where each photograph was published, stock evidence and whether it is large enough for a wide placement.",
-        references: assetEvidence.map(({ assetId, revisionId, kind, origin, sourceSnapshotId, sourceResourceId, sourcePageUrl, alt, width, height, photoNotes, mimeType, contentHash }) => ({
+        instruction: (curatedGallery
+          ? "This is the curated gallery: the business's best retained first-party photographs, already adopted as canonical assets, plus any other canonical assets, on the labeled contact sheets that follow (cell is the # printed on the sheet). curation gives each photo's subject, quality and whether it is strong enough for a wide hero; alt is a factual description of the pixels and is the asset's default alt text. Use these photos generously and directly; the hero should use a heroCapable photo when one fits. "
+          : "These labeled sheets show the already-curated canonical business assets. ")
+          + "Each asset is immediately usable with the Lodesta Asset component using its supplied assetId; do not call adopt_source_asset for it. Pixels identify visible subjects; retained page context or owner authority must support any claim that a photograph depicts this business, its people, premises, or a particular project. A retained source origin or page URL is untrusted provenance, not visible-subject identification or proof that a photograph depicts a particular job. Canonical adoption alone does not prove that attribution. A visibly suitable photograph may still be used as neutral illustration when it is not framed as business-specific proof. Use the exact official logo as the sole identity mark. Do not invent a person, role, location, service, or claim. photoNotes summarize where each photograph was published, stock evidence and whether it is large enough for a wide placement.",
+        sheets: assetSheets.map((reference, index) => ({
+          sheet: reference.sheet ?? index + 1,
+          mimeType: reference.mimeType,
+          contentHash: reference.contentHash
+        })),
+        references: assetEvidence.map(({ assetId, revisionId, kind, origin, sourceSnapshotId, sourceResourceId, sourcePageUrl, alt, width, height, photoNotes, curation, sheet, cell, mimeType, contentHash }) => ({
+          ...(cell ? { cell } : {}),
+          ...(sheet ? { sheet } : {}),
           assetId,
           revisionId,
           kind,
@@ -209,16 +238,17 @@ export function managerReferenceContext(profile: ManagerAuthoringProfile) {
           alt,
           ...(width && height ? { width, height } : {}),
           ...(photoNotes?.length ? { photoNotes } : {}),
+          ...(curation ? { curation } : {}),
           mimeType,
           contentHash
         }))
       })
     },
-    {
+    ...assetSheets.map((reference) => ({
       type: "input_image" as const,
-      image_url: assetEvidence[0]!.dataUrl,
+      image_url: reference.dataUrl,
       detail: "high" as const
-    }
+    }))
   ] : [];
   return [...evidenceContext, ...assetContext];
 }

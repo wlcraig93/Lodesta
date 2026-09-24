@@ -1113,6 +1113,45 @@ export const siteAgentArchitectureSchema = z.object({
 }).strict();
 export type SiteAgentArchitecture = z.infer<typeof siteAgentArchitectureSchema>;
 
+// Regenerable input-preparation intermediate: the pixel labels and selection
+// behind the curated photo gallery an initial build starts with. Selected
+// photos still become media only through source-photo adoption.
+const curationResourceId = z.string().min(1).max(200);
+export const siteAgentAssetCurationSchema = z.object({
+  schemaVersion: z.literal(1),
+  producer: z.string().min(1).max(200),
+  promptVersion: z.number().int().positive(),
+  modelId: z.string().min(1).max(120),
+  labeler: z.enum(["vision", "ranking_fallback"]),
+  fallbackReason: z.string().min(1).max(200).optional(),
+  publicBuildInputId: identifier,
+  inputHash: contentHash,
+  generatedAt: isoTimestamp,
+  candidateCount: z.number().int().nonnegative(),
+  duplicates: z.array(z.object({ resourceId: curationResourceId, duplicateOf: curationResourceId }).strict()).max(200),
+  labels: z.array(z.object({
+    resourceId: curationResourceId,
+    subject: z.enum(["crew_people", "vehicle", "finished_work", "before_after", "equipment", "premises", "product", "graphic", "other"]),
+    quality: z.enum(["excellent", "good", "fair", "poor"]),
+    heroCapable: z.boolean(),
+    peoplePresent: z.boolean(),
+    overlay: z.enum(["none", "minor", "dominant"]),
+    stockLike: z.boolean(),
+    alt: z.string().max(200)
+  }).strict()).max(200),
+  selected: z.array(z.object({
+    resourceId: curationResourceId,
+    sourceId: identifier,
+    sourcePageId: identifier,
+    subject: z.enum(["crew_people", "vehicle", "finished_work", "before_after", "equipment", "premises", "product", "other", "unlabeled"]),
+    quality: z.enum(["excellent", "good", "fair", "unlabeled"]),
+    heroCapable: z.boolean(),
+    alt: z.string().min(1).max(200)
+  }).strict()).max(60),
+  usage: siteAgentUsageSchema
+}).strict();
+export type SiteAgentAssetCuration = z.infer<typeof siteAgentAssetCurationSchema>;
+
 export const siteAgentRunRequestSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("initial_build"),
@@ -1235,6 +1274,7 @@ export const siteAgentRunSchema = z.object({
   // Reader-only provenance may contain a retired experiment label. Live execution accepts only the canonical profile.
   authoringProfileId: z.string().min(1).optional(),
   architecture: siteAgentArchitectureSchema.optional(),
+  assetCuration: siteAgentAssetCurationSchema.optional(),
   supersedesRunId: identifier.optional(),
   retryOfRunId: identifier.optional(),
   coalescedIntoRunId: identifier.optional(),

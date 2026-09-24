@@ -659,31 +659,45 @@ export function createArchitectureEvidenceFiles(
     || input.retainedContentMode === "indexed-pull-preview-author-digest"
   ) {
     const readableAnswer = input.retainedContentMode === "indexed-pull-preview-readable";
-    const sourceIndex = createApprovedSourceIndex(pages, plan, {
-      approvedDocuments: input.approvedDocuments,
-      includePreviews: input.retainedContentMode !== "indexed-pull",
-      authorDigest: input.retainedContentMode === "indexed-pull-preview-author-digest",
-      answerPacket: readableAnswer,
-      offerings: input.offerings,
-      routeImages: input.routeImages,
-      // The readable index carries each mapped source's customer answer.
-      // Shorter historical and digest variants stay on their existing bounds.
-      previewCharacters: readableAnswer ? 2_000 : undefined,
-      previewLines: readableAnswer ? 40 : undefined
-    });
+    const indent = input.retainedContentMode === "indexed-pull-preview-readable"
+      || input.retainedContentMode === "indexed-pull-preview-author-digest"
+      ? 2
+      : undefined;
+    const sourceIndexModule = (bounds: ApprovedSourceIndexBounds) => `export const approvedSourceIndex = ${JSON.stringify(
+      createApprovedSourceIndex(pages, plan, {
+        approvedDocuments: input.approvedDocuments,
+        includePreviews: input.retainedContentMode !== "indexed-pull",
+        authorDigest: input.retainedContentMode === "indexed-pull-preview-author-digest",
+        answerPacket: readableAnswer,
+        offerings: input.offerings,
+        routeImages: input.routeImages,
+        // The readable index carries each mapped source's customer answer.
+        // Shorter historical and digest variants stay on their existing bounds.
+        previewCharacters: readableAnswer ? 2_000 : undefined,
+        previewLines: readableAnswer ? 40 : undefined,
+        ...bounds
+      }),
+      null,
+      indent
+    )} as const;\n`;
+    // Large sites (hundreds of consolidated pages) would otherwise exceed the
+    // workspace file limit and fail after the architecture spend. Tighten the
+    // inline answer excerpts, highest-priority first, and name every omission;
+    // the complete text stays readable through each source's contentFiles.
+    let sourceIndexContent = sourceIndexModule({});
+    for (const bounds of approvedSourceIndexBoundSteps) {
+      if (sourceIndexContent.length <= maximumApprovedSourceIndexCharacters) break;
+      sourceIndexContent = sourceIndexModule(bounds);
+    }
+    if (sourceIndexContent.length > maximumApprovedSourceIndexCharacters) {
+      throw new Error(`approved_source_index_too_large:${sourceIndexContent.length}`);
+    }
     const inventory = readableAnswer ? createArchitectureContentInventory(pages, plan, input) : undefined;
     return [
       { path: "src/approved-architecture.ts", content: architectureModule },
       {
         path: "src/approved-source-index.ts",
-        content: `export const approvedSourceIndex = ${JSON.stringify(
-          sourceIndex,
-          null,
-          input.retainedContentMode === "indexed-pull-preview-readable"
-            || input.retainedContentMode === "indexed-pull-preview-author-digest"
-            ? 2
-            : undefined
-        )} as const;\n`
+        content: sourceIndexContent
       },
       ...(inventory && !contentInventoryIsEmpty(inventory)
         ? [{ path: contentInventoryPath, content: contentInventoryModule(inventory) }]
@@ -729,10 +743,31 @@ function inventoryRouteKey(sourcePath: string) {
   return canonicalPathname(sourcePath).replace(/\.html?$/i, "").replace(/\/index$/i, "") || "/";
 }
 
+/** Leaves headroom under the 1,000,000-character workspace file limit. */
+export const maximumApprovedSourceIndexCharacters = 900_000;
+
+type ApprovedSourceIndexBounds = {
+  /** Inline answer distinctions kept per route; the rest are named as omitted. */
+  maxDistinctionsPerRoute?: number;
+  /** Characters per inline distinction body. */
+  distinctionCharacters?: number;
+  /** Consolidated-only sources keep path, title, and contentFiles but drop headings. */
+  omitConsolidatedHeadings?: boolean;
+};
+
+const approvedSourceIndexBoundSteps: ApprovedSourceIndexBounds[] = [
+  { maxDistinctionsPerRoute: 40 },
+  { maxDistinctionsPerRoute: 24, omitConsolidatedHeadings: true },
+  { maxDistinctionsPerRoute: 12, distinctionCharacters: 1_200, omitConsolidatedHeadings: true },
+  { maxDistinctionsPerRoute: 6, distinctionCharacters: 800, omitConsolidatedHeadings: true },
+  { maxDistinctionsPerRoute: 3, distinctionCharacters: 500, omitConsolidatedHeadings: true },
+  { maxDistinctionsPerRoute: 1, distinctionCharacters: 300, omitConsolidatedHeadings: true }
+];
+
 function createApprovedSourceIndex(
   pages: SourceSnapshotPage[],
   plan: SiteArchitecturePlan,
-  input: {
+  input: ApprovedSourceIndexBounds & {
     includePreviews?: boolean;
     authorDigest?: boolean;
     answerPacket?: boolean;
@@ -779,7 +814,9 @@ function createApprovedSourceIndex(
           : "consolidated_evidence_only" as const,
         approvedLinkPath: route.path,
         title: approved ? route.label : page.title ?? "",
-        headings: approved ? undefined : page.headings.slice(0, 24),
+        headings: approved || (input.omitConsolidatedHeadings && canonicalPathname(sourcePath) !== route.path)
+          ? undefined
+          : page.headings.slice(0, 24),
         wordCount: approved ? undefined : page.wordCount,
         sourcePageId: page.id,
         authority: approved ? "owner-approved" : undefined,
@@ -818,14 +855,23 @@ function createApprovedSourceIndex(
           })
           .slice(0, input.answerPacket ? Number.POSITIVE_INFINITY : 2)
       : undefined;
+    const distinctionLimit = input.maxDistinctionsPerRoute ?? Number.POSITIVE_INFINITY;
     const distinctions = input.answerPacket
-      ? (evidencePreviews ?? []).map((preview) => ({
-          sourcePath: preview.sourcePath,
-          sourceRouteRole: preview.sourceRouteRole,
-          approvedLinkPath: preview.approvedLinkPath,
-          body: preview.preview,
-          continuesInContentFile: (bestByPath.get(canonicalPathname(preview.sourcePath))?.extractedText.length ?? 0) > preview.preview.length + 80
-        }))
+      ? (evidencePreviews ?? []).slice(0, distinctionLimit).map((preview) => {
+          const body = input.distinctionCharacters && preview.preview.length > input.distinctionCharacters
+            ? `${preview.preview.slice(0, input.distinctionCharacters).replace(/\s+\S*$/, "")} …`
+            : preview.preview;
+          return {
+            sourcePath: preview.sourcePath,
+            sourceRouteRole: preview.sourceRouteRole,
+            approvedLinkPath: preview.approvedLinkPath,
+            body,
+            continuesInContentFile: (bestByPath.get(canonicalPathname(preview.sourcePath))?.extractedText.length ?? 0) > body.length + 80
+          };
+        })
+      : [];
+    const omittedDistinctionPaths = input.answerPacket
+      ? (evidencePreviews ?? []).slice(distinctionLimit).map((preview) => preview.sourcePath)
       : [];
     const duplicateTarget = route.sourcePaths
       .map((sourcePath) => nearDuplicates.get(canonicalPathname(sourcePath)))
@@ -864,6 +910,13 @@ function createApprovedSourceIndex(
       ...(input.answerPacket ? {
         answer: {
           distinctions,
+          ...(omittedDistinctionPaths.length ? {
+            omittedDistinctions: {
+              count: omittedDistinctionPaths.length,
+              note: "Inline excerpts were bounded for this large site. These mapped sources still belong to this route; read their contentFiles from sources when the page needs their detail.",
+              sourcePaths: omittedDistinctionPaths
+            }
+          } : {}),
           mustName: mustName.get(route.path) ?? [],
           nearDuplicateOf,
           images

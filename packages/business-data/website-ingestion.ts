@@ -55,10 +55,11 @@ export type WebsiteIngestionResult = {
 };
 
 export type SourcePreparationFactDiagnostic = {
-  kind: "hours" | "service_area";
+  kind: "hours" | "service_area" | "testimonial";
   value: unknown;
   disposition:
     | "accepted"
+    | "selection_limit"
     | "deduplication"
     | "invalid_value_filtering"
     | "conflict_suppression"
@@ -983,6 +984,34 @@ export function sourcePreparationDiagnosticsFor(
       evidenceClasses: [...candidate.classes].sort()
     });
   }
+  // Every first-party testimonial candidate that was not kept carries its reason.
+  const firstPartyPages = crawl.pageSummaries.filter((page) => evidenceClassByUrl.get(page.url) === "first_party");
+  const kept = selectObservedFirstPartyTestimonials(firstPartyPages, crawl.url, ({ candidate, reason }) => {
+    facts.push({
+      kind: "testimonial",
+      value: candidate.text.slice(0, 300),
+      disposition: reason === "duplicate" ? "deduplication" : reason === "selection_limit" ? "selection_limit" : "invalid_value_filtering",
+      reason: {
+        too_short: "The candidate had fewer than six words or 30 characters.",
+        too_long: "The candidate exceeded the 2,000-character testimonial bound.",
+        placeholder: "The candidate was template or placeholder copy.",
+        duplicate: "The same testimonial was already retained.",
+        selection_limit: "The candidate exceeded the retained testimonial limit."
+      }[reason],
+      sourceUrls: [candidate.sourceUrl],
+      evidenceClasses: ["first_party"]
+    });
+  });
+  for (const testimonial of kept) {
+    facts.push({
+      kind: "testimonial",
+      value: testimonial.text.slice(0, 300),
+      disposition: "accepted",
+      reason: "A verbatim first-party testimonial was retained.",
+      sourceUrls: [testimonial.sourceUrl],
+      evidenceClasses: ["first_party"]
+    });
+  }
   return { schemaVersion: 1, facts };
 }
 
@@ -1330,19 +1359,27 @@ type TestimonialSourcePage = Pick<CrawlPageSummary, "url" | "purposeTags" | "sou
  * the business's own structured-data reviews. Blocks rendered inside embedded
  * review-platform widgets are that platform's content and are never used.
  */
+export type SkippedTestimonial = {
+  candidate: ObservedTestimonial;
+  reason: "too_short" | "too_long" | "placeholder" | "duplicate" | "selection_limit";
+};
+
 export function selectObservedFirstPartyTestimonials(
   pages: TestimonialSourcePage[],
-  sourceUrl: string
+  sourceUrl: string,
+  onSkip?: (skipped: SkippedTestimonial) => void
 ): ObservedTestimonial[] {
   const sourceHost = new URL(sourceUrl).hostname.replace(/^www\./, "");
   const seen = new Set<string>();
   const testimonials: ObservedTestimonial[] = [];
   const accept = (candidate: ObservedTestimonial) => {
     const text = candidate.text.replace(/\s+/g, " ").trim();
-    if (canonicalWordCount(text) < 6 || text.length < 30 || text.length > maxObservedTestimonialCharacters) return;
-    if (isPlaceholderOrTemplateCopy(text)) return;
+    const skip = (reason: SkippedTestimonial["reason"]) => onSkip?.({ candidate: { ...candidate, text }, reason });
+    if (canonicalWordCount(text) < 6 || text.length < 30) return skip("too_short");
+    if (text.length > maxObservedTestimonialCharacters) return skip("too_long");
+    if (isPlaceholderOrTemplateCopy(text)) return skip("placeholder");
     const identity = normalizedText(text);
-    if (seen.has(identity)) return;
+    if (seen.has(identity)) return skip("duplicate");
     seen.add(identity);
     testimonials.push({ ...candidate, text });
   };
@@ -1372,6 +1409,7 @@ export function selectObservedFirstPartyTestimonials(
       accept({ text: review.text, sourceUrl: page.url, ...(review.author ? { author: review.author } : {}) });
     }
   }
+  for (const candidate of testimonials.slice(maxObservedTestimonials)) onSkip?.({ candidate, reason: "selection_limit" });
   return testimonials.slice(0, maxObservedTestimonials);
 }
 

@@ -424,6 +424,28 @@ const manyReviewsSummary = {
 };
 assert.equal(selectObservedFirstPartyTestimonials([manyReviewsSummary], manyReviewsSummary.url).length, 24,
   "First-party testimonials are retained up to the widened cap of 24.");
+// Every first-party testimonial candidate that is not kept records its reason
+// in source-preparation diagnostics.
+{
+  const shortAndDuplicate = {
+    ...summarizeCrawlHtml(`<!doctype html><title>Reviews</title><main><h1>Reviews</h1>
+      <blockquote>“Great job, thanks!”</blockquote>
+      ${Array.from({ length: 26 }, (_, index) => `<blockquote>“Visit ${index + 1}: the crew arrived when promised and left the whole yard exactly as they found it.”</blockquote>`).join("\n")}
+      <blockquote>“Visit 1: the crew arrived when promised and left the whole yard exactly as they found it.”</blockquote>
+    </main>`, "https://testimonial-diagnostics.example/reviews"),
+    source: "primary" as const
+  };
+  const diagnostics = sourcePreparationDiagnosticsFor(
+    { ...activeCrawlShell(shortAndDuplicate.url), pageSummaries: [shortAndDuplicate] },
+    { pages: [{ url: shortAndDuplicate.url, finalUrl: shortAndDuplicate.url, evidenceClass: "first_party", summary: shortAndDuplicate }] } as never
+  ).facts.filter((fact) => fact.kind === "testimonial");
+  const byDisposition = (disposition: string) => diagnostics.filter((fact) => fact.disposition === disposition).length;
+  assert.equal(byDisposition("accepted"), 24);
+  assert.equal(byDisposition("selection_limit"), 2, "Testimonials over the retained limit must record why they were left out.");
+  assert.equal(byDisposition("deduplication"), 1);
+  assert.equal(byDisposition("invalid_value_filtering"), 1, "A too-short testimonial must record why it was left out.");
+}
+
 const proofFacts: Parameters<typeof observedProof>[2] = [];
 const retainedProof = observedProof({
   ...activeCrawlShell(reviewSummary.url),

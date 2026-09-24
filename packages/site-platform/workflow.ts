@@ -1151,7 +1151,8 @@ export class SiteAuthoringWorkflow {
             offerings: buildInput.business.offerings
               .filter((offering) => offering.status === "confirmed" && offering.visibility === "public")
               .map((offering) => offering.name),
-            routeImages: await this.routeAnswerImages(snapshots, websitePages)
+            routeImages: await this.routeAnswerImages(snapshots, websitePages),
+            publicFacts: buildInput.publicFacts
           });
           currentFiles = mergeArchitectureEvidenceFiles(currentFiles, evidenceFiles);
           releasePlan = createArchitectureReleasePlan(preparedArchitecture.architecture.plan, {

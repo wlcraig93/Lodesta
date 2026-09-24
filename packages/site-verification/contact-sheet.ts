@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import sharp from "sharp";
+import sharp, { type OverlayOptions } from "sharp";
 import { sha256 } from "@/packages/business-data";
 import type { BrowserGateCapture } from "./browser-gate";
 
@@ -258,39 +258,46 @@ async function renderFirstViewportSheet(
 ) {
   const desktopTileWidth = 560;
   let scale = 1;
-  const cards: string[] = [];
   for (const row of rows) {
-    const desktopTop = await firstViewport(row.desktop, viewportHeights.desktop);
-    const mobileTop = await firstViewport(row.mobile, viewportHeights.mobile);
-    scale = desktopTileWidth / desktopTop.width;
-    cards.push(`<article><header>${escapeHtml(row.route)}</header><div class="pair">`
-      + `<img class="desktop" src="data:image/png;base64,${desktopTop.bytes.toString("base64")}" alt="">`
-      + `<img class="mobile" src="data:image/png;base64,${mobileTop.bytes.toString("base64")}" alt="">`
-      + `</div></article>`);
+    scale = desktopTileWidth / (await firstViewport(row.desktop, viewportHeights.desktop)).width;
   }
   const tileHeight = Math.round(viewportHeights.desktop * scale);
   const columns = rows.length > 4 ? 2 : 1;
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage({ viewport: { width: 400, height: 400 }, deviceScaleFactor: 1 });
-    await page.setContent(`<!doctype html><html><head><style>
-      *{box-sizing:border-box}
-      body{margin:0;padding:12px;width:max-content;background:#d7d9dc;color:#17191c;font:700 18px Arial,sans-serif}
-      main{display:grid;grid-template-columns:repeat(${columns},max-content);gap:12px;align-items:start}
-      article{background:#fff;border:1px solid #aeb2b7;padding:0 8px 8px}
-      header{padding:6px 0}
-      .pair{display:flex;gap:10px;align-items:flex-start}
-      .desktop{display:block;width:${desktopTileWidth}px;height:auto}
-      .mobile{display:block;height:${tileHeight}px;width:auto}
-    </style></head><body><main>${cards.join("")}</main></body></html>`, { waitUntil: "load" });
-    await page.waitForFunction(() => [...document.images].every((image) => image.complete && image.naturalWidth > 0));
-    return {
-      bytes: Buffer.from(await page.screenshot({ fullPage: true, type: "png" })),
-      scale
-    };
-  } finally {
-    await browser.close();
+  // Composed with sharp (no browser) so inspection sheets render anywhere the
+  // release gate's image tooling runs.
+  const pad = 12, gap = 12, cardPad = 8, header = 30, pairGap = 10;
+  const tiles = [];
+  for (const row of rows) {
+    const desktopTop = await firstViewport(row.desktop, viewportHeights.desktop);
+    const desktop = await sharp(desktopTop.bytes).resize({ width: desktopTileWidth }).png().toBuffer();
+    const desktopHeight = (await sharp(desktop).metadata()).height!;
+    const mobileTop = await firstViewport(row.mobile, viewportHeights.mobile);
+    const mobile = await sharp(mobileTop.bytes).resize({ height: tileHeight }).png().toBuffer();
+    const mobileWidth = (await sharp(mobile).metadata()).width!;
+    tiles.push({ route: row.route, desktop, desktopHeight, mobile, mobileWidth });
   }
+  const cardWidth = Math.max(...tiles.map((tile) => cardPad * 2 + desktopTileWidth + pairGap + tile.mobileWidth));
+  const cardHeight = Math.max(...tiles.map((tile) => header + Math.max(tile.desktopHeight, tileHeight) + cardPad));
+  const rowsOfCards = Math.ceil(tiles.length / columns);
+  const width = pad * 2 + columns * cardWidth + (columns - 1) * gap;
+  const height = pad * 2 + rowsOfCards * cardHeight + (rowsOfCards - 1) * gap;
+  const composites: OverlayOptions[] = [];
+  tiles.forEach((tile, index) => {
+    const left = pad + (index % columns) * (cardWidth + gap);
+    const top = pad + Math.floor(index / columns) * (cardHeight + gap);
+    composites.push({
+      input: Buffer.from(`<svg width="${cardWidth}" height="${cardHeight}"><rect x="0.5" y="0.5" width="${cardWidth - 1}" height="${cardHeight - 1}" fill="#ffffff" stroke="#aeb2b7"/><text x="${cardPad}" y="21" font-family="Arial, sans-serif" font-weight="700" font-size="18" fill="#17191c">${escapeHtml(tile.route)}</text></svg>`),
+      left,
+      top
+    });
+    composites.push({ input: tile.desktop, left: left + cardPad, top: top + header });
+    composites.push({ input: tile.mobile, left: left + cardPad + desktopTileWidth + pairGap, top: top + header });
+  });
+  const bytes = await sharp({ create: { width, height, channels: 3, background: "#d7d9dc" } })
+    .composite(composites)
+    .png()
+    .toBuffer();
+  return { bytes, scale };
 }
 
 async function firstViewport(bytes: Buffer, viewportHeight: number) {

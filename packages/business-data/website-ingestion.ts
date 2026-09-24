@@ -25,8 +25,11 @@ import { canonicalWeeklySchedule } from "./weekly-schedule";
 import {
   firstPartySupportFromCrawlPages,
   isDatedOrPromotionalText,
+  reconcileFirstPartyValues,
   sensitiveFirstPartyTopics,
-  supportedOnCurrentCorePage
+  supportedOnCurrentCorePage,
+  type FirstPartyPageEvidence,
+  type FirstPartySupport
 } from "./first-party-support";
 import { sha256, stableJson } from "./hash";
 import { crawlWebsiteForGeneration, type EvidenceClass, type WebsiteGenerationIngestion } from "./generation-crawler";
@@ -223,9 +226,28 @@ export async function ingestWebsite(input: {
   const displayedPhones = selectDisplayedFirstPartyPhones(
     crawl.pageSummaries.filter((page) => firstPartyPageUrls.has(page.url) && sourceFactPageEligible(page, sourceUrl))
   );
+  const factPages = crawl.pageSummaries.filter((page) => firstPartyPageUrls.has(page.url) && sourceFactPageEligible(page, sourceUrl));
+  const lastModifiedByUrl = new Map(generationIngestion.pages.flatMap((page) => page.sitemapLastModified
+    ? [[page.url, page.sitemapLastModified] as const, [(page.summary as CrawlPageSummary | undefined)?.url ?? page.url, page.sitemapLastModified] as const]
+    : []));
+  const contactReconciliation = reconcileFirstPartyContactFields(factPages, firstPartySupportFromCrawlPages(factPages, lastModifiedByUrl));
+  const reconciledLocation = contactReconciliation.address.winner
+    ? contactReconciliation.address.winner.value
+    : contactReconciliation.address.conflicts.length ? undefined : scopedContactAndLocation.address;
   const facts = {
     ...crawl.extractedFacts,
-    ...scopedContactAndLocation
+    ...scopedContactAndLocation,
+    description: contactReconciliation.description.winner?.value
+      ?? (contactReconciliation.description.conflicts.length ? undefined : crawl.extractedFacts.description),
+    email: contactReconciliation.email.winner?.value
+      ?? (contactReconciliation.email.conflicts.length ? undefined : scopedContactAndLocation.email),
+    address: reconciledLocation,
+    // Coordinates belong to the page whose address won.
+    geo: reconciledLocation && sameValue(formatAddress(reconciledLocation), formatAddress(scopedContactAndLocation.address))
+      ? scopedContactAndLocation.geo
+      : undefined,
+    hours: contactReconciliation.hours.winner?.value
+      ?? (contactReconciliation.hours.conflicts.length ? undefined : scopedContactAndLocation.hours)
   };
   // An unselected page title or hostname is not an observed business name.
   const crawlName = clean(crawl.extractedFacts.name);
@@ -310,7 +332,26 @@ export async function ingestWebsite(input: {
     sourceUrl,
     evidenceClass: "first_party"
   })!;
-  addFact("description", "Business description", clean(facts.description), 0.7, sameValue(facts.description, crawl.extractedFacts.description));
+  // Any verbatim first-party value may publish. Conflicting values are
+  // reconciled by prominence and recency; the losers (or every value, when
+  // the top candidates tie) are recorded for owner review and not published.
+  const firstPartyEvidence = (evidence: readonly FirstPartyPageEvidence[]) => ({
+    sourceUrl: evidence.find((page) => !page.injected)?.url ?? sourceUrl,
+    evidenceClass: "first_party" as const
+  });
+  const recordConflicts = <T>(
+    kind: BusinessFact["kind"],
+    label: string,
+    conflicts: Array<{ value: T; evidence: readonly FirstPartyPageEvidence[] }>,
+    display: (value: T) => unknown
+  ) => {
+    for (const conflict of conflicts) {
+      addFact(kind, `Conflicting ${label.toLowerCase()} (owner review; not published)`, display(conflict.value), 0.5, false, firstPartyEvidence(conflict.evidence));
+    }
+  };
+  addFact("description", "Business description", clean(facts.description), 0.7, Boolean(contactReconciliation.description.winner)
+    || sameValue(facts.description, crawl.extractedFacts.description));
+  recordConflicts("description", "Business description", contactReconciliation.description.conflicts, clean);
   const phoneFactId = addFact(
     "phone",
     "Phone",
@@ -335,17 +376,22 @@ export async function ingestWebsite(input: {
     "Email",
     clean(facts.email),
     0.78,
-    sameValue(facts.email, crawl.extractedFacts.email) || sameValue(facts.email, retainedContacts.email)
+    Boolean(contactReconciliation.email.winner)
+      || sameValue(facts.email, crawl.extractedFacts.email) || sameValue(facts.email, retainedContacts.email)
   );
+  recordConflicts("email", "Email", contactReconciliation.email.conflicts, clean);
   const addressText = formatAddress(facts.address);
-  const addressFactId = addFact("address", "Address", addressText, 0.8, sameValue(addressText, formatAddress(crawl.extractedFacts.address)));
+  const addressFactId = addFact("address", "Address", addressText, 0.8, Boolean(contactReconciliation.address.winner)
+    || sameValue(addressText, formatAddress(crawl.extractedFacts.address)));
+  recordConflicts("address", "Address", contactReconciliation.address.conflicts, formatAddress);
   const hoursFactId = addFact(
     "hours",
     "Hours",
     facts.hours && Object.keys(facts.hours).length ? facts.hours : undefined,
     0.75,
-    sameValue(facts.hours, crawl.extractedFacts.hours)
+    Boolean(contactReconciliation.hours.winner) || sameValue(facts.hours, crawl.extractedFacts.hours)
   );
+  recordConflicts("hours", "Hours", contactReconciliation.hours.conflicts, (value) => value);
 
   const crawlServiceAreas = verifiedServiceAreas(crawl, generationIngestion);
   const offerings: BusinessOffering[] = selectSourceOfferingFacts(
@@ -1573,22 +1619,85 @@ export function assertSourceSuitableForGeneration(
     .filter((page) => page.source === "primary" && firstPartyUrls.has(page.url))
     .flatMap((page) => [page.title ?? "", page.metaDescription ?? "", ...page.sourceTextBlocks.map((block) => block.displayText)])
     .join("\n");
+  // Closure wording stays a hard stop for operator review. A parked
+  // for-sale domain is not a business source. Field-level problems
+  // (contradictory hours, "website coming soon" notices) no longer reject the
+  // whole source: contact reconciliation withholds only the affected field.
   const closed = /\b(?:permanently closed|temporarily closed until further notice|no longer (?:open|operating|in business)|ceased operations|closed (?:our|its) doors|business has closed|location is permanently closed)\b/i.test(primaryFirstPartyText);
-  const parked = /\b(?:this domain is for sale|buy this domain|domain may be for sale|website is coming soon)\b/i.test(primaryFirstPartyText);
-  const contradictory = hasContradictoryFirstPartyLocationHours(crawl, firstPartyUrls);
+  const parked = /\b(?:this domain is for sale|buy this domain|domain may be for sale)\b/i.test(primaryFirstPartyText);
   const ambiguousLocationIndex = isAmbiguousLocationIndex(crawl, ingestion);
-  if (closed || parked || contradictory || ambiguousLocationIndex) {
+  if (closed || parked || ambiguousLocationIndex) {
     throw new WebsiteCrawlError(
       "source_unsuitable",
       closed
-        ? "The first-party source indicates that the business or location is closed."
+        ? "The first-party source indicates that the business or location is closed. An operator must review it before generation."
         : parked
-          ? "The supplied address is a parked or placeholder website rather than an active first-party business source."
-          : contradictory
-            ? "The first-party source gives contradictory hours for the same named street address."
-            : "The supplied URL is a multi-location directory. Use a specific first-party location URL or explicitly create a corporate multi-location project."
+          ? "The supplied address is a parked domain for sale rather than an active first-party business source."
+          : "The supplied URL is a multi-location directory. Use a specific first-party location URL or explicitly create a corporate multi-location project."
     );
   }
+}
+
+type ReconciledField<T> = ReturnType<typeof reconcileFirstPartyValues<T>>;
+
+/**
+ * Per-field reconciliation of verbatim first-party contact values across the
+ * business's own pages: header/contact/homepage beats another core page body,
+ * which beats blog or archive pages; recency then breaks ties.
+ */
+export function reconcileFirstPartyContactFields(
+  pages: ReadonlyArray<Pick<CrawlPageSummary, "url" | "title" | "purposeTags" | "sourceTextBlocks" | "linkReferences" | "extractedFacts">>,
+  support: FirstPartySupport
+): {
+  description: ReconciledField<string>;
+  email: ReconciledField<string>;
+  address: ReconciledField<NonNullable<ExtractedBusinessFacts["address"]>>;
+  hours: ReconciledField<Record<string, string>>;
+} {
+  const evidenceByUrl = new Map(support.pages.map((page) => [page.url, page]));
+  const corePageCount = support.pages.filter((page) => page.core && !page.injected).length;
+  const candidates = <T>(value: (page: (typeof pages)[number]) => T | undefined) => pages.flatMap((page) => {
+    const candidate = value(page);
+    const evidence = evidenceByUrl.get(page.url);
+    return candidate === undefined || !evidence ? [] : [{ value: candidate, evidence: [evidence] }];
+  });
+  const text = (value: unknown) => clean(value);
+  return {
+    description: reconcileFirstPartyValues({
+      candidates: candidates((page) => text(page.extractedFacts.description)),
+      same: (left, right) => normalizedText(left) === normalizedText(right),
+      corePageCount
+    }),
+    email: reconcileFirstPartyValues({
+      candidates: candidates((page) => text(page.extractedFacts.email)?.toLowerCase()),
+      same: (left, right) => left === right,
+      corePageCount
+    }),
+    address: reconcileFirstPartyValues({
+      candidates: candidates((page) => formatAddress(page.extractedFacts.address) ? page.extractedFacts.address : undefined),
+      same: (left, right) => normalizedText(formatAddress(left) ?? "") === normalizedText(formatAddress(right) ?? ""),
+      corePageCount
+    }),
+    hours: reconcileFirstPartyValues({
+      // The most complete statement of an agreeing schedule represents it.
+      candidates: candidates((page) => page.extractedFacts.hours && Object.keys(page.extractedFacts.hours).length ? page.extractedFacts.hours : undefined)
+        .sort((left, right) => (canonicalWeeklySchedule(right.value)?.size ?? 0) - (canonicalWeeklySchedule(left.value)?.size ?? 0)),
+      same: sameWeeklyHours,
+      corePageCount
+    })
+  };
+}
+
+/** Two extracted schedules agree when every day both state has the same canonical hours. */
+function sameWeeklyHours(left: Record<string, string>, right: Record<string, string>) {
+  const leftSchedule = canonicalWeeklySchedule(left);
+  const rightSchedule = canonicalWeeklySchedule(right);
+  if (!leftSchedule || !rightSchedule) return stableJson(left) === stableJson(right);
+  for (const [day, value] of leftSchedule) {
+    const other = rightSchedule.get(day);
+    if (other !== undefined && other !== value) return false;
+  }
+  return true;
 }
 
 function isAmbiguousLocationIndex(crawl: CrawlAssessment, ingestion: WebsiteGenerationIngestion) {
@@ -1617,32 +1726,6 @@ function isAmbiguousLocationIndex(crawl: CrawlAssessment, ingestion: WebsiteGene
   return childLocations.size >= 2;
 }
 
-export function hasContradictoryFirstPartyLocationHours(
-  crawl: CrawlAssessment,
-  firstPartyUrls = new Set(crawl.pageSummaries.map((page) => page.url))
-) {
-  // Compare canonical per-day schedules, not display strings: "Mon-Fri 8am-5pm"
-  // and "Monday: 8:00 AM - 5:00 PM" are the same hours. Only a day that two
-  // pages give different canonical times (or open vs closed) is contradictory;
-  // a page that omits a day is incomplete, not contradictory.
-  const scheduleByAddress = new Map<string, Map<string, string>>();
-  for (const page of crawl.pageSummaries) {
-    if (!firstPartyUrls.has(page.url)) continue;
-    const address = normalizedText(formatAddress(page.extractedFacts.address) ?? "");
-    const hours = page.extractedFacts.hours;
-    if (!address || !hours || !Object.keys(hours).length) continue;
-    const schedule = canonicalWeeklySchedule(hours);
-    if (!schedule) continue;
-    const known = scheduleByAddress.get(address) ?? new Map<string, string>();
-    for (const [day, value] of schedule) {
-      const existing = known.get(day);
-      if (existing !== undefined && existing !== value) return true;
-      known.set(day, value);
-    }
-    scheduleByAddress.set(address, known);
-  }
-  return false;
-}
 
 function isAccountLevelSocialProfile(value: string) {
   try {

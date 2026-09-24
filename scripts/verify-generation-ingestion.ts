@@ -23,11 +23,12 @@ import {
   robotsAllows
 } from "../packages/business-data/robots-policy";
 import { PublicFetchUrlError } from "../lib/url-safety";
+import { firstPartySupportFromCrawlPages } from "../packages/business-data/first-party-support";
 import { isLikelyInjectedSpamSourcePage, isMalformedSourceLinkPath } from "../packages/business-data/source-page-classification";
 import {
   assertSourceSuitableForGeneration,
   createLooseWebsiteBootstrap,
-  hasContradictoryFirstPartyLocationHours,
+  reconcileFirstPartyContactFields,
   ingestWebsite,
   observedProof,
   retainedContactConsensus,
@@ -510,6 +511,47 @@ const intakeTransport = {
     return html === undefined ? response("missing", 404, "text/plain") : response(html, 200);
   }) as typeof fetch
 };
+
+// Field-level withholding and contact reconciliation: a "coming soon" notice
+// and contradictory hours no longer reject the source; the contact page's
+// email beats a stale blog address (recorded for owner review), and equally
+// prominent contradictory hours are withheld with both values recorded.
+{
+  const reconcileOrigin = "https://reconcile-contacts.example";
+  const address = "<p>1200 Canyon Road, Boise, ID 83702</p>";
+  const documents = new Map<string, string>([
+    ["/", pageHtml("Canyon Glass Repair", ["/contact", "/blog/2017-update"], "", `</p><p>Our new website is coming soon! Until then, call or email us.</p>${address}<p>Mon-Fri 8am-5pm</p><a href="mailto:office@reconcile-contacts.example">office@reconcile-contacts.example</a><p>`)],
+    ["/contact", pageHtml("Contact Canyon Glass Repair", [], "", `</p>${address}<p>Mon-Fri 9am-6pm</p><a href="mailto:office@reconcile-contacts.example">office@reconcile-contacts.example</a><p>`)],
+    ["/blog/2017-update", pageHtml("2017 shop update", [], "", `</p><a href="mailto:old-shop@reconcile-contacts.example">old-shop@reconcile-contacts.example</a><p>`)]
+  ]);
+  const reconciled = await ingestWebsite({
+    url: `${reconcileOrigin}/`,
+    now: "2026-09-24T00:00:00.000Z",
+    crawlTransport: {
+      validateUrl: async (value: string) => new URL(value).href,
+      sleep: async () => undefined,
+      browserFetch: async () => { throw new Error("browser rendering is not part of this fixture"); },
+      fetchImpl: (async (input: string | URL | Request) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+        if (url.pathname === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+        const html = documents.get(url.pathname);
+        return html === undefined ? response("missing", 404, "text/plain") : response(html, 200);
+      }) as typeof fetch
+    }
+  });
+  const emails = reconciled.state.facts.filter((fact) => fact.kind === "email");
+  assert.deepEqual(emails.filter((fact) => fact.publicEligible).map((fact) => fact.value), ["office@reconcile-contacts.example"],
+    "The prominent first-party email did not publish.");
+  const staleEmail = emails.find((fact) => fact.value === "old-shop@reconcile-contacts.example");
+  assert.equal(staleEmail?.publicEligible, false, "A less prominent conflicting email was published.");
+  assert.match(staleEmail?.label ?? "", /Conflicting email \(owner review; not published\)/);
+  const hoursFacts = reconciled.state.facts.filter((fact) => fact.kind === "hours");
+  assert.equal(hoursFacts.some((fact) => fact.publicEligible), false, "Equally prominent contradictory hours were published.");
+  assert.equal(hoursFacts.filter((fact) => /Conflicting hours/.test(fact.label)).length, 2,
+    "Both contradictory hours values must be recorded for owner review.");
+  assert.equal(reconciled.state.locations[0]?.hours, undefined);
+}
+
 const intake = await ingestWebsite({ url: `${intakeOrigin}/`, now: "2026-09-23T00:00:00.000Z", crawlTransport: intakeTransport });
 assert.equal(intake.state.identity.name, "A & T Well and Pump",
   "A homepage service headline displaced the business's own LocalBusiness name.");
@@ -1169,13 +1211,24 @@ assert.equal(isLikelyInjectedSpamSourcePage({ path: "/residential/bed-bugs", tit
   const different = hoursPage("/about", "<p>Mon-Fri 9am-6pm</p>");
   assert.ok(compact.extractedFacts.hours && longForm.extractedFacts.hours && different.extractedFacts.hours,
     "The hours fixture did not extract visible hours.");
-  const hoursCrawl = (pages: typeof compact[]) => ({ ...activeCrawlShell(`${hoursOrigin}/`), pageSummaries: pages });
-  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([compact, longForm])), false,
-    "Equivalent hours in different display formats were rejected as contradictory.");
-  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([compact, different])), true,
-    "Genuinely different hours for the same address were not flagged.");
-  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([longForm, hoursPage("/visit", "<p>Saturday: 9am-1pm</p>")])), true,
-    "Closed versus open on the same day was not flagged.");
+  const reconcileHours = (pages: typeof compact[]) => reconcileFirstPartyContactFields(pages,
+    firstPartySupportFromCrawlPages(pages)).hours;
+  const equivalent = reconcileHours([compact, longForm]);
+  assert.ok(equivalent.winner && !equivalent.conflicts.length,
+    "Equivalent hours in different display formats were treated as conflicting.");
+  // Homepage versus a core service page: the more prominent homepage wins and
+  // the other value is recorded as a conflict, not published.
+  const differing = reconcileHours([compact, different]);
+  assert.equal(differing.winner?.evidence[0]?.path, "/", "The homepage's hours did not win over a less prominent page.");
+  assert.equal(differing.conflicts.length, 1);
+  // Homepage and contact page are equally prominent: a same-day conflict
+  // withholds hours and records both values for owner review.
+  const contactConflict = hoursPage("/contact", "<p>Mon-Fri 9am-6pm</p>");
+  const tied = reconcileHours([compact, contactConflict]);
+  assert.equal(tied.winner, undefined, "Equally prominent contradictory hours were published.");
+  assert.equal(tied.conflicts.length, 2);
+  assert.ok(reconcileHours([longForm, hoursPage("/visit", "<p>Saturday: 9am-1pm</p>")]).conflicts.length > 0,
+    "Closed versus open on the same day was not recorded as a conflict.");
 }
 
 // A text block over the size cap is split into verbatim sentence-aligned

@@ -57,10 +57,10 @@ import {
 import {
   normalizeSiteArchitecturePlan,
   siteArchitectureModelId,
-  siteArchitectureOutputJsonSchema,
+  siteArchitectureContextWindowShare,
+  siteArchitectureMaxOutputTokens,
+  siteArchitecturePlannerRequest,
   siteArchitecturePromptIdentityFor,
-  siteArchitectureSystemPromptFor,
-  siteArchitectureUserPrompt,
   validateSiteArchitecturePlan,
   type RawSiteArchitecturePlan,
   type SiteArchitectureAuthorityContext,
@@ -697,16 +697,33 @@ export class WebsiteManagerAgent {
     const providerCapability = await establishProviderAuthoringCapabilities(route.apiProvider, route.modelId, {
       loadOpenRouterCatalog: this.openRouterCatalogLoader
     });
+    const request = siteArchitecturePlannerRequest({
+      inventory: input.inventory,
+      authorityContext: input.authorityContext,
+      architectureMode: input.architectureMode
+    });
+    // Refuse before spend: the estimate is conservative, and the output
+    // allowance must still fit beside the input inside the provider window.
+    const inputLimit = Math.floor(providerCapability.descriptor.contextWindowTokens * siteArchitectureContextWindowShare)
+      - siteArchitectureMaxOutputTokens;
+    if (request.estimatedInputTokens > inputLimit) {
+      throw new SiteAuthoringTerminalError(
+        "context_capacity_exhausted",
+        "provider",
+        false,
+        `context_capacity_exhausted:site_architecture_request_too_large:estimatedInputTokens=${request.estimatedInputTokens}:limit=${inputLimit}:sourcePaths=${input.inventory.length}`
+      );
+    }
     const result = await structuredResponse({
       client: this.injectedClient ?? configuredResponsesClient(providerCapability.descriptor),
       route,
       providerCapabilities: providerCapability.descriptor,
       name: "exhaustive_site_architecture",
-      schema: siteArchitectureOutputJsonSchema(input.inventory),
-      system: siteArchitectureSystemPromptFor(input.architectureMode),
-      content: [{ type: "input_text", text: siteArchitectureUserPrompt(input.inventory, input.authorityContext) }],
+      schema: request.schema,
+      system: request.system,
+      content: [{ type: "input_text", text: request.user }],
       signal: input.signal,
-      maxOutputTokens: 100_000,
+      maxOutputTokens: siteArchitectureMaxOutputTokens,
       reasoningEffort: "high"
     });
     const normalizationFindings: string[] = [];
@@ -724,6 +741,11 @@ export class WebsiteManagerAgent {
       plan,
       validation,
       normalizationFindings,
+      plannerRequest: {
+        estimatedInputTokens: request.estimatedInputTokens,
+        requestCharacters: request.requestCharacters,
+        ...(request.ledger ? { ledger: request.ledger } : {})
+      },
       usage: result.usage,
       apiProvider: route.apiProvider,
       modelId: route.modelId,

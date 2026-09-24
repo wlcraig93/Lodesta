@@ -10,7 +10,12 @@ import {
 import type { WorkspaceSourceFile } from "./contracts";
 import { sourceWorkspaceContentFilePaths } from "./source-workspace";
 import { normalizeSiteRedirectPath } from "@/packages/platform-operations/contracts";
-import { isLegalSourcePagePath, isLikelyInjectedSpamSourcePage, isMalformedSourceLinkPath } from "@/packages/business-data/source-page-classification";
+import {
+  classifySourcePagePath,
+  isLegalSourcePagePath,
+  isLikelyInjectedSpamSourcePage,
+  isMalformedSourceLinkPath
+} from "@/packages/business-data/source-page-classification";
 import type { ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
 import { containsGatedBusinessClaim } from "./claim-gates";
 import {
@@ -253,13 +258,223 @@ export function siteArchitectureInventoryHash(inventory: SiteArchitectureInvento
 
 export function siteArchitectureUserPrompt(
   inventory: SiteArchitectureInventoryEntry[],
-  authority?: SiteArchitectureAuthorityContext
+  authority?: SiteArchitectureAuthorityContext,
+  bounds?: SiteArchitecturePlannerBounds
 ) {
   const authoritySection = authority
     ? `Owner authority (the allowed business and geographic scope):\n${JSON.stringify(authority)}\n\n`
     : "";
-  const plannerInventory = inventory.map(({ evidencePreview: _evidencePreview, ...entry }) => entry);
-  return `${authoritySection}Produce the complete explicit architecture for this ${inventory.length}-path source inventory. sourceText is the crawled page and sourcePhotoCount is the number of photographs captured on that URL. Before responding, verify internally that every source path appears exactly once and every non-null target is present in the explicit route list.\n\n${JSON.stringify(plannerInventory)}`;
+  if (!bounds) {
+    const plannerInventory = inventory.map(({ evidencePreview: _evidencePreview, ...entry }) => entry);
+    return `${authoritySection}Produce the complete explicit architecture for this ${inventory.length}-path source inventory. sourceText is the crawled page and sourcePhotoCount is the number of photographs captured on that URL. Before responding, verify internally that every source path appears exactly once and every non-null target is present in the explicit route list.\n\n${JSON.stringify(plannerInventory)}`;
+  }
+  const bounded = boundedPlannerInventory(inventory, bounds);
+  return `${authoritySection}Produce the complete explicit architecture for this ${inventory.length}-path source inventory. sourceText is the crawled page and sourcePhotoCount is the number of photographs captured on that URL.
+
+This source is large, so the inventory is bounded. Records without a summarized field carry the page's evidence; a record's sourceText ending in "…" was shortened to fit. Records with a summarized field carry only path, title, wordCount, sourcePhotoCount, statuses, and duplicate hints, and name why: "family:<prefix>" means it is one of many sibling pages under that prefix, and the family's representative siblings keep their evidence as ordinary records; "mechanical_archive" is a CMS category, tag, author, pagination, or feed listing; "no_content" never yielded page text; "text_budget" did not fit the evidence budget. A summarized record is still a source path. Give it a disposition exactly like every other path. The omission ledger below counts every summarized record.
+
+Before responding, verify internally that every source path appears exactly once and every non-null target is present in the explicit route list.
+
+Omission ledger:
+${JSON.stringify(bounded.ledger)}
+
+${JSON.stringify(bounded.records)}`;
+}
+
+/**
+ * Bounds on the planner's view of a large inventory. The disposition schema
+ * and validation always use the complete inventory, so bounding changes what
+ * evidence the planner reads, never which paths it must account for.
+ */
+export type SiteArchitecturePlannerBounds = {
+  /** Total sourceText characters shared by the non-summarized records. */
+  sourceTextBudget: number;
+};
+
+export type SiteArchitecturePlannerLedger = {
+  sourcePaths: number;
+  evidencePaths: number;
+  shortenedEvidencePaths: number;
+  summarizedPaths: number;
+  summarizedBy: Record<string, number>;
+  sourceTextBudget: number;
+};
+
+/** Conservative characters-per-token estimate for JSON-heavy planner input. */
+const plannerCharactersPerToken = 3;
+/** The planner's structured output allowance; reserved inside the context window. */
+export const siteArchitectureMaxOutputTokens = 100_000;
+/** Large inventories are summarized, step by step, until the request fits this estimate. */
+export const siteArchitectureTargetInputTokens = 400_000;
+/** The request is refused before spend if its estimate plus output exceeds this share of the window. */
+export const siteArchitectureContextWindowShare = 0.8;
+/** Sibling pages under one parent path that make a long-tail family. */
+const plannerFamilyThreshold = 12;
+/** Representatives per family that keep their evidence. */
+const plannerFamilyRepresentatives = 2;
+/** Evidence each non-summarized record is guaranteed before priority pages extend theirs. */
+const plannerSourceTextFloor = 1_200;
+const plannerBoundSteps: Array<SiteArchitecturePlannerBounds | undefined> = [
+  undefined,
+  { sourceTextBudget: 1_200_000 },
+  { sourceTextBudget: 600_000 },
+  { sourceTextBudget: 300_000 },
+  { sourceTextBudget: 120_000 },
+  { sourceTextBudget: 0 }
+];
+
+export type SiteArchitecturePlannerRequest = {
+  system: string;
+  user: string;
+  schema: ReturnType<typeof siteArchitectureOutputJsonSchema>;
+  bounds?: SiteArchitecturePlannerBounds;
+  ledger?: SiteArchitecturePlannerLedger;
+  requestCharacters: number;
+  estimatedInputTokens: number;
+};
+
+/**
+ * Builds the single planner request, summarizing lower-priority evidence only
+ * as far as needed to fit the target size. Small inventories keep the
+ * complete unbounded record. The result carries a conservative token estimate
+ * so the caller can refuse an oversized request before any spend.
+ */
+export function siteArchitecturePlannerRequest(input: {
+  inventory: SiteArchitectureInventoryEntry[];
+  authorityContext?: SiteArchitectureAuthorityContext;
+  architectureMode?: SiteArchitectureMode;
+  targetInputTokens?: number;
+}): SiteArchitecturePlannerRequest {
+  const system = siteArchitectureSystemPromptFor(input.architectureMode);
+  const schema = siteArchitectureOutputJsonSchema(input.inventory);
+  const fixedCharacters = system.length + JSON.stringify(schema).length;
+  const target = input.targetInputTokens ?? siteArchitectureTargetInputTokens;
+  let request: SiteArchitecturePlannerRequest | undefined;
+  for (const bounds of plannerBoundSteps) {
+    const user = siteArchitectureUserPrompt(input.inventory, input.authorityContext, bounds);
+    const requestCharacters = fixedCharacters + user.length;
+    request = {
+      system,
+      user,
+      schema,
+      bounds,
+      ledger: bounds ? boundedPlannerInventory(input.inventory, bounds).ledger : undefined,
+      requestCharacters,
+      estimatedInputTokens: estimatePlannerTokens(requestCharacters)
+    };
+    if (request.estimatedInputTokens <= target) break;
+  }
+  return request!;
+}
+
+export function estimatePlannerTokens(characters: number) {
+  return Math.ceil(characters / plannerCharactersPerToken);
+}
+
+type PlannerSummaryReason = `family:${string}` | "mechanical_archive" | "no_content" | "text_budget";
+
+function boundedPlannerInventory(inventory: SiteArchitectureInventoryEntry[], bounds: SiteArchitecturePlannerBounds) {
+  const summarized = new Map<string, PlannerSummaryReason>();
+  for (const entry of inventory) {
+    if (isPreservableLegalSourcePath(entry.path) || entry.path === "/") continue;
+    if (!entry.outcomes.includes("fetched") || entry.wordCount === 0 || !entry.sourceText) {
+      summarized.set(entry.path, "no_content");
+    } else if (classifySourcePagePath(entry.path) === "mechanical_archive") {
+      summarized.set(entry.path, "mechanical_archive");
+    }
+  }
+  // Many sibling pages under one parent (city-by-service grids, post
+  // archives) are one planning decision. Keep a few representatives' evidence
+  // and list the rest compactly so the family cannot crowd out core pages.
+  const families = new Map<string, SiteArchitectureInventoryEntry[]>();
+  for (const entry of inventory) {
+    if (summarized.has(entry.path) || isPreservableLegalSourcePath(entry.path)) continue;
+    const segments = entry.path.split("/").filter(Boolean);
+    if (segments.length < 2) continue;
+    const prefix = `/${segments.slice(0, -1).join("/")}/`;
+    families.set(prefix, [...(families.get(prefix) ?? []), entry]);
+  }
+  for (const [prefix, members] of families) {
+    if (members.length < plannerFamilyThreshold) continue;
+    const representatives = new Set([...members]
+      .sort((left, right) => right.linkProminence - left.linkProminence
+        || right.wordCount - left.wordCount
+        || left.path.localeCompare(right.path))
+      .slice(0, plannerFamilyRepresentatives)
+      .map((entry) => entry.path));
+    for (const member of members) {
+      if (!representatives.has(member.path)) summarized.set(member.path, `family:${prefix}`);
+    }
+  }
+
+  // Remaining pages share the evidence budget: each is guaranteed a floor,
+  // then the highest-priority pages extend toward the ordinary per-page cap.
+  const evidence = inventory
+    .filter((entry) => !summarized.has(entry.path))
+    .sort((left, right) => plannerPriority(right) - plannerPriority(left)
+      || right.linkProminence - left.linkProminence
+      || routeDepth(left.path) - routeDepth(right.path)
+      || right.wordCount - left.wordCount
+      || left.path.localeCompare(right.path));
+  const floor = evidence.length
+    ? Math.min(plannerSourceTextFloor, Math.floor(bounds.sourceTextBudget / 2 / evidence.length))
+    : 0;
+  const allotment = new Map(evidence.map((entry) => [entry.path, Math.min(entry.sourceText.length, floor)]));
+  let remaining = bounds.sourceTextBudget - [...allotment.values()].reduce((total, value) => total + value, 0);
+  for (const entry of evidence) {
+    if (remaining <= 0) break;
+    const extra = Math.min(entry.sourceText.length - allotment.get(entry.path)!, remaining);
+    allotment.set(entry.path, allotment.get(entry.path)! + extra);
+    remaining -= extra;
+  }
+  for (const entry of evidence) {
+    if (allotment.get(entry.path)! === 0 && entry.sourceText) summarized.set(entry.path, "text_budget");
+  }
+
+  let shortenedEvidencePaths = 0;
+  const records = inventory.map((entry) => {
+    const reason = summarized.get(entry.path);
+    if (reason) {
+      return {
+        path: entry.path,
+        title: entry.title,
+        wordCount: entry.wordCount,
+        sourcePhotoCount: entry.sourcePhotoCount,
+        statuses: entry.statuses,
+        exactDuplicateOf: entry.exactDuplicateOf,
+        nearDuplicateOf: entry.nearDuplicateOf,
+        summarized: reason
+      };
+    }
+    const { evidencePreview: _evidencePreview, ...record } = entry;
+    const allowed = allotment.get(entry.path) ?? 0;
+    if (allowed >= entry.sourceText.length) return { ...record, headings: entry.headings.slice(0, 12) };
+    shortenedEvidencePaths += 1;
+    return {
+      ...record,
+      headings: entry.headings.slice(0, 12),
+      sourceText: `${truncatePreviewLine(entry.sourceText, allowed)}…`
+    };
+  });
+  const summarizedBy: Record<string, number> = {};
+  for (const reason of summarized.values()) summarizedBy[reason] = (summarizedBy[reason] ?? 0) + 1;
+  return {
+    records,
+    ledger: {
+      sourcePaths: inventory.length,
+      evidencePaths: inventory.length - summarized.size,
+      shortenedEvidencePaths,
+      summarizedPaths: summarized.size,
+      summarizedBy,
+      sourceTextBudget: bounds.sourceTextBudget
+    } satisfies SiteArchitecturePlannerLedger
+  };
+}
+
+/** Home and preserved legal documents always keep evidence first. */
+function plannerPriority(entry: SiteArchitectureInventoryEntry) {
+  if (entry.path === "/") return 2;
+  return isPreservableLegalSourcePath(entry.path) ? 1 : 0;
 }
 
 export function siteArchitectureOutputJsonSchema(inventory: SiteArchitectureInventoryEntry[]) {
@@ -343,6 +558,21 @@ export function normalizeSiteArchitecturePlan(
     sourcePath: path,
     ...raw.sourceDispositions[path]
   }));
+  // "Preserved" is the explicit URL decision: the source stays live at its
+  // exact path. A preserved record that also names a different target
+  // contradicts itself. Keep the more conservative reading, the source URL
+  // stays live and no public URL is lost, and record the target the plan
+  // dropped. A source path that cannot be a static route cannot stay live, so
+  // that contradiction is left for validation to reject loudly.
+  for (const item of sourceDispositions) {
+    if (item.disposition !== "preserved" || item.targetPath === null || item.targetPath === item.sourcePath) continue;
+    if (!isStaticSiteRoutePath(item.sourcePath)) continue;
+    // A one-letter typo of the source path is the same route; the typo repair
+    // below restores it together with every other reference to that route.
+    if (repairPathTokens(item.targetPath, item.sourcePath) === item.sourcePath) continue;
+    findings.push(`kept ${item.sourcePath} live at its own path: it was preserved but named ${item.targetPath} as its target`);
+    item.targetPath = item.sourcePath;
+  }
   // A route or target the static site cannot represent is dropped with a
   // finding instead of failing the whole plan, but only when nothing real is
   // lost: a broken-markup link artifact or a path that never yielded content.

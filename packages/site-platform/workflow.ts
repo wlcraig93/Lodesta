@@ -42,6 +42,7 @@ import {
   imageProofScope,
   initialArchitectureAuthoringInstruction,
   isSiteAuthoringTerminalError,
+  isTransientRailwayApiError,
   mergeArchitectureEvidenceFiles,
   managerGuardrailsAfterPriorUsage,
   managerAuthoringProfileIdentity,
@@ -182,7 +183,6 @@ import { executeWithFreshSandboxRecovery } from "./sandbox-recovery";
 import { prepareWebsiteSource, websiteSourcePreparationDeadlineMs } from "./source-preparation";
 import { ownerCanRetrySiteAgentRun } from "@/packages/site-agent/retry-policy";
 import { fetchPublicText } from "@/lib/url-safety";
-import { sendOwnerOperationalEmail } from "@/lib/owner-notifications";
 import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
 import { scopedVisualInspectionRoutePaths } from "./visual-inspection-scope";
 import { logoPresentationRecipeVersion } from "./logo-preparation";
@@ -1362,16 +1362,6 @@ export class SiteAuthoringWorkflow {
             schemaVersion: "site-agent-message", id: id("message"), sessionId: waiting.sessionId, runId: waiting.id, role: "agent",
             content: error.question, createdAt: now
           });
-          const site = await this.repository.getSite(waiting.siteId);
-          const state = site ? await this.repository.getBusinessState(site.businessId) : undefined;
-          if (site && state) {
-            await sendOwnerOperationalEmail({
-              site, business: state, kind: "website_input_needed",
-              subject: "Your website update needs one answer",
-              summaryLines: [error.question, "The update is paused at its latest durable checkpoint while we wait."],
-              actionPath: `/workspace/${site.slug}/editor`
-            }).catch(() => undefined);
-          }
           return waiting;
         } catch (checkpointError) {
           error = checkpointError;
@@ -6578,6 +6568,7 @@ function isRepairableSandboxBuildError(error: unknown) {
 
 function isSandboxTransportFailure(error: unknown) {
   if (isRailwayAuthorizationFailure(error)) return false;
+  if (isTransientRailwayApiError(error)) return true;
   if (error instanceof SiteSandboxRequestError) {
     return error.status === 408 || error.status === 429 || error.status === 502 || error.status === 503 || error.status === 504;
   }

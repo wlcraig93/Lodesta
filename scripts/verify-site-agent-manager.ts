@@ -13,6 +13,7 @@ import {
   assertOpenAiStrictFunctionSchema,
   assertOpenAiStrictFunctionTools,
   classifySiteAuthoringFailure,
+  isTransientRailwayApiError,
   classifyModelProviderError,
   canonicalAuthoringProfile,
   imageCreationModel,
@@ -923,6 +924,12 @@ const transientPlatformFailure = classifySiteAuthoringFailure(new TypeError("fet
 assert.equal(transientPlatformFailure.code, "unknown_internal_failure");
 assert.equal(transientPlatformFailure.category, "platform");
 assert.equal(transientPlatformFailure.retryableByOwner, true);
+// A Railway control-plane 5xx (e.g. during the post-finish workspace backup) must stay owner-retryable, not discard verified work.
+const railwayOutage = classifySiteAuthoringFailure(Object.assign(new Error("Railway GraphQL request failed with HTTP 503."), { name: "RailwayGraphQLError", status: 503 }));
+assert.equal(railwayOutage.code, "sandbox_unavailable");
+assert.equal(railwayOutage.retryableByOwner, true);
+assert.equal(isTransientRailwayApiError(Object.assign(new Error("Not found"), { name: "RailwayGraphQLError", status: 404 })), false);
+assert.equal(isTransientRailwayApiError(Object.assign(new Error("Too many requests"), { name: "RailwayGraphQLError", status: 429 })), true);
 const transientDatabaseFailure = classifySiteAuthoringFailure(
   new Error('duplicate key value violates unique constraint "asset_revisions_storage_path_key"')
 );

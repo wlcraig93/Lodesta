@@ -21,6 +21,13 @@ export function isSiteAuthoringTerminalError(error: unknown): error is SiteAutho
   return error instanceof SiteAuthoringTerminalError;
 }
 
+/** Railway control-plane API errors (the SDK's RailwayGraphQLError) that a later attempt can succeed past. */
+export function isTransientRailwayApiError(error: unknown) {
+  if (!(error instanceof Error) || error.name !== "RailwayGraphQLError") return false;
+  const status = (error as Error & { status?: unknown }).status;
+  return typeof status === "number" && (status >= 500 || status === 408 || status === 429);
+}
+
 export function classifySiteAuthoringFailure(error: unknown) {
   if (isSiteAuthoringTerminalError(error)) {
     return {
@@ -31,6 +38,9 @@ export function classifySiteAuthoringFailure(error: unknown) {
     };
   }
   const message = boundedFailureMessage(error);
+  if (isTransientRailwayApiError(error)) {
+    return failure("sandbox_unavailable", "platform", true, message);
+  }
   if (/manager_cost_limit_exhausted|cost_limit_exhausted/i.test(message)) {
     return failure("cost_limit_exhausted", "budget", false, message);
   }

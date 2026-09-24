@@ -14,6 +14,7 @@ import { isLegalSourcePagePath, normalizedSourcePagePath } from "@/packages/busi
 import { canonicalSourceTokens } from "@/lib/source-text-blocks";
 import { resolveApprovedSourceDocuments, type ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
 import { FactBindingValidator } from "./fact-declarations";
+import { firstPartyOutboundHrefs, firstPartySupportForBuild } from "./first-party-evidence";
 import {
   agentAuthoredArtifactSchema,
   normalizeRoutePath,
@@ -64,9 +65,23 @@ export function prepareSiteArtifact(input: {
   const authored = agentAuthoredArtifactSchema.parse(input.authoredArtifact);
   const routes = new Set(authored.routes.map((route) => normalizeRoutePath(route.path)));
   const allowedFormIds = new Set(input.buildInput.forms.map((form) => form.id));
-  const allowedExternalHrefs = allowedExternalHrefsFor(input.buildInput, input.sourceSnapshots ?? []);
-  const allowedPhoneNumbers = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => comparablePhone(String(fact.value))));
-  const allowedEmailAddresses = new Set(input.buildInput.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value).trim().toLowerCase()));
+  // Links, phone numbers and email addresses the business itself shows on its
+  // retained first-party pages are verified destinations, alongside bound
+  // public facts. Spam/injected pages and affiliate/tracking links are never
+  // support; unsafe schemes are still rejected by the sanitizer.
+  const firstPartySupport = firstPartySupportForBuild(input.buildInput, input.sourceSnapshots ?? [], input.sourcePages ?? []);
+  const allowedExternalHrefs = new Set([
+    ...allowedExternalHrefsFor(input.buildInput, input.sourceSnapshots ?? []),
+    ...firstPartyOutboundHrefs(firstPartySupport)
+  ]);
+  const allowedPhoneNumbers = new Set([
+    ...input.buildInput.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => comparablePhone(String(fact.value))),
+    ...firstPartySupport.corePagePhones().map(comparablePhone)
+  ]);
+  const allowedEmailAddresses = new Set([
+    ...input.buildInput.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value).trim().toLowerCase()),
+    ...firstPartySupport.corePageEmails()
+  ]);
   const cssResult = sanitizeAgentCss(authored.sharedCss, input.buildInput.business.assets);
   const finalCss = `${platformFontStyles}\n${platformCapabilityStylesFor(input.runtimeSeriesId)}\n${cssResult.css}`;
   const findings: ArtifactGateFinding[] = [...cssResult.findings];
@@ -292,11 +307,13 @@ function validateSiteStructure(input: {
   for (const route of input.routes) {
     const mismatch = slugTokenMismatch(route.path, `${route.title} ${route.description} ${visibleBodyText(route.bodyHtml)}`);
     if (!mismatch) continue;
+    // A spelling heuristic, not a functional failure: advisory only.
     findings.push(gateFinding(
       "route.slug_mismatch",
       "route",
-      `Route path token "${mismatch.token}" is one letter away from "${mismatch.word}" on this page. Correct that token in the route path. This is a spelling repair of the approved path, not a new route.`,
-      route.path
+      `Route path token "${mismatch.token}" is one letter away from "${mismatch.word}" on this page. If it is a misspelling, correct that token in the route path; a deliberate spelling (a source path or brand word) may stay.`,
+      route.path,
+      "warning"
     ));
   }
   for (const similarity of input.similarities) {

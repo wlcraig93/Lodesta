@@ -82,8 +82,10 @@ type IndexedPage = FirstPartyPageEvidence & {
 export class FirstPartySupport {
   readonly pages: readonly FirstPartyPageEvidence[];
   private readonly indexed: IndexedPage[];
+  private readonly texts: string[];
 
   constructor(pages: readonly FirstPartySupportPageInput[]) {
+    this.texts = pages.map((page) => page.text);
     const homepageText = pages
       .filter((page) => normalizedSourcePagePath(page.path ?? safePath(page.url)) === "/")
       .map((page) => `${page.title ?? ""}\n${page.text}`)
@@ -117,6 +119,35 @@ export class FirstPartySupport {
     return this.evidence(this.indexed.filter((page) => !page.injected && containsTokenSequence(page.tokens, needle)));
   }
 
+  /**
+   * Pages (never injected spam) on which this is a complete sentence or line:
+   * token-for-token equal, not merely contained, so a truncated qualifier or
+   * an appended clause never matches.
+   */
+  sentence(text: string): FirstPartyPageEvidence[] {
+    const key = canonicalSourceTokens(text).map((token) => token.value).join(" ");
+    if (!key) return [];
+    this.sentenceIndex ??= this.buildSentenceIndex();
+    return this.evidence(this.sentenceIndex.get(key) ?? []);
+  }
+
+  private sentenceIndex?: Map<string, IndexedPage[]>;
+
+  private buildSentenceIndex() {
+    const index = new Map<string, IndexedPage[]>();
+    this.indexed.forEach((page, position) => {
+      if (page.injected) return;
+      for (const sentence of this.texts[position]!.split(/\n+|(?<=[.!?])\s+/)) {
+        const key = canonicalSourceTokens(sentence).map((token) => token.value).join(" ");
+        if (!key) continue;
+        const pages = index.get(key) ?? [];
+        if (!pages.includes(page)) pages.push(page);
+        index.set(key, pages);
+      }
+    });
+    return index;
+  }
+
   /** Pages (never injected spam) that display this US phone number. */
   phone(value: string): FirstPartyPageEvidence[] {
     const digits = value.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
@@ -138,6 +169,22 @@ export class FirstPartySupport {
     const normalized = normalizedFirstPartyHref(href);
     if (!normalized) return [];
     return this.evidence(this.indexed.filter((page) => !page.injected && page.links.has(normalized)));
+  }
+
+  /** US phone numbers (+1XXXXXXXXXX) displayed or linked on current core pages. */
+  corePagePhones(): string[] {
+    return [...new Set(this.indexed.filter((page) => page.core && !page.injected).flatMap((page) => [
+      ...[...page.links].filter((href) => href.startsWith("tel:")).map((href) => href.slice(4)),
+      ...[...page.digits.matchAll(/(?:^|\s)(?:1\s+)?(\d{3})\s+(\d{3})\s+(\d{4})(?=\s|$)/g)].map((match) => `+1${match[1]}${match[2]}${match[3]}`)
+    ]))];
+  }
+
+  /** Email addresses displayed or linked on current core pages. */
+  corePageEmails(): string[] {
+    return [...new Set(this.indexed.filter((page) => page.core && !page.injected).flatMap((page) => [
+      ...page.emails,
+      ...[...page.links].filter((href) => href.startsWith("mailto:")).map((href) => href.slice(7))
+    ]))];
   }
 
   /** Every outbound http(s) destination shown on a non-spam first-party page. */

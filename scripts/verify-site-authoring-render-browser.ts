@@ -2707,12 +2707,13 @@ const missingGlyphBrowser = await runArtifactBrowserGate({
 });
 const missingGlyphFinding = missingGlyphBrowser.findings.find((finding) => finding.id === "render.missing_glyph");
 assert(
-  missingGlyphFinding?.severity === "error" && isTechnicalReleaseBlocker(missingGlyphFinding),
-  "An unsupported emoji was not treated as a deterministic portable-font release failure."
+  missingGlyphFinding?.severity === "warning" && !isTechnicalReleaseBlocker(missingGlyphFinding),
+  "An unsupported emoji must be an advisory portable-font finding, not a release blocker."
 );
 assert(
   missingGlyphFinding.message.includes("U+1F4DE")
   && missingGlyphFinding.message.includes("ordinary supported text")
+  && missingGlyphFinding.message.includes("verbatim first-party quotation exactly")
   && missingGlyphFinding.message.includes("inline SVG"),
   "The missing-glyph diagnostic did not identify the codepoint and portable alternatives."
 );

@@ -863,11 +863,11 @@ function extractBusinessFacts(
   // A business's own LocalBusiness/Organization declaration names the entity;
   // a visible heading is usually a service headline, so it only fills gaps.
   facts.structuredName = structuredName;
-  facts.name = structuredName ?? preferBusinessNameCandidate(
+  facts.name = structuredName ?? expandTruncatedBusinessName(preferBusinessNameCandidate(
     facts.name,
     extractVisibleBusinessNameCandidate(html, base.hostname),
     base.hostname
-  );
+  ), html, base.hostname);
   facts.hours ||= extractVisibleHours(html);
   facts.address ||= extractVisibleAddress(html);
   facts.serviceAreas = unique([...facts.serviceAreas, ...extractVisibleServiceAreas(html)]);
@@ -1672,6 +1672,43 @@ function extractVisibleBusinessNameCandidate(html: string, hostname: string) {
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .find(({ score }) => score > 0)
     ?.candidate;
+}
+
+/**
+ * Site builders often carry a placeholder or shortened site title ("bob") in
+ * <title>, og:site_name, and WebSite JSON-LD while every page displays the
+ * real name ("Bob’s Pest Control") in a heading or copyright line. Only a
+ * displayed phrase that begins with the current name and scores at least as
+ * well for this hostname may replace it; unrelated headlines never compete.
+ */
+function expandTruncatedBusinessName(current: string | undefined, html: string, hostname: string) {
+  if (!current) return current;
+  const currentId = businessNameId(current);
+  if (!currentId || current.trim().split(/\s+/).length > 2) return current;
+  const phrases: string[] = [];
+  for (const match of html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)) phrases.push(cleanText(match[1]) ?? "");
+  for (const match of html.matchAll(/(?:©|&copy;|&#169;|copyright)\s*(?:\d{4}(?:\s*[-\u2013]\s*\d{4})?)?\s*([^<|.]{3,80})/gi)) phrases.push(cleanText(match[1]) ?? "");
+  const currentScore = businessNameCandidateScore(current, hostname);
+  const counts = new Map<string, { candidate: string; count: number; score: number }>();
+  for (const phrase of phrases) {
+    const candidate = phrase.replace(/[\s,.]*all rights reserved\.?$/i, "").trim();
+    const words = candidate.split(/\s+/).length;
+    const id = businessNameId(candidate);
+    if (!candidate || candidate.length > 60 || words > 6 || id === currentId || !id.startsWith(currentId)) continue;
+    if (!new RegExp(`^${escapeRegExp(current.trim())}(?:[\\s'\u2019]|$)`, "i").test(candidate)) continue;
+    const score = businessNameCandidateScore(candidate, hostname);
+    if (score < currentScore) continue;
+    const entry = counts.get(id) ?? { candidate, count: 0, score };
+    entry.count += 1;
+    counts.set(id, entry);
+  }
+  return [...counts.values()]
+    .sort((left, right) => right.score - left.score || right.count - left.count || left.candidate.localeCompare(right.candidate))[0]
+    ?.candidate ?? current;
+}
+
+function businessNameId(value: string) {
+  return value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function normalizeBusinessNameCandidate(value: string | undefined, hostname: string) {

@@ -1005,6 +1005,20 @@ assert.throws(
   "A broad location directory silently became a single arbitrary branch project."
 );
 
+// Bob's Pest Control regression: a Squarespace placeholder site title ("bob")
+// in <title>, og:site_name, WebSite JSON-LD, and logo alt must yield to the
+// displayed name that extends it; unrelated headings never replace a name.
+{
+  const bobsHead = `<title>   bob</title><meta property="og:site_name" content="   bob"/><script type="application/ld+json">{"url":"https://www.bobspestcontrolep.com","name":"   bob","@context":"http://schema.org","@type":"WebSite"}</script>`;
+  const bobsBody = `<header><img class="header-logo" src="/BOBS-2.png" alt="   bob"></header><main><h1>Pest Control in El Paso</h1><h2>Pest Control</h2><p>With Bob’s Pest Control on your side, you won’t have to worry.</p></main><footer><h4>Bob’s Pest Control</h4></footer>`;
+  assert.equal(summarizeCrawlHtml(`<!doctype html><html><head>${bobsHead}</head><body>${bobsBody}</body></html>`, "https://www.bobspestcontrolep.com/").extractedFacts.name,
+    "Bob’s Pest Control");
+  const copyright = summarizeCrawlHtml(`<!doctype html><title>Haynes</title><main><h2>Termite Control</h2></main><footer>© 2026 Haynes Pest Control. All rights reserved.</footer>`, "https://www.haynespestcontrol.com/");
+  assert.equal(copyright.extractedFacts.name, "Haynes Pest Control");
+  const unrelated = summarizeCrawlHtml(`<!doctype html><title>Acme Roofing</title><main><h2>Acme Roofing Deals You Can Trust!</h2><h2>Roofing</h2></main>`, "https://acmeroofing.example/");
+  assert.equal(unrelated.extractedFacts.name, "Acme Roofing");
+}
+
 // Altura regression: broken-markup link artifacts are never crawl inventory,
 // and injected off-topic posts are recognized only when the homepage never
 // mentions their topic.

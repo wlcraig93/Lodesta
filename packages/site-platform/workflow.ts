@@ -189,6 +189,8 @@ import {
   createOpenAiPhotoLabeler,
   curateSourcePhotos,
   sourcePhotoCurationModelId,
+  sourcePhotoCurationPoolLimit,
+  sourcePhotoCurationRemainderLimit,
   type PhotoCurationCandidate,
   type PhotoLabeler
 } from "./source-photo-curation";
@@ -196,7 +198,7 @@ import { canonicalSourceLogoAssetId, canonicalSourceLogoRevisionId, materializeC
 
 export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
 
-type SourcePhotoPoolItem = {
+export type SourcePhotoPoolItem = {
   candidate: SourceAssetCandidate;
   page: SourceSnapshotPage | undefined;
   path: string;
@@ -2140,10 +2142,12 @@ export class SiteAuthoringWorkflow {
     const authoringProfile = liveAuthoringProfile(run.authoringProfileId, input.kind);
     const approvedArchitecture = input.currentFiles.find((file) => file.path === "src/approved-architecture.ts");
     const approvedPlan = approvedArchitecture ? parseApprovedArchitectureModule(approvedArchitecture.content) : undefined;
+    // Initial builds curate from a wider pool than the author's inventory
+    // sheets show; other runs keep the inventory ceiling.
     const photoPool = await this.selectSourcePhotoPool(
       input.snapshots,
       input.sourcePages,
-      authoringProfile.sourceEvidenceLimit,
+      input.kind === "initial_build" ? sourcePhotoCurationPoolLimit : authoringProfile.sourceEvidenceLimit,
       approvedPlan?.routes.flatMap((route) => route.sourcePaths)
     );
     const baseState = await this.repository.getBusinessState(input.buildInput.businessId);
@@ -2255,7 +2259,8 @@ export class SiteAuthoringWorkflow {
     }
     const curatedResourceIds = new Set([...curatedByAssetId.values()].map((photo) => photo.resourceId));
     const sourceEvidenceReferences = await this.renderSourcePhotoEvidence(
-      photoPool.filter((item) => !curatedResourceIds.has(item.candidate.resource.id)),
+      photoPool.filter((item) => !curatedResourceIds.has(item.candidate.resource.id))
+        .slice(0, curatedResourceIds.size ? sourcePhotoCurationRemainderLimit : authoringProfile.sourceEvidenceLimit),
       authoringProfile.sourceEvidenceSheetSize
     );
     const assetEvidenceReferences = await this.createOperatorAssetEvidence(
@@ -5020,32 +5025,7 @@ export class SiteAuthoringWorkflow {
     signal?: AbortSignal;
   }) {
     let run = input.run;
-    const candidates: PhotoCurationCandidate[] = input.pool.flatMap((item) => {
-      const resource = item.candidate.resource;
-      const imageUrl = resource.finalUrl ?? resource.requestedUrl;
-      // Curation admits only the business's own photographs: a first-party
-      // host for the page that published it, and no stock evidence.
-      let firstParty = false;
-      try {
-        firstParty = sourceImageHostIsFirstParty(new URL(imageUrl), new URL(item.candidate.sourcePageUrl));
-      } catch {
-        firstParty = false;
-      }
-      if (!firstParty || stockImageSignal(imageUrl) || !resource.rawContentHash) return [];
-      return [{
-        resourceId: resource.id,
-        sourceId: resource.sourceSnapshotId,
-        sourcePageId: item.candidate.sourcePageId,
-        sourcePageUrl: item.candidate.sourcePageUrl,
-        imageUrl,
-        rawContentHash: resource.rawContentHash,
-        pageRole: item.role,
-        relevanceScore: item.candidate.relevanceScore,
-        width: item.pixels.width,
-        height: item.pixels.height,
-        bytes: item.pixels.bytes
-      }];
-    });
+    const candidates = sourcePhotoCurationCandidates(input.pool);
     if (!candidates.length) return { run, selected: [] as SiteAgentAssetCuration["selected"] };
     if (!run.guardrails) throw new Error("responses_run_guardrails_required");
     managerGuardrailsAfterPriorUsage(run.guardrails, run.usage);
@@ -6070,6 +6050,38 @@ function addRunUsage(base: SiteAgentRun["usage"], next: SiteAgentRun["usage"]): 
     upstreamInferenceCostUsd: base.upstreamInferenceCostUsd + next.upstreamInferenceCostUsd,
     durationMs: base.durationMs + next.durationMs
   };
+}
+
+/**
+ * The curation candidates in a decoded photo pool: only the business's own
+ * photographs, served from a first-party host for the page that published
+ * them and carrying no stock evidence.
+ */
+export function sourcePhotoCurationCandidates(pool: readonly SourcePhotoPoolItem[]): PhotoCurationCandidate[] {
+  return pool.flatMap((item) => {
+    const resource = item.candidate.resource;
+    const imageUrl = resource.finalUrl ?? resource.requestedUrl;
+    let firstParty = false;
+    try {
+      firstParty = sourceImageHostIsFirstParty(new URL(imageUrl), new URL(item.candidate.sourcePageUrl));
+    } catch {
+      firstParty = false;
+    }
+    if (!firstParty || stockImageSignal(imageUrl) || !resource.rawContentHash) return [];
+    return [{
+      resourceId: resource.id,
+      sourceId: resource.sourceSnapshotId,
+      sourcePageId: item.candidate.sourcePageId,
+      sourcePageUrl: item.candidate.sourcePageUrl,
+      imageUrl,
+      rawContentHash: resource.rawContentHash,
+      pageRole: item.role,
+      relevanceScore: item.candidate.relevanceScore,
+      width: item.pixels.width,
+      height: item.pixels.height,
+      bytes: item.pixels.bytes
+    }];
+  });
 }
 
 function webResearchUsageForRun(usage: WebResearchUsage): SiteAgentRun["usage"] {

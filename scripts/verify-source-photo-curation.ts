@@ -127,7 +127,7 @@ async function candidate(id: string, options: Partial<PhotoCurationCandidate> & 
   label("vehicle_2", { subject: "vehicle" });
   label("crew_1", { subject: "crew_people", peoplePresent: true, heroCapable: true });
   label("premises_1", { subject: "premises", quality: "fair" });
-  label("flyer", { subject: "graphic", quality: "excellent" });
+  label("flyer", { overlay: "dominant", quality: "excellent" });
   label("blurry", { quality: "poor" });
   label("stocky", { stockLike: true, quality: "excellent" });
   label("watermarked", { overlay: "dominant", quality: "excellent" });
@@ -135,6 +135,12 @@ async function candidate(id: string, options: Partial<PhotoCurationCandidate> & 
   label("tiny", { quality: "excellent" });
   const selected = selectCuratedPhotos({ candidates, labels, fallbackAlt: "Fallback", limit: 8 });
   const ids = selected.map((photo) => photo.candidate.resourceId);
+  const everything = selectCuratedPhotos({ candidates, labels, fallbackAlt: "Fallback", limit: 40 }).map((photo) => photo.candidate.resourceId);
+  assert(everything.includes("stocky") && everything.indexOf("stocky") > everything.indexOf("work_5"),
+    "A first-party photo that merely looks stock-like is demoted, not excluded.");
+  for (const excluded of ["flyer", "blurry", "watermarked", "stock_url", "tiny"]) {
+    assert(!everything.includes(excluded), `Curation admitted ${excluded}.`);
+  }
   for (const excluded of ["flyer", "blurry", "stocky", "watermarked", "stock_url", "tiny"]) {
     assert(!ids.includes(excluded), `Curation admitted ${excluded}.`);
   }
@@ -156,7 +162,13 @@ async function candidate(id: string, options: Partial<PhotoCurationCandidate> & 
     candidate("photo_b", { seed: 62, width: 800, height: 1_000 }),
     candidate("photo_c", { seed: 63 }),
     candidate("photo_a_copy", { seed: 61, width: 1_200, height: 800 }),
-    candidate("unsplash", { seed: 64, imageUrl: "https://images.unsplash.com/photo-1.jpg" })
+    candidate("unsplash", { seed: 64, imageUrl: "https://images.unsplash.com/photo-1.jpg" }),
+    candidate("line_art", {
+      seed: 65,
+      bytes: await sharp({ create: { width: 1_600, height: 1_000, channels: 3, background: "#000000" } })
+        .composite([{ input: Buffer.from('<svg width="1600" height="1000"><path d="M200 700 Q800 200 1400 700" stroke="#888" stroke-width="6" fill="none"/></svg>'), left: 0, top: 0 }])
+        .png().toBuffer()
+    })
   ]);
   const failing: PhotoLabeler = {
     modelId: "gpt-6-luna",
@@ -193,7 +205,8 @@ async function candidate(id: string, options: Partial<PhotoCurationCandidate> & 
   assert.equal(curation.labeler, "vision");
   assert.equal(curation.generatedAt, "2026-09-23T12:00:00.000Z");
   assert.equal(curation.publicBuildInputId, "input_fixture");
-  assert.equal(curation.candidateCount, 5);
+  assert.equal(curation.candidateCount, 6);
+  assert.deepEqual(curation.flatArtwork, ["line_art"], "Flat line art must be excluded from its pixels before labeling.");
   assert.deepEqual(curation.duplicates, [{ resourceId: "photo_a_copy", duplicateOf: "photo_a" }]);
   const deduped = await dedupeCurationCandidates(candidates);
   assert.equal(curation.inputHash, curationInputHash(deduped.unique, "gpt-6-luna"));

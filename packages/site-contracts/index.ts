@@ -1129,9 +1129,10 @@ export const siteAgentAssetCurationSchema = z.object({
   generatedAt: isoTimestamp,
   candidateCount: z.number().int().nonnegative(),
   duplicates: z.array(z.object({ resourceId: curationResourceId, duplicateOf: curationResourceId }).strict()).max(200),
+  flatArtwork: z.array(curationResourceId).max(200),
   labels: z.array(z.object({
     resourceId: curationResourceId,
-    subject: z.enum(["crew_people", "vehicle", "finished_work", "before_after", "equipment", "premises", "product", "graphic", "other"]),
+    subject: z.enum(["crew_people", "vehicle", "finished_work", "before_after", "equipment", "premises", "product", "other"]),
     quality: z.enum(["excellent", "good", "fair", "poor"]),
     heroCapable: z.boolean(),
     peoplePresent: z.boolean(),

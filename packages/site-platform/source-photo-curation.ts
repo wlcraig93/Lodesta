@@ -16,6 +16,10 @@ import { stockImageSignal, type SourcePhotoPageRole } from "./source-resource-ra
 export const sourcePhotoCurationProducer = "source-photo-curation@1" as const;
 export const sourcePhotoCurationModelId = "gpt-6-luna" as const;
 export const sourcePhotoCurationLimit = 32;
+/** Retained photos considered for curation (labeling cost scales with this). */
+export const sourcePhotoCurationPoolLimit = 96;
+/** Uncurated retained photos still shown to the author on source sheets. */
+export const sourcePhotoCurationRemainderLimit = 24;
 export const sourcePhotoCurationFallbackLimit = 20;
 const heroSlots = 6;
 const labelBatchSize = 10;
@@ -23,6 +27,12 @@ const labelConcurrency = 3;
 const labelPreviewEdge = 512;
 const minimumCuratedEdge = 320;
 const nearDuplicateDistance = 5;
+/**
+ * Grayscale entropy (bits) below which an image is flat artwork (line
+ * drawings, logos, text panels) rather than a photograph. Measured retained
+ * photos sit above 5.9, line-art panels near 1.
+ */
+const flatArtworkEntropy = 4.5;
 const maximumLabelOutputTokens = 4_000;
 
 export const photoCurationSubjects = [
@@ -33,7 +43,6 @@ export const photoCurationSubjects = [
   "equipment",
   "premises",
   "product",
-  "graphic",
   "other"
 ] as const;
 export type PhotoCurationSubject = (typeof photoCurationSubjects)[number];
@@ -77,18 +86,18 @@ export type PhotoLabeler = {
 
 export type CuratedPhoto = {
   candidate: PhotoCurationCandidate;
-  subject: Exclude<PhotoCurationSubject, "graphic"> | "unlabeled";
+  subject: PhotoCurationSubject | "unlabeled";
   quality: Exclude<PhotoCurationQuality, "poor"> | "unlabeled";
   heroCapable: boolean;
   peoplePresent?: boolean;
   alt: string;
 };
 
-export const photoCurationPromptVersion = 1;
+export const photoCurationPromptVersion = 4;
 const labelInstructions = [
   "You label photographs retained from a small business's own website so a web designer can choose images.",
   "Judge only the visible pixels. Never guess names, places, brands, or claims the pixels do not show.",
-  "subject: crew_people (staff or customers are the subject), vehicle, finished_work (a completed job or result), before_after (a side-by-side or explicit before/after pair), equipment (tools, machines, supplies), premises (building, shop, office, interior), product (goods for sale), graphic (logo, flyer, banner, screenshot, illustration, icon or mostly text), other.",
+  "subject: the main visible subject of the photograph: crew_people (staff or customers are the subject), vehicle, finished_work (a completed job or result), before_after (a side-by-side or explicit before/after pair), equipment (tools, machines, supplies), premises (building, shop, office, interior), product (goods for sale), other.",
   "quality: excellent = sharp, well lit, well composed; good = clear and usable; fair = usable small only (soft, dark, cluttered or low resolution); poor = blurry, broken, tiny or unusable.",
   "heroCapable: true only when the photo is sharp and strong enough to fill a wide first-screen banner.",
   "peoplePresent: true when any person is visible.",
@@ -198,6 +207,15 @@ export async function photoDifferenceHash(bytes: Buffer) {
   return hash;
 }
 
+/** Grayscale entropy of a small auto-oriented rendition. */
+export async function photoPixelEntropy(bytes: Buffer) {
+  const small = await sharp(bytes, { limitInputPixels: 80_000_000, animated: false })
+    .rotate()
+    .resize(256, 256, { fit: "inside" })
+    .toBuffer();
+  return (await sharp(small).stats()).entropy;
+}
+
 function hammingDistance(left: bigint, right: bigint) {
   let value = left ^ right;
   let count = 0;
@@ -262,7 +280,7 @@ function curationEligible(candidate: PhotoCurationCandidate) {
 
 /**
  * Deterministic selection over labeled candidates: drop unusable, stock-like,
- * overlaid and graphic images; take hero-capable photos first, then fill by
+ * overlaid images; take hero-capable photos first, then fill by
  * round-robin across subjects so the gallery covers the business's range.
  */
 export function selectCuratedPhotos(input: {
@@ -289,11 +307,13 @@ export function selectCuratedPhotos(input: {
   const scored = input.candidates.flatMap((candidate) => {
     const label = labels.get(candidate.resourceId);
     if (!label || !curationEligible(candidate)) return [];
-    if (label.quality === "poor" || label.overlay === "dominant" || label.stockLike || label.subject === "graphic") return [];
+    if (label.quality === "poor" || label.overlay === "dominant") return [];
     const heroCapable = label.heroCapable && wideEnoughForHero(candidate)
       && (label.quality === "excellent" || label.quality === "good") && label.overlay === "none";
+    // Candidates are already first-party and free of stock URL evidence, so a
+    // stock-like look (common for polished professional shoots) only demotes.
     const score = qualityPoints[label.quality] + (heroCapable ? 80 : 0) + rolePoints[candidate.pageRole]
-      + Math.max(-50, Math.min(50, candidate.relevanceScore / 10));
+      + Math.max(-50, Math.min(50, candidate.relevanceScore / 10)) - (label.stockLike ? 150 : 0);
     return [{ candidate, label, heroCapable, score }];
   }).sort((left, right) => right.score - left.score || left.candidate.resourceId.localeCompare(right.candidate.resourceId));
   type Scored = (typeof scored)[number];
@@ -329,7 +349,7 @@ export function selectCuratedPhotos(input: {
   roundRobin(scored, limit);
   return selected.map(({ candidate, label, heroCapable }) => ({
     candidate,
-    subject: label.subject as CuratedPhoto["subject"],
+    subject: label.subject,
     quality: label.quality as CuratedPhoto["quality"],
     heroCapable,
     peoplePresent: label.peoplePresent,
@@ -423,9 +443,14 @@ export async function curateSourcePhotos(input: {
   now?: () => Date;
   signal?: AbortSignal;
 }): Promise<{ curation: SiteAgentAssetCuration; selected: CuratedPhoto[]; reused: boolean }> {
-  const { unique, duplicates } = await dedupeCurationCandidates(input.candidates);
+  const { unique: deduped, duplicates } = await dedupeCurationCandidates(input.candidates);
+  // Flat artwork (line drawings, logos, text panels) is excluded from its
+  // pixels alone, deterministically, before any labeling spend.
+  const entropies = await Promise.all(deduped.map((candidate) => photoPixelEntropy(candidate.bytes).catch(() => 0)));
+  const flatArtwork = deduped.filter((_candidate, index) => entropies[index]! < flatArtworkEntropy).map((candidate) => candidate.resourceId);
+  const unique = deduped.filter((candidate) => !flatArtwork.includes(candidate.resourceId));
   const modelId = input.labeler?.modelId ?? sourcePhotoCurationModelId;
-  const inputHash = curationInputHash(unique, modelId);
+  const inputHash = curationInputHash(deduped, modelId);
   const fallbackAlt = `Photo from the ${input.businessName} website`.slice(0, 200);
   let labels: Map<string, PhotoCurationLabel> | undefined;
   let usage = zeroUsage();
@@ -459,6 +484,7 @@ export async function curateSourcePhotos(input: {
     generatedAt: (input.now?.() ?? new Date()).toISOString(),
     candidateCount: input.candidates.length,
     duplicates,
+    flatArtwork,
     labels: labels ? [...labels].map(([resourceId, label]) => ({ resourceId, ...label })) : [],
     selected: selected.map((photo) => ({
       resourceId: photo.candidate.resourceId,

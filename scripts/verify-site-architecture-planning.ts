@@ -1042,6 +1042,64 @@ assert.doesNotThrow(() => siteAgentArchitectureSchema.parse({
   }
 }));
 
+// Altura regression: an unquoted tel: href produced the retained path
+// /privacy-policy/%22tel:...%3C/a%3E%22 (legal-classified, so forced to be
+// preserved) and a hacked blog carried casino posts. Neither may enter the
+// plan, and an unrepresentable target for a contentless path is dropped with
+// a finding rather than failing the whole run.
+{
+  const malformedPath = "/privacy-policy/%22tel:9256597405%22%3E925-659-7405%3C/a%3E%22";
+  const alturaPages = [
+    page("page_a_home", "/", "Local Pest Control in Livermore", "Altura Pest Control protects homes in Livermore, Tracy, and Manteca from ants, spiders, and rodents."),
+    page("page_a_privacy", "/privacy-policy", "Privacy Policy", "We respect the privacy of every customer who contacts our pest control office."),
+    { ...page("page_a_bad", malformedPath, "", ""), outcome: "failed" as const, status: 404, wordCount: 0 },
+    page("page_a_spam", "/blog/casino-scam-alerts-united-arab-emirates-fraud-prevention-guide", "Casino Scam Alerts United Arab Emirates", "Online casino players should verify every operator license before depositing money."),
+    page("page_a_ants", "/residential/ants-spiders", "Ants and Spiders", "Ant and spider treatments for Livermore homes start with an inspection of entry points and nesting sites.")
+  ];
+  const alturaInventory = buildSiteArchitectureInventory(alturaPages);
+  assert.deepEqual(alturaInventory.map((item) => item.path), ["/", "/privacy-policy", "/residential/ants-spiders"],
+    "malformed link artifacts and injected casino posts must not reach the planner");
+  const alturaSchema = JSON.stringify(siteArchitectureOutputJsonSchema(alturaInventory));
+  assert.ok(!alturaSchema.includes("%22tel"));
+
+  // A contentless unrepresentable path that does reach normalization (an older
+  // inventory) is retired with a finding; the rest of the plan survives.
+  const legacyInventory = [...alturaInventory, {
+    ...alturaInventory[1]!, path: malformedPath, outcomes: ["failed"], wordCount: 0, title: null
+  }];
+  const findings: string[] = [];
+  const repaired = normalizeSiteArchitecturePlan({
+    strategy: "Keep the core pages.",
+    primaryNavigation: [{ label: "Home", path: "/" }],
+    routes: [
+      { path: "/", label: "Home", purpose: "Introduce the business and its service area.", pageType: "home", parentPath: null, navigation: "primary" },
+      { path: "/residential/ants-spiders", label: "Ants and spiders", purpose: "Explain ant and spider treatment for homes.", pageType: "service", parentPath: null, navigation: "primary" },
+      { path: malformedPath, label: "Privacy", purpose: "A copied malformed source path.", pageType: "legal", parentPath: null, navigation: "none" }
+    ],
+    sourceDispositions: {
+      "/": { disposition: "preserved", targetPath: "/" },
+      "/privacy-policy": { disposition: "preserved", targetPath: "/privacy-policy" },
+      "/residential/ants-spiders": { disposition: "preserved", targetPath: "/residential/ants-spiders" },
+      [malformedPath]: { disposition: "preserved", targetPath: malformedPath }
+    },
+    authoringGuidance: []
+  } as RawSiteArchitecturePlan, legacyInventory, findings);
+  assert.ok(repaired.routes.every((route) => isStaticSiteRoutePath(route.path)));
+  assert.equal(repaired.sourceDispositions.find((item) => item.sourcePath === malformedPath)?.disposition, "retired");
+  assert.equal(findings.length, 2, findings.join("\n"));
+  assert.equal(validateSiteArchitecturePlan(legacyInventory, repaired).complete, true);
+
+  // A real page with an unrepresentable path still fails loudly: nothing real is silently retired.
+  const realInventory = [...alturaInventory, { ...alturaInventory[2]!, path: "/Services/Ants", wordCount: 120 }];
+  assert.throws(() => normalizeSiteArchitecturePlan({
+    strategy: "Keep the core pages.",
+    primaryNavigation: [],
+    routes: [{ path: "/", label: "Home", purpose: "Introduce the business and its service area.", pageType: "home", parentPath: null, navigation: "primary" }],
+    sourceDispositions: Object.fromEntries(realInventory.map((item) => [item.path, { disposition: "preserved", targetPath: item.path }])),
+    authoringGuidance: []
+  } as RawSiteArchitecturePlan, realInventory));
+}
+
 process.stdout.write(`${JSON.stringify({
   ok: true,
   canonicalInventoryPaths: inventory.length,

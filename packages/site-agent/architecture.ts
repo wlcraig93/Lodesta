@@ -10,7 +10,7 @@ import {
 import type { WorkspaceSourceFile } from "./contracts";
 import { sourceWorkspaceContentFilePaths } from "./source-workspace";
 import { normalizeSiteRedirectPath } from "@/packages/platform-operations/contracts";
-import { isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
+import { isLegalSourcePagePath, isLikelyInjectedSpamSourcePage, isMalformedSourceLinkPath } from "@/packages/business-data/source-page-classification";
 import type { ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
 import { containsGatedBusinessClaim } from "./claim-gates";
 import {
@@ -163,6 +163,16 @@ export function buildSiteArchitectureInventory(
   pages: SourceSnapshotPage[],
   sourcePhotoCounts?: ReadonlyMap<string, number>
 ): SiteArchitectureInventoryEntry[] {
+  // Broken-markup link artifacts are not pages the site publishes; they can
+  // never become routes, so they never enter the planner's ledger.
+  // Off-topic posts injected into a hacked CMS (casino, pharma) are not the
+  // business's content; keep them out of the plan so they never become routes.
+  const homepageText = pages
+    .filter((page) => canonicalPathname(page.path) === "/")
+    .map((page) => `${page.title ?? ""}\n${page.extractedText}`)
+    .join("\n");
+  pages = pages.filter((page) => !isMalformedSourceLinkPath(page.path)
+    && !isLikelyInjectedSpamSourcePage(page, homepageText));
   const pagePathById = new Map(pages.map((page) => [page.id, canonicalPathname(page.path)]));
   const fetchedPages = pages.filter((page) => page.outcome === "fetched" && Boolean(page.extractedText));
   const evidencePageByPath = new Map<string, SourceSnapshotPage>();
@@ -304,11 +314,11 @@ export function siteArchitectureOutputJsonSchema(inventory: SiteArchitectureInve
           properties: {
             disposition: {
               type: "string",
-              enum: isLegalSourcePagePath(page.path)
+              enum: isPreservableLegalSourcePath(page.path)
                 ? ["preserved"]
                 : ["preserved", "redirected", "canonical_duplicate", "retired"]
             },
-            targetPath: isLegalSourcePagePath(page.path)
+            targetPath: isPreservableLegalSourcePath(page.path)
               ? { type: "string", const: page.path }
               : { ...liveRoutePath, type: ["string", "null"] }
           }
@@ -326,18 +336,43 @@ export function siteArchitectureOutputJsonSchema(inventory: SiteArchitectureInve
  */
 export function normalizeSiteArchitecturePlan(
   raw: RawSiteArchitecturePlan,
-  inventory: SiteArchitectureInventoryEntry[]
+  inventory: SiteArchitectureInventoryEntry[],
+  findings: string[] = []
 ) {
   const sourceDispositions: SiteArchitecturePlan["sourceDispositions"] = inventory.map(({ path }) => ({
     sourcePath: path,
     ...raw.sourceDispositions[path]
   }));
+  // A route or target the static site cannot represent is dropped with a
+  // finding instead of failing the whole plan, but only when nothing real is
+  // lost: a broken-markup link artifact or a path that never yielded content.
+  // An unrepresentable path to a real page still fails loudly as before.
+  const contentlessPaths = new Set(inventory
+    .filter((entry) => !entry.outcomes.includes("fetched") || entry.wordCount === 0)
+    .map((entry) => entry.path));
+  const droppable = (path: string) => !isStaticSiteRoutePath(path)
+    && (isMalformedSourceLinkPath(path) || contentlessPaths.has(path));
+  for (const item of sourceDispositions) {
+    const target = item.disposition === "preserved" && item.targetPath === null ? item.sourcePath : item.targetPath;
+    if (item.disposition === "retired" || target === null || !droppable(target)) continue;
+    findings.push(`retired ${item.sourcePath}: target ${target} is not a representable static route`);
+    item.disposition = "retired";
+    item.targetPath = null;
+  }
   const routes: SiteArchitecturePlan["routes"] = [];
   const routeIndex = new Map<string, number>();
   for (const route of raw.routes) {
+    if (droppable(route.path)) {
+      findings.push(`dropped route ${route.path}: not a representable static route`);
+      continue;
+    }
     if (routeIndex.has(route.path)) continue;
     routeIndex.set(route.path, routes.length);
-    routes.push({ ...route, sourcePaths: [] });
+    routes.push({
+      ...route,
+      parentPath: route.parentPath && droppable(route.parentPath) ? null : route.parentPath,
+      sourcePaths: []
+    });
   }
 
   // "Preserved" already makes the target unambiguous: the source remains at
@@ -407,6 +442,7 @@ export function normalizeSiteArchitecturePlan(
   }
 
   const primaryNavigation = raw.primaryNavigation
+    .filter((item) => !droppable(item.path))
     .map((item) => {
       if (!removedPaths.has(item.path)) return item;
       const targetPath = sourceDispositions.find((source) => source.sourcePath === item.path)?.targetPath;
@@ -466,7 +502,7 @@ export function validateSiteArchitecturePlan(
   const invalidNavigationTargets = plan.primaryNavigation.map((item) => item.path).filter((path) => !routePaths.has(path));
   const missingRoutePurposes = plan.routes.filter((route) => route.purpose.trim().length < 12).map((route) => route.path);
   const unsafeLegalDispositions = plan.sourceDispositions.flatMap((item) =>
-    isLegalSourcePagePath(item.sourcePath)
+    isPreservableLegalSourcePath(item.sourcePath)
       && (item.disposition !== "preserved" || item.targetPath !== item.sourcePath)
       ? [{ sourcePath: item.sourcePath, disposition: item.disposition, targetPath: item.targetPath }]
       : []
@@ -1394,6 +1430,11 @@ function canonicalPhotoCounts(counts?: ReadonlyMap<string, number>) {
     normalized.set(key, (normalized.get(key) ?? 0) + count);
   }
   return normalized;
+}
+
+/** Legal pages are preserved at their exact path only when that path can be a route. */
+function isPreservableLegalSourcePath(path: string) {
+  return isLegalSourcePagePath(path) && isStaticSiteRoutePath(path);
 }
 
 function canonicalPathname(value: string) {

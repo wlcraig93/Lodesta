@@ -709,7 +709,8 @@ export class WebsiteManagerAgent {
       maxOutputTokens: 100_000,
       reasoningEffort: "high"
     });
-    const plan = normalizeSiteArchitecturePlan(result.value as RawSiteArchitecturePlan, input.inventory);
+    const normalizationFindings: string[] = [];
+    const plan = normalizeSiteArchitecturePlan(result.value as RawSiteArchitecturePlan, input.inventory, normalizationFindings);
     const validation = validateSiteArchitecturePlan(input.inventory, plan);
     if (!validation.complete) {
       throw new SiteAuthoringTerminalError(
@@ -722,6 +723,7 @@ export class WebsiteManagerAgent {
     return {
       plan,
       validation,
+      normalizationFindings,
       usage: result.usage,
       apiProvider: route.apiProvider,
       modelId: route.modelId,

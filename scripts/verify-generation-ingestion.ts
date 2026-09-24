@@ -23,6 +23,7 @@ import {
   robotsAllows
 } from "../packages/business-data/robots-policy";
 import { PublicFetchUrlError } from "../lib/url-safety";
+import { isLikelyInjectedSpamSourcePage, isMalformedSourceLinkPath } from "../packages/business-data/source-page-classification";
 import {
   assertSourceSuitableForGeneration,
   createLooseWebsiteBootstrap,
@@ -1003,6 +1004,37 @@ assert.throws(
   /multi-location directory/i,
   "A broad location directory silently became a single arbitrary branch project."
 );
+
+// Altura regression: broken-markup link artifacts are never crawl inventory,
+// and injected off-topic posts are recognized only when the homepage never
+// mentions their topic.
+assert.equal(isMalformedSourceLinkPath("/privacy-policy/%22tel:9256597405%22%3E925-659-7405%3C/a%3E%22"), true);
+assert.equal(isMalformedSourceLinkPath("/contact/mailto:office@example.com"), true);
+assert.equal(isMalformedSourceLinkPath("/residential/ants-spiders"), false);
+assert.equal(isMalformedSourceLinkPath("/hotel-pest-control"), false);
+assert.equal(isLikelyInjectedSpamSourcePage({ path: "/blog/tower-rush-1win-jeu-dadresse", title: "Tower Rush 1win" }, "Altura Pest Control serves Livermore."), true);
+assert.equal(isLikelyInjectedSpamSourcePage({ path: "/casino-pest-control", title: "Casino pest control" }, "We protect every casino on the Las Vegas strip."), false);
+assert.equal(isLikelyInjectedSpamSourcePage({ path: "/residential/bed-bugs", title: "Bed Bugs" }, "Pest control."), false);
+{
+  const malformedOrigin = "https://malformed-link.example";
+  const malformedCrawl = await crawlWebsiteForGeneration({
+    url: `${malformedOrigin}/`,
+    validateUrl: async (value) => value,
+    limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+    sleep: async () => undefined,
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = new URL(url).pathname;
+      if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+      if (path === "/sitemap.xml") return response("", 404, "text/plain");
+      if (path === "/") return response(pageHtml("Home", ["/privacy-policy"]), 200);
+      if (path === "/privacy-policy") return response(`<!doctype html><title>Privacy</title><main><p>${"Privacy terms for customers. ".repeat(20)}</p><a href="&quot;tel:9256597405&quot;&gt;925-659-7405&lt;/a&gt;">925-659-7405</a></main>`, 200);
+      throw new Error(`unexpected_malformed_fixture_url:${url}`);
+    }
+  });
+  assert.ok(malformedCrawl.ingestion.pages.every((entry) => !/%22|tel:/i.test(entry.url)),
+    "An unquoted tel: href was crawled as a page path.");
+}
 
 // Foothills Pest regression: the same hours rendered in two display formats on
 // two first-party pages for one street address are not a contradiction.

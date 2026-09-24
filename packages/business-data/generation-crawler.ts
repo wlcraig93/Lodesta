@@ -11,7 +11,7 @@ import {
 import { assertPublicFetchUrl, PublicFetchUrlError } from "@/lib/url-safety";
 import { corroboratedHomepageBusinessName, preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
 import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "./crawl-errors";
-import { isLikelyCmsTemplateOrSystemSourcePage } from "./source-page-classification";
+import { isLikelyCmsTemplateOrSystemSourcePage, isMalformedSourceLinkPath } from "./source-page-classification";
 import {
   generationCrawlerUserAgent,
   parseRobotsPolicy,
@@ -293,6 +293,9 @@ export async function crawlWebsiteForGeneration(input: {
       : sameSiteUrl;
     const robotsCandidate = normalizeSameSite(candidate, source, true);
     if (!normalized) return undefined;
+    // Broken markup (an unquoted tel: href) yields paths like
+    // /privacy-policy/%22tel:...%3C/a%3E; they are not pages, so never inventory them.
+    if (reason !== "source_home" && isMalformedSourceLinkPath(new URL(normalized).pathname)) return undefined;
     if (inventory.has(normalized)) return normalized;
     if (!meaningfulUrl(normalized)) {
       skipped.push({ url: normalized, reason: "unsupported_content" });

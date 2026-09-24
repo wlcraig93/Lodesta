@@ -22,6 +22,41 @@ export function isLegalSourcePagePath(value: string) {
     || /-(?:privacy-policy|terms-and-conditions|terms-of-service|terms-of-use|cookie-policy|accessibility-statement|disclaimer|cancellation-policy|refund-policy|return-policy|returns-policy)$/.test(segment));
 }
 
+/**
+ * A path that is a broken-markup link artifact rather than a page the site
+ * publishes, e.g. `/privacy-policy/%22tel:9256597405%22%3E925-659-7405%3C/a%3E%22`
+ * produced by an unquoted href. Quotes, angle brackets, or an embedded URI
+ * scheme never occur in a real local-business page path.
+ */
+export function isMalformedSourceLinkPath(value: string) {
+  const pathname = value.split(/[?#]/, 1)[0] ?? "";
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return true;
+  }
+  return /["'<>`\\]/.test(decoded)
+    || /(?:^|\/)[^/]*(?:tel|mailto|sms|javascript|data|https?|callto|whatsapp):/i.test(decoded);
+}
+
+const injectedSpamTopicPattern = /\b(?:casinos?|1win|1xbet|mostbet|pin-?up|betting|sportsbook|bookmakers?|slot-?machines?|jackpots?|roulette|blackjack|poker|viagra|cialis|payday[- ]loans?|escorts?|crypto(?:currency)?|forex)\b/i;
+
+/**
+ * Hacked CMS installs inject off-topic posts (casino, pharma, loans) into a
+ * local business blog. A page whose path or title names such a topic that the
+ * homepage never mentions is not the business's own content.
+ */
+export function isLikelyInjectedSpamSourcePage(
+  page: { path: string; title?: string | null },
+  homepageText: string
+) {
+  const signal = `${page.path.replace(/[-_/]+/g, " ")} ${page.title ?? ""}`;
+  const topic = signal.match(injectedSpamTopicPattern)?.[0];
+  if (!topic || normalizedSourcePagePath(page.path) === "/") return false;
+  return !new RegExp(`\\b${topic.replace(/[^a-z0-9]/gi, ".?")}\\b`, "i").test(homepageText);
+}
+
 export function normalizedSourcePagePath(value: string) {
   const pathname = value.split(/[?#]/, 1)[0] || "/";
   if (pathname === "/") return pathname;

@@ -73,7 +73,9 @@ function extractSourceTextBlockElements(html: string, sourceUrl: string): Array<
   return candidates
     .map((element) => ({ element, displayText: normalizeDisplayText(DomUtils.textContent(element)) }))
     .filter((entry) => entry.displayText.length > 0)
-    .filter((entry) => entry.displayText.length <= maxBlockCharacters)
+    // A long block (an unstructured article body or legal text) is split into
+    // sentence-aligned pieces within the cap instead of being dropped.
+    .flatMap((entry) => splitLongDisplayText(entry.displayText).map((displayText) => ({ element: entry.element, displayText })))
     .slice(0, maxBlocksPerPage)
     .map(({ element, displayText }, order) => {
       const containerId = elementPath(element);
@@ -131,6 +133,47 @@ function elementPath(element: Element) {
     current = current.parent?.type === "tag" ? current.parent : undefined;
   }
   return segments.join(" > ");
+}
+
+/**
+ * Splits text longer than the block cap at sentence boundaries (falling back
+ * to word boundaries for a single overlong sentence). Every piece is verbatim
+ * source text; nothing is dropped.
+ */
+export function splitLongDisplayText(text: string, limit = maxBlockCharacters): string[] {
+  if (text.length <= limit) return [text];
+  const pieces: string[] = [];
+  let current = "";
+  const push = () => {
+    if (current) pieces.push(current);
+    current = "";
+  };
+  for (const sentence of text.split(/(?<=[.!?…])\s+/u)) {
+    const units = sentence.length <= limit ? [sentence] : hardWrap(sentence, limit);
+    for (const unit of units) {
+      if (current && current.length + 1 + unit.length > limit) push();
+      current = current ? `${current} ${unit}` : unit;
+    }
+  }
+  push();
+  return pieces;
+}
+
+function hardWrap(text: string, limit: number) {
+  const pieces: string[] = [];
+  let current = "";
+  for (const word of text.split(" ")) {
+    const units = word.length <= limit ? [word] : word.match(new RegExp(`.{1,${limit}}`, "gu")) ?? [];
+    for (const unit of units) {
+      if (current && current.length + 1 + unit.length > limit) {
+        pieces.push(current);
+        current = "";
+      }
+      current = current ? `${current} ${unit}` : unit;
+    }
+  }
+  if (current) pieces.push(current);
+  return pieces;
 }
 
 function normalizeDisplayText(value: string) {

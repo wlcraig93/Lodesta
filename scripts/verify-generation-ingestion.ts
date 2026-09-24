@@ -1178,6 +1178,19 @@ assert.equal(isLikelyInjectedSpamSourcePage({ path: "/residential/bed-bugs", tit
     "Closed versus open on the same day was not flagged.");
 }
 
+// A text block over the size cap is split into verbatim sentence-aligned
+// pieces, never dropped whole.
+{
+  const sentences = Array.from({ length: 90 }, (_value, index) => `Our crew completed restoration project number ${index + 1} with careful cleanup and a final walkthrough.`);
+  const longHtml = `<!doctype html><title>Story</title><main><p>${sentences.join(" ")}</p></main>`;
+  const longBlocks = summarizeCrawlHtml(longHtml, "https://long-block.example/story").sourceTextBlocks;
+  assert.ok(longBlocks.length >= 2, "An oversized text block was not split.");
+  assert.ok(longBlocks.every((block) => block.displayText.length <= 4_000), "A split piece exceeds the block cap.");
+  assert.equal(longBlocks.map((block) => block.displayText).join(" "), sentences.join(" "),
+    "Splitting an oversized block lost or changed source text.");
+  assert.equal(new Set(longBlocks.map((block) => block.id)).size, longBlocks.length, "Split pieces share a block id.");
+}
+
 // Split schedules (Mon-Fri 8-5, Sat 9-1) stated in different formats on two
 // first-party pages agree day by day; only a same-day conflict withholds hours.
 {

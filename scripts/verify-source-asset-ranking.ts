@@ -7,7 +7,6 @@ import type {
 import {
   rankSourceAssetCandidates,
   sourceImageFamily,
-  sourceImageHostIsFirstParty,
   sourcePhotoNotes,
   sourcePhotoPageRole,
   sourceResourceIsAdoptableImage,
@@ -258,9 +257,11 @@ for (const id of ["cdn_tiny", "cdn_vendor", "cdn_archive"]) {
   assert.notEqual(cdnCandidates.find(c => c.resource.id === id)?.likelyKind, "photo",
     "Tiny graphics, vendor artwork or archive-only media became default photo candidates.");
 }
-assert(cdnCandidates.find(c => c.resource.id === "cdn_service")?.relevanceReasons
+// A non-stock media host the business's own page loads is a first-party host.
+assert(!cdnCandidates.find(c => c.resource.id === "cdn_service")?.relevanceReasons
   .includes("cross-origin dependency rather than a first-party asset"),
-"A visual-review hint erased the cross-origin provenance warning.");
+"A media CDN loaded by the business's own page was penalized as cross-origin.");
+assert.equal(cdnCandidates.find(c => c.resource.id === "cdn_service")?.firstPartyHost, true);
 
 for (const url of [
   "https://example.com/wp-content/uploads/AdobeStock_123456.jpeg",
@@ -283,31 +284,37 @@ assert.deepEqual(sourcePhotoNotes({ imageUrl: "https://example.com/AdobeStock_1.
   "portrait orientation"
 ]);
 
-// Site-builder media CDNs and the site's own subdomains serve first-party
-// uploads; stock and unrelated hosts stay cross-origin.
+// Any media host the business's own pages load images from is first-party:
+// site-builder CDNs, generic CDNs, the site's own subdomains. Stock hosts,
+// review platforms, and other businesses' websites stay cross-origin.
+const homeWithPartner = { ...home, externalLinks: ["https://www.partner-supplier.example/"] };
 const builderCdnRanking = rankSourceAssetCandidates({
-  pages: [home, about],
+  pages: [homeWithPartner, about],
   resources: [
+    resource("cloudfront_photo", "https://d1abc234.cloudfront.net/uploads/crew.jpg", home.finalUrl!, "image/jpeg", 90_000),
+    resource("cloudinary_photo", "https://res.cloudinary.com/fixture/image/upload/v1/roof.jpg", home.finalUrl!, "image/jpeg", 90_000),
+    resource("gbp_photo", "https://lh3.googleusercontent.com/p/AF1QipN-fixture=s1600", home.finalUrl!, "image/jpeg", 90_000),
+    resource("partner_photo", "https://cdn.partner-supplier.example/catalog/shingle.jpg", home.finalUrl!, "image/jpeg", 90_000),
+    resource("other_business_site_photo", "https://www.unrelated-business.example/images/truck.jpg", home.finalUrl!, "image/jpeg", 90_000),
     resource("webflow_photo", "https://cdn.prod.website-files.com/64ab/65cd_detail-bay.jpeg", home.finalUrl!, "image/jpeg", 90_000),
     resource("squarespace_photo", "https://images.squarespace-cdn.com/content/abc/coating.jpg?format=1500w", home.finalUrl!, "image/jpeg", 90_000),
     resource("wix_photo", "https://static.wixstatic.com/media/a1b2c3_d4e5~mv2.jpg/v1/fill/w_980,h_600/detail.jpg", about.finalUrl!, "image/jpeg", 90_000),
     resource("subdomain_photo", "https://media.fixture.example/uploads/shop.jpg", home.finalUrl!, "image/jpeg", 90_000),
     resource("photon_photo", "https://i0.wp.com/fixture.example/wp-content/uploads/crew.jpg", home.finalUrl!, "image/jpeg", 90_000),
-    resource("third_party_photo", "https://widgets.reviews.example/badge-photo.jpg", home.finalUrl!, "image/jpeg", 90_000),
+    resource("third_party_photo", "https://s3-media0.fl.yelpcdn.com/bphoto/fixture/o.jpg", home.finalUrl!, "image/jpeg", 90_000),
     resource("stock_host_photo", "https://images.unsplash.com/photo-1581578731548", home.finalUrl!, "image/jpeg", 90_000),
     resource("foreign_photon", "https://i0.wp.com/other.example/wp-content/uploads/crew.jpg", home.finalUrl!, "image/jpeg", 90_000)
   ]
 });
 const crossOrigin = (id: string) => builderCdnRanking.find((candidate) => candidate.resource.id === id)?.relevanceReasons
   .includes("cross-origin dependency rather than a first-party asset");
-for (const id of ["webflow_photo", "squarespace_photo", "wix_photo", "subdomain_photo", "photon_photo"]) {
+for (const id of ["webflow_photo", "squarespace_photo", "wix_photo", "subdomain_photo", "photon_photo", "cloudfront_photo", "cloudinary_photo", "gbp_photo"]) {
   assert.equal(crossOrigin(id), false, `A first-party site-builder or subdomain photo was penalized as cross-origin: ${id}`);
 }
-for (const id of ["third_party_photo", "stock_host_photo", "foreign_photon"]) {
+for (const id of ["third_party_photo", "stock_host_photo", "foreign_photon", "partner_photo", "other_business_site_photo"]) {
   assert.equal(crossOrigin(id), true, `A third-party or stock image became first-party: ${id}`);
 }
-assert.equal(sourceImageHostIsFirstParty(new URL("https://cdn.example.co.uk/a.jpg"), new URL("https://www.example.co.uk/")), true);
-assert.equal(sourceImageHostIsFirstParty(new URL("https://cdn.other.co.uk/a.jpg"), new URL("https://www.example.co.uk/")), false);
+assert.equal(builderCdnRanking.find((candidate) => candidate.resource.id === "cloudfront_photo")?.firstPartyHost, true);
 
 // Responsive size variants share one visual family.
 for (const [left, right] of [

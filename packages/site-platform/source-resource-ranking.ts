@@ -3,12 +3,19 @@ import type {
   SourceSnapshotResource
 } from "@/packages/site-contracts";
 import { classifySourcePagePath } from "@/packages/business-data/source-page-classification";
+import {
+  firstPartyImageHost,
+  firstPartySupportFromSnapshotPages,
+  isStockOrMarketplaceImageHost
+} from "@/packages/business-data/first-party-support";
 
 export type SourceAssetCandidate = {
   resource: SourceSnapshotResource;
   sourcePageId: string;
   sourcePageUrl: string;
   likelyKind: "logo" | "photo" | "icon" | "other";
+  /** Loaded by a first-party page from the business's own or a first-party media host. */
+  firstPartyHost: boolean;
   relevanceScore: number;
   relevanceReasons: string[];
 };
@@ -33,6 +40,11 @@ export function rankSourceAssetCandidates(input: {
     if (resource.finalUrl) stylesheetsByUrl.set(resource.finalUrl, resource);
   }
   const homepage = input.pages.find((page) => page.path === "/");
+  // Other websites the business links to (partners, manufacturers) are not
+  // its media hosts; every other non-stock host its pages load images from is.
+  const linkedOtherSiteDomains = homepage
+    ? firstPartySupportFromSnapshotPages(input.pages).linkedOtherSiteDomains(new URL(homepage.finalUrl ?? homepage.requestedUrl).hostname)
+    : new Set<string>();
   const strongestByVisualIdentity = new Map<string, SourceAssetCandidate>();
   for (const resource of input.resources) {
     if (!sourceResourceIsAdoptableImage(resource)
@@ -40,7 +52,7 @@ export function rankSourceAssetCandidates(input: {
     const sourcePage = sourceInitiatorPages(resource.initiatorUrls, pagesByUrl, stylesheetsByUrl, homepage)
       .sort((left, right) => sourcePageAssociationScore(right) - sourcePageAssociationScore(left))[0];
     if (!sourcePage) continue;
-    const candidate = sourceAssetCandidate(resource, sourcePage);
+    const candidate = sourceAssetCandidate(resource, sourcePage, linkedOtherSiteDomains);
     const identity = sourceImageFamily(resource.finalUrl ?? resource.requestedUrl);
     const current = strongestByVisualIdentity.get(identity);
     if (!current
@@ -126,7 +138,11 @@ function sourceResourceIsPersistedSvg(resource: SourceSnapshotResource) {
     && (resource.contentType ?? "").split(";", 1)[0]?.trim().toLowerCase() === "image/svg+xml";
 }
 
-function sourceAssetCandidate(resource: SourceSnapshotResource, page: SourceSnapshotPage): SourceAssetCandidate {
+function sourceAssetCandidate(
+  resource: SourceSnapshotResource,
+  page: SourceSnapshotPage,
+  linkedOtherSiteDomains: ReadonlySet<string>
+): SourceAssetCandidate {
   const url = resource.finalUrl ?? resource.requestedUrl;
   const assetUrl = new URL(url);
   const decodedPath = decodeURIComponentSafe(assetUrl.pathname);
@@ -139,7 +155,11 @@ function sourceAssetCandidate(resource: SourceSnapshotResource, page: SourceSnap
   let score = 0;
   let likelyKind: SourceAssetCandidate["likelyKind"] = "other";
   let excludedArtwork = false;
-  const firstParty = sourceImageHostIsFirstParty(assetUrl, new URL(page.finalUrl ?? page.requestedUrl));
+  const firstParty = firstPartyImageHost({
+    imageUrl: assetUrl.href,
+    pageUrl: page.finalUrl ?? page.requestedUrl,
+    linkedOtherSiteDomains
+  });
 
   if (!firstParty) {
     score -= 260;
@@ -257,6 +277,7 @@ function sourceAssetCandidate(resource: SourceSnapshotResource, page: SourceSnap
     sourcePageId: page.id,
     sourcePageUrl: page.finalUrl ?? page.requestedUrl,
     likelyKind,
+    firstPartyHost: firstParty,
     relevanceScore: score,
     relevanceReasons: reasons
   };
@@ -270,37 +291,6 @@ function sourcePageAssociationScore(page: SourceSnapshotPage) {
   else if (/\b(?:gallery|portfolio|projects?|remodel|before after|case stud(?:y|ies)|our work)\b/.test(normalizedSignal(`${page.path} ${page.title ?? ""}`))) score += 70;
   else if (/\bservices?\b/.test(normalizedSignal(`${page.path} ${page.title ?? ""}`))) score += 40;
   return score;
-}
-
-/**
- * Site-builder media CDNs that serve a site's own uploads. An image on one of
- * these hosts, loaded by the site's own page, is the business's upload rather
- * than a third-party dependency.
- */
-const siteBuilderMediaHostPattern = /(?:^|\.)(?:website-files\.com|webflow\.com|squarespace-cdn\.com|squarespace\.com|wixstatic\.com|wsimg\.com|shopify\.com|weebly\.com|editmysite\.com|multiscreensite\.com)$/;
-
-/**
- * An image is first-party when the site serves it from its own domain (any
- * subdomain), from a site-builder media CDN its page loads it from, or through
- * a WordPress image proxy of its own host. Stock and other third-party hosts
- * remain cross-origin dependencies.
- */
-export function sourceImageHostIsFirstParty(imageUrl: URL, pageUrl: URL) {
-  const imageHost = imageUrl.hostname.toLowerCase().replace(/^www\./, "");
-  const pageHost = pageUrl.hostname.toLowerCase().replace(/^www\./, "");
-  if (imageHost === pageHost || registrableDomain(imageHost) === registrableDomain(pageHost)) return true;
-  if (siteBuilderMediaHostPattern.test(imageHost)) return true;
-  if (/^i[0-3]\.wp\.com$/.test(imageHost)) {
-    return imageUrl.pathname.split("/")[1]?.toLowerCase().replace(/^www\./, "") === pageHost;
-  }
-  return false;
-}
-
-function registrableDomain(host: string) {
-  const labels = host.split(".");
-  if (labels.length <= 2) return host;
-  const depth = labels.at(-1)!.length === 2 && /^(?:co|com|net|org|gov|ac|edu)$/.test(labels.at(-2)!) ? 3 : 2;
-  return labels.slice(-depth).join(".");
 }
 
 /**
@@ -340,7 +330,6 @@ function normalizedSignal(value: string) {
     .trim();
 }
 
-const stockHostPattern = /(?:^|\.)(?:shutterstock|istockphoto|gettyimages|stock\.adobe|depositphotos|dreamstime|123rf|bigstockphoto|unsplash|pexels|pixabay|freepik)\.(?:com|net)$/;
 const stockPathPattern = /\b(?:adobe ?stock|shutterstock|istock(?:photo)?|getty ?images|depositphotos|dreamstime|123rf|bigstock|unsplash|pexels|pixabay|freepik|stock ?photo)\b|\/(?:11062b|nsplsh)_/;
 
 /** URL evidence that an image is licensed stock rather than the business's own photograph. */
@@ -352,7 +341,7 @@ export function stockImageSignal(url: string) {
     return false;
   }
   const path = decodeURIComponentSafe(parsed.pathname);
-  return stockHostPattern.test(parsed.hostname.toLowerCase())
+  return isStockOrMarketplaceImageHost(parsed.hostname)
     || stockPathPattern.test(path.toLowerCase())
     || stockPathPattern.test(normalizedSignal(path));
 }

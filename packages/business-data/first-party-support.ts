@@ -39,8 +39,6 @@ export type FirstPartySupportPageInput = {
   text: string;
   /** Absolute hrefs shown on the page, including tel: and mailto:. */
   links?: readonly string[];
-  /** Absolute image URLs the page loads. */
-  imageUrls?: readonly string[];
   lastModified?: string;
   purposeTags?: readonly string[];
 };
@@ -79,7 +77,6 @@ type IndexedPage = FirstPartyPageEvidence & {
   digits: string;
   emails: Set<string>;
   links: Set<string>;
-  imageHosts: Set<string>;
 };
 
 export class FirstPartySupport {
@@ -107,17 +104,10 @@ export class FirstPartySupport {
         links: new Set((page.links ?? []).flatMap((href) => {
           const normalized = normalizedFirstPartyHref(href);
           return normalized ? [normalized] : [];
-        })),
-        imageHosts: new Set((page.imageUrls ?? []).flatMap((url) => {
-          try {
-            return [new URL(url).hostname.toLowerCase().replace(/^www\./, "")];
-          } catch {
-            return [];
-          }
         }))
       };
     });
-    this.pages = this.indexed.map(({ tokens: _tokens, digits: _digits, emails: _emails, links: _links, imageHosts: _hosts, ...page }) => page);
+    this.pages = this.evidence(this.indexed);
   }
 
   /** Pages (never injected spam) whose visible text contains this exact token sequence. */
@@ -156,13 +146,17 @@ export class FirstPartySupport {
       .flatMap((page) => [...page.links].filter((href) => /^https?:\/\//.test(href))))];
   }
 
-  /** Registrable domains of other websites the business links to (partners, suppliers, platforms). */
+  /**
+   * Other websites the business links to (partners, suppliers, platforms).
+   * A link to a site's apex or www host names that whole registrable domain;
+   * a link to a subdomain (a file on a shared CDN) names only that host.
+   */
   linkedOtherSiteDomains(ownHost: string): Set<string> {
     const own = registrableDomain(ownHost.toLowerCase().replace(/^www\./, ""));
     return new Set(this.outboundLinks().flatMap((href) => {
       try {
-        const domain = registrableDomain(new URL(href).hostname.toLowerCase().replace(/^www\./, ""));
-        return domain === own ? [] : [domain];
+        const host = new URL(href).hostname.toLowerCase().replace(/^www\./, "");
+        return registrableDomain(host) === own ? [] : [host];
       } catch {
         return [];
       }
@@ -170,7 +164,7 @@ export class FirstPartySupport {
   }
 
   private evidence(pages: IndexedPage[]): FirstPartyPageEvidence[] {
-    return pages.map(({ tokens: _tokens, digits: _digits, emails: _emails, links: _links, imageHosts: _hosts, ...page }) => page);
+    return pages.map(({ tokens: _tokens, digits: _digits, emails: _emails, links: _links, ...page }) => page);
   }
 }
 
@@ -305,11 +299,17 @@ export function firstPartyImageHost(input: {
   } catch {
     return false;
   }
-  const imageHost = image.hostname.toLowerCase().replace(/^www\./, "");
+  const rawImageHost = image.hostname.toLowerCase();
+  const imageHost = rawImageHost.replace(/^www\./, "");
   const pageHost = page.hostname.toLowerCase().replace(/^www\./, "");
   if (imageHost === pageHost || registrableDomain(imageHost) === registrableDomain(pageHost)) return true;
   if (isStockOrMarketplaceImageHost(imageHost) || reviewOrWidgetPlatformHostPattern.test(imageHost)) return false;
-  if (input.linkedOtherSiteDomains?.has(registrableDomain(imageHost))) return false;
+  // A WordPress image proxy serves whichever site is named in its path.
+  if (/^i[0-3]\.wp\.com$/.test(imageHost)) return image.pathname.split("/")[1]?.toLowerCase().replace(/^www\./, "") === pageHost;
+  // Another business's own website (its www host, or a domain it links to) is not a media host.
+  if (rawImageHost.startsWith("www.")) return false;
+  const linkedSite = registrableDomain(imageHost);
+  if (input.linkedOtherSiteDomains?.has(imageHost) || input.linkedOtherSiteDomains?.has(linkedSite)) return false;
   return true;
 }
 
@@ -387,7 +387,7 @@ export function firstPartySupportFromSnapshotPages(
     externalLinks?: readonly string[];
     sitemap?: { lastModified?: string };
   }[],
-  options: { sourceHosts?: ReadonlyMap<string, string>; imageUrlsByPageUrl?: ReadonlyMap<string, readonly string[]> } = {}
+  options: { sourceHosts?: ReadonlyMap<string, string> } = {}
 ) {
   return new FirstPartySupport(pages.flatMap((page) => {
     if (page.outcome !== "fetched") return [];
@@ -402,7 +402,6 @@ export function firstPartySupportFromSnapshotPages(
       title: page.title,
       text: page.extractedText,
       links: page.externalLinks ?? [],
-      imageUrls: options.imageUrlsByPageUrl?.get(url) ?? options.imageUrlsByPageUrl?.get(page.requestedUrl) ?? [],
       ...(page.sitemap?.lastModified ? { lastModified: page.sitemap.lastModified } : {})
     }];
   }));
@@ -416,7 +415,6 @@ export function firstPartySupportFromCrawlPages(
     purposeTags: readonly string[];
     sourceTextBlocks: readonly { displayText: string }[];
     linkReferences: readonly { href: string }[];
-    assetReferences?: readonly { url?: string; href?: string; kind?: string }[];
   }[],
   lastModifiedByUrl?: ReadonlyMap<string, string>
 ) {

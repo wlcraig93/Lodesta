@@ -161,7 +161,6 @@ import {
   sourcePhotoPageRole,
   sourcePhotoPageRoles,
   sourceResourceIsAdoptableImage,
-  sourceImageHostIsFirstParty,
   stockImageSignal,
   type SourceAssetCandidate,
   type SourcePhotoPageRole
@@ -6085,13 +6084,7 @@ export function sourcePhotoCurationCandidates(pool: readonly SourcePhotoPoolItem
   return pool.flatMap((item) => {
     const resource = item.candidate.resource;
     const imageUrl = resource.finalUrl ?? resource.requestedUrl;
-    let firstParty = false;
-    try {
-      firstParty = sourceImageHostIsFirstParty(new URL(imageUrl), new URL(item.candidate.sourcePageUrl));
-    } catch {
-      firstParty = false;
-    }
-    if (!firstParty || stockImageSignal(imageUrl) || !resource.rawContentHash) return [];
+    if (!item.candidate.firstPartyHost || stockImageSignal(imageUrl) || !resource.rawContentHash) return [];
     return [{
       resourceId: resource.id,
       sourceId: resource.sourceSnapshotId,

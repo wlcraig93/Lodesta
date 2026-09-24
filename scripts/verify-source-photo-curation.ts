@@ -322,7 +322,9 @@ try {
     indexability: "indexable", headings: [], wordCount: 3, internalLinks: [], externalLinks: [], linkProminence: 1,
     extractedText: `Page ${path}`, textContentHash: sha256(`Page ${path}`), producer: "fixture", inputHash: sha256("fixture"), createdAt: now
   });
-  const homepage = page("page_home", "/");
+  // The homepage links the widget vendor's own website, so its image host is
+  // another business's domain, not a first-party media host.
+  const homepage = { ...page("page_home", "/"), externalLinks: ["https://www.vendor-widgets.example/"] };
   const gallery = page("page_gallery", "/gallery");
   const photos = [
     { id: "resource_home_hero", url: "https://pristine.example/media/home-hero.jpg", page: homepage, seed: 71, contentType: "image/jpeg" },

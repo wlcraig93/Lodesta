@@ -2358,9 +2358,31 @@ const reviewBrowser = await runArtifactBrowserGate({
 assert.equal(reviewBrowser.routesChecked, 1);
 assert.equal(reviewBrowser.allRoutesChecked, 1, "Focused author review performed work outside its selected visual route.");
 assert(!reviewBrowser.findings.some((finding) => finding.id === "accessibility.axe.complete"), "Focused author review ran the release-only accessibility suite.");
-assert.equal(reviewBrowser.captures.length, 9, "Author review did not retain natural and extended visual evidence.");
-assert.equal(reviewBrowser.captures.filter((capture) => capture.stage === "natural").length, 2, "Author review did not retain desktop and mobile natural-load evidence.");
-assert.equal(reviewBrowser.captures.filter((capture) => capture.stage === "settled").length, 7, "Author review did not retain full settled route evidence.");
+assert.deepEqual(
+  reviewBrowser.captures.map((capture) => `${capture.stage}:${capture.viewport}:${capture.frame}`),
+  ["settled:desktop:full", "settled:mobile:full"],
+  "Default author review must retain one full-page desktop and phone capture, and no tablet, sampled or natural-load frames."
+);
+for (const capture of reviewBrowser.captures.filter((item) => item.frame === "full")) {
+  const metadata = await sharp(capture.bytes).metadata();
+  const viewport = capture.viewport === "desktop" ? 1280 : 390;
+  assert.equal(metadata.width, viewport, `Full-page ${capture.viewport} review capture changed the viewport width.`);
+  assert(metadata.height! >= (capture.viewport === "desktop" ? 900 : 844), `Full-page ${capture.viewport} review capture is shorter than its viewport.`);
+}
+const tabletReviewBrowser = await runArtifactBrowserGate({
+  prepared,
+  buildInput,
+  blobStore: new MemoryBlobStore(),
+  capturePrefix: "verification/site-authoring-render-review-tablet",
+  routePaths: ["/", "/contact"],
+  captureMode: "review",
+  authorScreenshot: "tablet"
+});
+assert.deepEqual(
+  tabletReviewBrowser.captures.map((capture) => `${capture.route}:${capture.viewport}:${capture.frame}`),
+  ["/:tablet:top", "/contact:tablet:top"],
+  "A tablet author review must return exactly one native tablet first-viewport frame per route."
+);
 
 const focusedBrowser = await runArtifactBrowserGate({
   prepared,
@@ -2377,10 +2399,9 @@ assert.equal(focusedCaptures.length, 3, "Selection-aware homepage verification d
 assert(focusedCaptures.every((capture) => capture.focusSelector === ".hero"));
 assert(!focusedBrowser.findings.some((finding) => finding.id === "render.inspection_selection_missing"));
 
-// Route-level review frames deliberately sample the top, middle, and bottom of
-// long pages rather than tiling every pixel. Keep a target in the gap between
-// those frames to prove that the existing focus-selector path exposes a native
-// close-up without changing the ordinary sampling algorithm.
+// Route-level review captures the whole page, so a target far below the fold
+// (which the retired top/middle/bottom sampling missed) appears in the default
+// full-page capture; the focus-selector path still gives a native close-up.
 const inspectionGapMarkup = '<div class="inspection-sampling-spacer"><section class="inspection-gap-target" aria-label="Focused inspection target">Focused inspection target</section></div>';
 const inspectionGapPrepared = {
   ...prepared,
@@ -2439,12 +2460,12 @@ const inspectionGapDefaultBrowser = await runArtifactBrowserGate({
 const inspectionGapDefaultCaptures = inspectionGapDefaultBrowser.captures.filter((capture) => capture.stage === "settled");
 assert.deepEqual(
   inspectionGapDefaultCaptures.map((capture) => `${capture.viewport}:${capture.frame}`),
-  ["desktop:top", "desktop:middle", "desktop:bottom", "tablet:top", "mobile:top", "mobile:middle", "mobile:bottom"],
-  "Below-fold fixture did not retain the expected default sampled frames."
+  ["desktop:full", "mobile:full"],
+  "Below-fold fixture did not retain one full-page capture per desktop and phone viewport."
 );
 for (const capture of inspectionGapDefaultCaptures) {
   const bounds = await magentaBounds(capture.bytes);
-  assert.equal(bounds.count, 0, `Default ${capture.viewport}:${capture.frame} unexpectedly included the between-frame target.`);
+  assert(bounds.count > 10_000, `Default ${capture.viewport}:${capture.frame} did not include the below-fold target.`);
 }
 const inspectionGapFocusedBrowser = await runArtifactBrowserGate({
   prepared: inspectionGapPrepared,
@@ -2491,12 +2512,12 @@ for (const selectorFixture of [
     `${selectorFixture.prefix} selector did not retain bounded fallback evidence.`
   );
   assert(
-    fallbackBrowser.captures.some((capture) => capture.viewport === "mobile" && capture.stage === "settled" && capture.frame === "top"),
+    fallbackBrowser.captures.some((capture) => capture.viewport === "mobile" && capture.stage === "settled" && capture.frame === "full"),
     `${selectorFixture.prefix} selector did not fall back to an ordinary route frame.`
   );
   assert(!fallbackBrowser.captures.some((capture) => capture.frame === "focus"), `${selectorFixture.prefix} selector unexpectedly retained a focus frame.`);
 }
-console.log(JSON.stringify({ ok: true, focusedInspection: "between-frame-native-png", viewports: inspectionGapViewports.map(({ name, width, height }) => ({ name, width, height })), selectorFallback: ["missing", "invalid"] }));
+console.log(JSON.stringify({ ok: true, focusedInspection: "below-fold-native-png", viewports: inspectionGapViewports.map(({ name, width, height }) => ({ name, width, height })), selectorFallback: ["missing", "invalid"] }));
 
 const axeSabotage = `<script>window.axe=undefined;Object.defineProperty(window,"axe",{value:undefined,writable:false,configurable:false});</script>`;
 const axeUnavailablePrepared = {
@@ -3665,8 +3686,13 @@ assert(
   `Nested desktop and mobile disclosures did not reveal every destination: ${nestedDisclosureBrowser.findings.filter((finding) => finding.id === "functional.navigation_reachability").map((finding) => finding.message).join(" | ")}`
 );
 const nestedDesktopTop = nestedDisclosureBrowser.captures.find((capture) =>
-  capture.viewport === "desktop" && capture.frame === "top");
-assert(nestedDesktopTop, "The nested-disclosure regression did not retain its desktop top frame.");
+  capture.viewport === "desktop" && capture.frame === "full");
+assert(nestedDesktopTop, "The nested-disclosure regression did not retain its desktop full-page capture.");
+assert.deepEqual(
+  nestedDisclosureBrowser.captures.map((capture) => `${capture.viewport}:${capture.frame}`),
+  ["desktop:full", "mobile:navigation", "mobile:full"],
+  "Default homepage author review must add exactly one opened phone-navigation frame."
+);
 const nestedDesktopPixels = await sharp(nestedDesktopTop.bytes).removeAlpha().raw().toBuffer({ resolveWithObject: true });
 let nestedRedPixelCount = 0;
 for (let offset = 0; offset < nestedDesktopPixels.data.length; offset += nestedDesktopPixels.info.channels) {

@@ -20,7 +20,7 @@ export type BrowserGateCapture = {
   route: string;
   viewport: "desktop" | "tablet" | "mobile";
   stage?: "natural" | "settled";
-  frame?: "top" | "middle" | "bottom" | "overview" | "focus" | "navigation";
+  frame?: "top" | "middle" | "bottom" | "overview" | "focus" | "navigation" | "full";
   focusSelector?: string;
   pageState?: {
     scrollX: number;
@@ -89,8 +89,14 @@ export const defaultBrowserGateViewports: readonly BrowserGateViewport[] = [
   { name: "mobile" as const, width: 390, height: 844 }
 ];
 
-/** Author-review screenshot budget. Verification mode ignores this and keeps full release captures. */
-export type AuthorReviewScreenshot = "none" | "desktop-top" | "focus" | "full";
+/**
+ * Author-review screenshot policy. Verification mode ignores this and keeps
+ * its release captures. `full` photographs one full-page desktop and mobile
+ * capture per route plus the opened homepage phone navigation; `tablet` one
+ * tablet first-viewport frame per route; `focus` one focused desktop element
+ * frame; `none` keeps measured text only. Every mode measures all viewports.
+ */
+export type AuthorReviewScreenshot = "none" | "focus" | "full" | "tablet";
 
 export async function runArtifactBrowserGate(input: {
   prepared: PreparedSiteArtifact;
@@ -100,11 +106,7 @@ export async function runArtifactBrowserGate(input: {
   routePaths?: string[];
   focusSelector?: string;
   captureMode?: "verification" | "review";
-  /**
-   * Limits author-review PNG capture. `none` keeps measured text only;
-   * `desktop-top` returns one desktop top frame; `focus` returns one focused
-   * element frame. Omitted review callers keep the historical full set.
-   */
+  /** Author-review PNG capture policy; omitted review callers use `full`. */
   authorScreenshot?: AuthorReviewScreenshot;
   /** Author-review/operator/test viewport override. Final verification uses the defaults. */
   viewports?: readonly BrowserGateViewport[];
@@ -240,17 +242,6 @@ async function runArtifactBrowserGateOnce(input: {
           });
           if (!response?.ok()) routeFindings.push(finding("route.response", `Route returned ${response?.status() ?? "no response"}.`, route.path));
           const naturalMetrics = await inspectPage(page, activeLogoRevisionIds, ownerLogoRevisionIds);
-          if (authorScreenshot === "full" && input.captureMode === "review" && route.path === "/" && viewport.name !== "tablet") {
-            const naturalKey = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-natural.png`;
-            captures.push({
-              key: naturalKey,
-              route: route.path,
-              viewport: viewport.name,
-              stage: "natural",
-              frame: "top",
-              bytes: await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
-            });
-          }
           if (naturalMetrics.lazyAboveFoldImageCount > 0) {
             routeFindings.push(finding(
               "render.lazy_above_fold_image",
@@ -272,8 +263,10 @@ async function runArtifactBrowserGateOnce(input: {
           // presentation cannot be assessed honestly from the closed header,
           // while capturing every route would add redundant evidence and cost.
           if (viewport.name === "mobile" && (isAuthorReview || route.path === "/")) {
+            // Author review photographs the opened menu once, on the homepage;
+            // other routes still measure it.
             const openNavigation = await captureOpenNavigation(page, {
-              captureScreenshot: authorScreenshot === "full"
+              captureScreenshot: authorScreenshot === "full" && route.path === "/"
             });
             if (openNavigation) {
               if (openNavigation.bytes) {
@@ -1092,12 +1085,25 @@ async function runArtifactBrowserGateOnce(input: {
               if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
             });
             await page.waitForTimeout(50);
-            const captureDesktopTopOnly = authorScreenshot === "desktop-top";
-            if (captureDesktopTopOnly && viewport.name !== "desktop") {
-              // Measured text still runs on every viewport; only desktop top is photographed.
+            if (isAuthorReview) {
+              const reviewCapture = authorReviewCaptureFor(authorScreenshot, viewport.name);
+              if (reviewCapture) {
+                await settleScrollPosition(page, 0);
+                const pageState = await inspectCapturePageState(page);
+                captures.push({
+                  key: `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-${reviewCapture}.png`,
+                  route: route.path,
+                  viewport: viewport.name,
+                  stage: "settled",
+                  frame: reviewCapture,
+                  pageState,
+                  bytes: reviewCapture === "full"
+                    ? await captureAuthorReviewFullPage(page)
+                    : await page.screenshot({ fullPage: false, type: "png", animations: "disabled" })
+                });
+              }
             } else {
-              const retainExtendedEvidence = !captureDesktopTopOnly
-                && (input.captureMode === "review" || routeFindings.some(isTechnicalReleaseBlocker));
+              const retainExtendedEvidence = routeFindings.some(isTechnicalReleaseBlocker);
               const frames = !retainExtendedEvidence || viewport.name === "tablet"
                 ? ["top"] as const
                 : ["top", "middle", "bottom"] as const;
@@ -1149,6 +1155,34 @@ async function runArtifactBrowserGateOnce(input: {
     await browser?.close();
     await stopServer(harness.server);
   }
+}
+
+/** Which single author-review frame (if any) a viewport contributes. */
+function authorReviewCaptureFor(
+  authorScreenshot: AuthorReviewScreenshot,
+  viewport: BrowserGateViewport["name"]
+): "full" | "top" | undefined {
+  if (authorScreenshot === "full") return viewport === "tablet" ? undefined : "full";
+  if (authorScreenshot === "tablet") return viewport === "tablet" ? "top" : undefined;
+  return undefined;
+}
+
+/** Longest full-page author-review capture; taller pages are cut at this height. */
+export const authorReviewFullPageMaxHeight = 16_000;
+
+async function captureAuthorReviewFullPage(page: Page) {
+  const size = await page.evaluate(() => ({
+    width: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth, innerWidth),
+    height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, innerHeight)
+  }));
+  return page.screenshot({
+    fullPage: true,
+    type: "png",
+    animations: "disabled",
+    ...(size.height > authorReviewFullPageMaxHeight
+      ? { clip: { x: 0, y: 0, width: size.width, height: authorReviewFullPageMaxHeight } }
+      : {})
+  });
 }
 
 function allRouteCopyAdvisories(prepared: PreparedSiteArtifact, visuallyInspectedPaths: Set<string>) {

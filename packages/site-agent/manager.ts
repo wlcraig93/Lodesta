@@ -1547,11 +1547,13 @@ export const websiteManagerTools: Tool[] = [
       alt: { type: "string", minLength: 1, maxLength: 500 }
     }
   }),
-  tool("inspect_site", "Build the current workspace if needed, then inspect the pages in Lodesta's browser. It returns every release blocker finish would report on any page (contrast, navigation, links, layout), plus measured findings and desktop, tablet, phone and opened mobile-navigation screenshots for the representative sample. For an initial build, pass null for the architecture-selected representative sample; passing '/' inspects only the homepage. Pass an exact route to see a page not represented by the sample. Pass an exact route and CSS selector to see the first matching visible element close up. This never runs hard release verification.", {
+  tool("inspect_site", "Build the current workspace if needed, then inspect pages in Lodesta's browser. Returns every release blocker finish would report on any page plus measured layout findings (overflow, clipping, image scaling, contrast, text size, target size, empty controls) as text. Images (all high detail): full-page desktop (scaled to 640px wide) and phone images for the homepage and for inspected routes whose pixels changed since your last inspection; the opened phone menu once; and one sheet of first-viewport desktop and phone frames, labelled by route, for the other inspected routes. visualEvidenceFrames describes each image in order. route: null inspects the representative sample; an exact route inspects only that page, shown whole. full: routes that should also get full-page images. viewport: 'tablet' returns one tablet first-viewport frame per inspected route instead. route plus a CSS selector returns a native-resolution close-up of the first matching visible element. Never runs hard release verification.", {
     type: "object", additionalProperties: false, properties: {
       route: { type: ["string", "null"], pattern: "^/", maxLength: 300 },
-      selector: { type: ["string", "null"], minLength: 1, maxLength: 500 }
-    }, required: ["route", "selector"]
+      selector: { type: ["string", "null"], minLength: 1, maxLength: 500 },
+      viewport: { type: ["string", "null"], enum: ["tablet", null] },
+      full: { type: ["array", "null"], maxItems: 6, items: { type: "string", pattern: "^/", maxLength: 300 } }
+    }, required: ["route", "selector", "viewport", "full"]
   }),
   tool("request_input", "Pause and ask the owner one consequential question when essential direction is unavailable. Do not use this for routine creative choices you can make well.", {
     type: "object", additionalProperties: false, required: ["question"],

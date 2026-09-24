@@ -50,7 +50,20 @@ export type RuntimeVisualInspection = {
   inspectionHash: `sha256:${string}`;
   modelSummary: Record<string, unknown>;
   diagnosticSummary: Record<string, unknown>;
-  images?: Array<{ type: "input_image"; image_url: string; detail: "high" | "low" }>;
+  /** Per-route hash of the rendered full-page pixels, for changed-route detection. */
+  routeRenderHashes?: Record<string, string>;
+  /** Author images always carry explicit `high` detail; `auto` and `low` are never sent. */
+  images?: Array<{ type: "input_image"; image_url: string; detail: "high" }>;
+};
+
+/** Author-requested inspect_site capture: default full pages, a tablet frame, or an element close-up. */
+export type RuntimeVisualInspectionTarget = {
+  route?: string;
+  selector?: string;
+  label?: string;
+  authorScreenshot: "full" | "focus" | "tablet";
+  fullRoutes?: string[];
+  previousRouteRenderHashes?: Record<string, string>;
 };
 
 type RuntimeInspectionPhase = "browser_navigation_capture" | "visual_evidence_preparation" | "persistence";
@@ -70,6 +83,8 @@ export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
   };
   inspection?: RuntimeInspection<Checkpoint>;
   visualInspection?: RuntimeVisualInspection;
+  /** Last rendered pixels per route, retained across edits so inspect_site can show what changed. */
+  routeRenderHashes?: Record<string, string>;
   metrics: {
     builds: number;
     inspections: number;
@@ -107,6 +122,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   private retrievalRequests = 0;
   private retrievalFailures = 0;
   private mutatedWorkspace = false;
+  private routeRenderHashes: Record<string, string> | undefined;
 
   constructor(private readonly options: {
     kind: ManagerRunRequest["kind"];
@@ -124,12 +140,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     inspect(files: WorkspaceSourceFile[], sandboxRevision: string, signal?: AbortSignal): Promise<RuntimeInspection<Checkpoint>>;
     verify?(files: WorkspaceSourceFile[], sandboxRevision: string, signal?: AbortSignal): Promise<RuntimeInspection<Checkpoint>>;
     listBuiltRoutePaths?(sandboxRevision: string): Promise<string[]>;
-    inspectVisual?(files: WorkspaceSourceFile[], sandboxRevision: string, target: {
-      route?: string;
-      selector?: string;
-      label?: string;
-      authorScreenshot: "full" | "focus";
-    }, signal?: AbortSignal, onPhase?: (phase: RuntimeInspectionPhase, durationMs?: number) => void): Promise<RuntimeVisualInspection>;
+    inspectVisual?(files: WorkspaceSourceFile[], sandboxRevision: string, target: RuntimeVisualInspectionTarget, signal?: AbortSignal, onPhase?: (phase: RuntimeInspectionPhase, durationMs?: number) => void): Promise<RuntimeVisualInspection>;
     visualInspectionFeedback?: "prioritized-homepage" | "blockers-only-homepage" | "material-only-homepage" | "component-diagnostic-homepage" | "component-diagnostic-route-family" | "component-diagnostic-route-family-shared-first" | "component-diagnostic-route-family-quality-led" | "component-diagnostic-route-family-material-only" | "component-diagnostic-route-family-material-copy" | "component-diagnostic-route-family-balanced" | "component-diagnostic-route-family-component-evidence";
     configureLeadForm?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
     createImage?(args: Record<string, unknown>): Promise<ManagerToolExecution>;
@@ -146,6 +157,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       this.failedBuild = snapshot.failedBuild;
       this.inspection = snapshot.inspection;
       this.visualInspection = snapshot.visualInspection;
+      this.routeRenderHashes = snapshot.routeRenderHashes;
       this.builds = snapshot.metrics.builds;
       this.inspections = snapshot.metrics.inspections;
       this.readCalls = snapshot.metrics.readCalls;
@@ -258,6 +270,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       failedBuild: this.failedBuild ? structuredClone(this.failedBuild) : undefined,
       inspection: this.inspection ? structuredClone(this.inspection) : undefined,
       visualInspection: this.visualInspection ? structuredClone(this.visualInspection) : undefined,
+      routeRenderHashes: this.routeRenderHashes ? { ...this.routeRenderHashes } : undefined,
       metrics: this.metrics(),
       mutatedWorkspace: this.mutatedWorkspace
     };
@@ -637,11 +650,12 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     if (parsed.selector && !parsed.route) {
       return result({ ok: false, error: "inspection_selector_requires_route", message: "Supply an exact route with selector, or use selector: null for the ordinary inspection." });
     }
-    const authorScreenshot = parsed.selector ? "focus" as const : "full" as const;
+    const authorScreenshot = parsed.selector ? "focus" as const : parsed.viewport === "tablet" ? "tablet" as const : "full" as const;
     const route = parsed.route ?? (this.options.kind === "initial_build" ? undefined : this.options.selection?.route);
     const selection = this.options.selection?.route === route ? this.options.selection : undefined;
     const selector = authorScreenshot === "focus" ? parsed.selector ?? undefined : undefined;
-    const label = authorScreenshot === "full" ? selection?.label : undefined;
+    const label = authorScreenshot === "focus" ? undefined : selection?.label;
+    const fullRoutes = authorScreenshot === "full" ? parsed.full : undefined;
     let buildPerformed = false;
     if (!this.workspaceHash || !this.successfulBuild || this.successfulBuild.workspaceHash !== this.workspaceHash) {
       setPhase("build");
@@ -677,6 +691,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       && this.visualInspection.modelSummary.requestedSelector === selector
       && this.visualInspection.modelSummary.selectionLabel === label
       && this.visualInspection.modelSummary.authorScreenshot === authorScreenshot
+      && stableJson(this.visualInspection.modelSummary.requestedFullRoutes ?? []) === stableJson(fullRoutes ?? [])
     );
     if (!cached) {
       this.inspections += 1;
@@ -685,7 +700,9 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         route,
         selector,
         label,
-        authorScreenshot
+        authorScreenshot,
+        ...(fullRoutes?.length ? { fullRoutes } : {}),
+        ...(this.routeRenderHashes ? { previousRouteRenderHashes: this.routeRenderHashes } : {})
       }, signal, (phase, durationMs) => {
         setPhase(phase);
         if (durationMs === undefined) return;
@@ -694,6 +711,9 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         if (phase === "persistence") phaseTimings.persistenceMs = durationMs;
       });
       phaseTimings.visualInspectionMs = Date.now() - phaseStartedAt;
+      if (this.visualInspection.routeRenderHashes && Object.keys(this.visualInspection.routeRenderHashes).length) {
+        this.routeRenderHashes = { ...this.routeRenderHashes, ...this.visualInspection.routeRenderHashes };
+      }
     }
     const inspection = this.visualInspection;
     if (!inspection) return result({ ok: false, error: "visual_inspection_unavailable" });
@@ -1289,10 +1309,10 @@ function homepageVisualSummary(summary: Record<string, unknown>, feedbackMode: "
   const scopeGuidance = builtRoutes.length > inspectedRoutes.length
     ? `Fresh browser evidence in this pass covers only ${inspectedRoutes.join(", ")} (${inspectedRoutes.length} of ${builtRoutes.length} built routes). Do not treat it as current evidence for the other ${builtRoutes.length - inspectedRoutes.length} routes.`
     : visualEvidenceRoutes.length > 0 && inspectedRoutes.length > visualEvidenceRoutes.length
-      ? `Fresh deterministic browser findings cover ${inspectedRoutes.length} routes, while the supplied native frame covers ${visualEvidenceRoutes.join(", ")}. Match the image to the one-based visualEvidenceFrames index. Do not infer visual review for routes or states absent from that frame.`
+      ? `Fresh deterministic browser findings cover ${inspectedRoutes.length} routes, while the supplied images cover ${visualEvidenceRoutes.join(", ")}. Match each image to its one-based visualEvidenceFrames index. Do not infer visual review for routes or states absent from those images.`
       : visualEvidenceRoutes.length === 0
-        ? "This inspection returned measured browser text only. Pass an exact route for one desktop top screenshot, or an exact route plus CSS selector for one focused element screenshot."
-        : "";
+        ? "This inspection returned measured browser text only. Pass full with an exact route for its full-page images, or an exact route plus CSS selector for one focused element close-up."
+        : "Match each image to its one-based visualEvidenceFrames index: full-page images show a whole route; the first-viewport sheet shows only each route's opening screen at reduced scale. Pass full with a route to see all of it, or a route plus selector for a readable close-up.";
   const feedbackGuidance = [scopeGuidance, baseFeedbackGuidance].filter(Boolean).join(" ");
   return {
     ...rest,

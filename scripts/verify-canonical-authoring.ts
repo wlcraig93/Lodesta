@@ -160,8 +160,10 @@ assert.match(managerRuntime, /Readability, contrast, form text, essential target
 assert.match(managerRuntime, /Follow the task skill for design and content judgment/i);
 assert(workflow.includes("preferredRouteLimit: 5")
   && workflow.includes("defaultRoutes: input.releasePlan?.visualReviewRoutePaths")
-  && workflow.includes("createArtifactVisualFrames")
+  && workflow.includes("createAuthorInspectionImages")
   && workflow.includes("visualEvidenceFrames: visualFrames.map")
+  && workflow.includes("detail: imageDetail")
+  && !workflow.includes('detail: "auto"')
   && workflow.includes("authorScreenshot")
   && !workflow.includes("createArtifactRouteFamilyContactSheets")
   && workflow.includes("browserRoutePaths: input.releasePlan?.browserRoutePaths")

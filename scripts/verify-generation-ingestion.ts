@@ -1157,6 +1157,50 @@ assert.throws(
   }
 }
 
+// The same location-landing and offering rules hold for any trade: nothing in
+// them depends on the business's vertical.
+{
+  const roofingOrigin = "https://roofing-landing.example";
+  const roofingDocuments = new Map([
+    ["/", pageHtml("Summit Roofing", ["/roof-repair", "/services/gutter-cleaning", "/austin-tx-roof-repair", "/roof-repair-round-rock-tx", "/roof-repair-in-leander", "/gutter-cleaning-georgetown-texas", "/drain-cleaning-in-basements", "/areas/cedar-park-roofing"], "", "Proudly serving Travis and Williamson counties in Texas.")],
+    ["/roof-repair", pageHtml("Roof Repair")],
+    ["/services/gutter-cleaning", pageHtml("Gutter Cleaning")],
+    ["/austin-tx-roof-repair", pageHtml("Austin, TX Roof Repair")],
+    ["/roof-repair-round-rock-tx", pageHtml("Roof Repair Round Rock TX")],
+    ["/roof-repair-in-leander", pageHtml("Roof Repair in Leander")],
+    ["/gutter-cleaning-georgetown-texas", pageHtml("Gutter Cleaning Georgetown Texas")],
+    ["/drain-cleaning-in-basements", pageHtml("Drain Cleaning in Basements")],
+    ["/areas/cedar-park-roofing", pageHtml("Cedar Park roofing", [], "", "Service areas include Cedar Park TX.")]
+  ]);
+  const roofingCrawl = await crawlWebsiteForGeneration({
+    url: `${roofingOrigin}/`,
+    validateUrl: async (value) => value,
+    limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+    sleep: async () => undefined,
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = new URL(url).pathname;
+      if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+      if (path === "/sitemap.xml") return response("", 404, "text/plain");
+      const document = roofingDocuments.get(path);
+      return document ? response(document, 200) : response("missing", 404, "text/plain");
+    }
+  });
+  const roofingOfferings = new Set(selectSourceOfferingFacts(roofingCrawl.crawl, roofingCrawl.ingestion).map((offering) => offering.name));
+  for (const expected of ["Roof Repair", "Gutter Cleaning", "Drain Cleaning In Basements"]) {
+    assert.ok(roofingOfferings.has(expected), `Service page ${expected} lost offering authority: ${[...roofingOfferings].join(", ")}`);
+  }
+  for (const location of ["Austin Tx Roof Repair", "Tx Roof Repair", "Roof Repair Round Rock Tx", "Roof Repair In Leander", "Gutter Cleaning Georgetown Texas"]) {
+    assert.ok(!roofingOfferings.has(location), `City landing page ${location} became an offering: ${[...roofingOfferings].join(", ")}`);
+  }
+  // A first-party route named for the place is geographic evidence whatever
+  // trade words surround the place name.
+  const roofingAreas = sourcePreparationDiagnosticsFor(roofingCrawl.crawl, roofingCrawl.ingestion).facts
+    .filter((fact) => fact.kind === "service_area" && fact.disposition === "accepted")
+    .map((fact) => String(fact.value));
+  assert.ok(roofingAreas.includes("Cedar Park TX"), `A place-named location page lost its service area: ${roofingAreas.join(", ")}`);
+}
+
 // Best Pest / Haynes regressions: a first-party "Testimonials" section on a
 // non-review page (a Wix homepage strip with id-scoped cards, an About-page
 // tab label) yields verbatim attributed testimonials; a Google widget does not.
@@ -1462,7 +1506,7 @@ assert.deepEqual(new Set(listOfferings.map(o => o.name)), new Set([
 assert(listOfferings.every(o => o.evidence.sourceUrl === legacyServiceList.url && o.evidence.sourceBlockId),
   "Parsed offerings lost their exact first-party block provenance.");
 assert.deepEqual(
-  selectBusinessCategories(["Site Navigation Element", "LocalBusiness"], ["well pump repair"]),
+  selectBusinessCategories(["Site Navigation Element", "LocalBusiness"]),
   [],
   "Schema.org presentation types were admitted as business categories."
 );

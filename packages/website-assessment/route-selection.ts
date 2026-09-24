@@ -131,15 +131,15 @@ export function inferWebsiteHealthPurposeTags(
     return [];
   }
 
-  if (matchesSegment(lastSegment, ["service", "services", "pest-control", "commercial-pest-control"])
-    || /(?:^|-)(?:control|treatment|removal|repair|installation|replacement|management|extermination)$/.test(lastSegment)
+  if (matchesSegment(lastSegment, ["service", "services"])
+    || /(?:^|-)(?:control|treatment|removal|repair|installation|replacement|management|maintenance|cleaning|inspection)$/.test(lastSegment)
     || routeSegments.some((segment) => segment === "services" || segment === "service")) {
     return lastSegment === "service" || lastSegment === "services" ? ["services"] : ["service_detail"];
   }
 
   // Metadata is a deliberately weak final fallback. Require service language
-  // in both the title and description so a business name such as "Kind Pest
-  // Control" does not classify every route as a service page.
+  // in both the title and description so a business name such as "Kind Roof
+  // Repair" does not classify every route as a service page.
   const serviceTerms = ["service", "services", "treatment", "removal", "repair", "installation"];
   if (serviceTerms.some((term) => titleWords.includes(term))
     && serviceTerms.some((term) => descriptionWords.includes(term))) {

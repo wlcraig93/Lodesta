@@ -150,7 +150,7 @@ function sourceAssetCandidate(
   const signal = normalizedSignal(decodedPath);
   const pageSignal = normalizedSignal(`${page.path} ${page.title ?? ""}`);
   const identityPage = page.path === "/" || /\b(?:about|team|company)\b/.test(pageSignal);
-  const projectEvidencePage = /\b(?:gallery|portfolio|projects?|remodel|before after|case stud(?:y|ies)|our work)\b/.test(pageSignal);
+  const projectEvidencePage = /\b(?:gallery|portfolio|projects?|before after|case stud(?:y|ies)|our work)\b/.test(pageSignal);
   const reasons: string[] = [];
   let score = 0;
   let likelyKind: SourceAssetCandidate["likelyKind"] = "other";
@@ -288,7 +288,7 @@ function sourcePageAssociationScore(page: SourceSnapshotPage) {
   let score = role === "customer_content" ? 1_000 : role === "mechanical_archive" ? 0 : -1_000;
   if (page.path === "/") score += 100;
   else if (/\b(?:about|team|company)\b/.test(normalizedSignal(`${page.path} ${page.title ?? ""}`))) score += 80;
-  else if (/\b(?:gallery|portfolio|projects?|remodel|before after|case stud(?:y|ies)|our work)\b/.test(normalizedSignal(`${page.path} ${page.title ?? ""}`))) score += 70;
+  else if (/\b(?:gallery|portfolio|projects?|before after|case stud(?:y|ies)|our work)\b/.test(normalizedSignal(`${page.path} ${page.title ?? ""}`))) score += 70;
   else if (/\bservices?\b/.test(normalizedSignal(`${page.path} ${page.title ?? ""}`))) score += 40;
   return score;
 }
@@ -358,7 +358,7 @@ export type SourcePhotoPageRole = (typeof sourcePhotoPageRoles)[number];
 export function sourcePhotoPageRole(path: string, title?: string | null, architectureMapped = false): SourcePhotoPageRole {
   if (path === "/" || path === "") return "home";
   const signal = normalizedSignal(`${path} ${title ?? ""}`);
-  if (/\b(?:gallery|portfolio|projects?|remodel|before after|case stud(?:y|ies)|our work)\b/.test(signal)) return "portfolio";
+  if (/\b(?:gallery|portfolio|projects?|before after|case stud(?:y|ies)|our work)\b/.test(signal)) return "portfolio";
   if (/\b(?:about|team|company|staff|story)\b/.test(signal)) return "about";
   if (/\bservices?\b/.test(signal)) return "service";
   if (architectureMapped && !/\b(?:contact|blog|news|faq|reviews?|testimonials?|privacy|terms|careers?|jobs?)\b/.test(signal)) return "service";
@@ -374,7 +374,7 @@ export function sourcePhotoNotes(input: { imageUrl?: string; pagePath?: string; 
   const notes: string[] = [];
   const pageSignal = normalizedSignal(`${input.pagePath ?? ""} ${input.pageTitle ?? ""}`);
   if (input.pagePath === "/") notes.push("published on the source homepage");
-  else if (/\b(?:gallery|portfolio|projects?|remodel|before after|case stud(?:y|ies)|our work)\b/.test(pageSignal)) notes.push("published on a project or gallery page");
+  else if (/\b(?:gallery|portfolio|projects?|before after|case stud(?:y|ies)|our work)\b/.test(pageSignal)) notes.push("published on a project or gallery page");
   else if (/\b(?:about|team|company|staff|story)\b/.test(pageSignal)) notes.push("published on an about or team page");
   else if (/\bservices?\b/.test(pageSignal)) notes.push("published on a service page");
   if (input.imageUrl && stockImageSignal(input.imageUrl)) notes.push("URL indicates licensed stock photography, not this business's own work");

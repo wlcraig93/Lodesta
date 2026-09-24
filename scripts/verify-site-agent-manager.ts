@@ -308,7 +308,7 @@ assert(inspectionTool?.type === "function");
 assert.match(inspectionTool.description!, /Images \(all high detail\): full-page desktop \(scaled to 640px wide\) and phone images for the homepage and for inspected routes whose pixels changed/i);
 assert.match(inspectionTool.description!, /opened phone menu once.*one sheet of first-viewport desktop and phone frames, labelled by route/i);
 assert.match(inspectionTool.description!, /route: null inspects the representative sample; an exact route inspects only that page/i);
-assert.match(inspectionTool.description!, /full: routes that should also get full-page images. viewport: 'tablet'/i);
+assert.match(inspectionTool.description!, /full: routes that should also get full-page images; to review several specific pages, pass them together in full.*viewport: 'tablet'/i);
 assert.match(inspectionTool.description!, /route plus a CSS selector returns a native-resolution close-up/i);
 assert.doesNotMatch(inspectionTool.description!, /\bauto\b/i);
 assert(inspectionTool.parameters);

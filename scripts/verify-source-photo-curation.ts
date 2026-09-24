@@ -136,12 +136,19 @@ async function candidate(id: string, options: Partial<PhotoCurationCandidate> & 
   const selected = selectCuratedPhotos({ candidates, labels, fallbackAlt: "Fallback", limit: 8 });
   const ids = selected.map((photo) => photo.candidate.resourceId);
   const everything = selectCuratedPhotos({ candidates, labels, fallbackAlt: "Fallback", limit: 40 }).map((photo) => photo.candidate.resourceId);
-  assert(everything.includes("stocky") && everything.indexOf("stocky") > everything.indexOf("work_5"),
-    "A first-party photo that merely looks stock-like is demoted, not excluded.");
+  assert(everything.includes("stocky"),
+    "A polished first-party photo that merely looks stock-like is kept on its quality, not excluded for its look.");
+  {
+    const twin = new Map(labels);
+    twin.set("stocky", { ...labels.get("stocky")!, stockLike: false });
+    const withLook = selectCuratedPhotos({ candidates, labels, fallbackAlt: "Fallback", limit: 40 }).map((photo) => photo.candidate.resourceId);
+    const withoutLook = selectCuratedPhotos({ candidates, labels: twin, fallbackAlt: "Fallback", limit: 40 }).map((photo) => photo.candidate.resourceId);
+    assert.deepEqual(withLook, withoutLook, "A stock-like look changed a first-party photo's rank.");
+  }
   for (const excluded of ["flyer", "blurry", "watermarked", "stock_url", "tiny"]) {
     assert(!everything.includes(excluded), `Curation admitted ${excluded}.`);
   }
-  for (const excluded of ["flyer", "blurry", "stocky", "watermarked", "stock_url", "tiny"]) {
+  for (const excluded of ["flyer", "blurry", "watermarked", "stock_url", "tiny"]) {
     assert(!ids.includes(excluded), `Curation admitted ${excluded}.`);
   }
   assert.equal(selected.length, 8);

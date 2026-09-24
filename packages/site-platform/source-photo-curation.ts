@@ -310,10 +310,11 @@ export function selectCuratedPhotos(input: {
     if (label.quality === "poor" || label.overlay === "dominant") return [];
     const heroCapable = label.heroCapable && wideEnoughForHero(candidate)
       && (label.quality === "excellent" || label.quality === "good") && label.overlay === "none";
-    // Candidates are already first-party and free of stock URL evidence, so a
-    // stock-like look (common for polished professional shoots) only demotes.
+    // Candidates are already first-party and free of stock URL evidence. A
+    // stock-like look is common in polished professional shoots of the
+    // business's own work, so it is shown to the author but does not rank.
     const score = qualityPoints[label.quality] + (heroCapable ? 80 : 0) + rolePoints[candidate.pageRole]
-      + Math.max(-50, Math.min(50, candidate.relevanceScore / 10)) - (label.stockLike ? 150 : 0);
+      + Math.max(-50, Math.min(50, candidate.relevanceScore / 10));
     return [{ candidate, label, heroCapable, score }];
   }).sort((left, right) => right.score - left.score || left.candidate.resourceId.localeCompare(right.candidate.resourceId));
   type Scored = (typeof scored)[number];

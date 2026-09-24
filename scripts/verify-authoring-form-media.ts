@@ -184,8 +184,7 @@ try {
   const assetEvidence = await Reflect.get(canaryWorkflow, "createOperatorAssetEvidence").call(
     canaryWorkflow,
     assetEvidenceInput,
-    canonicalProfile.assetEvidenceLimit,
-    canonicalProfile.assetEvidencePresentation
+    canonicalProfile.assetEvidenceLimit
   ) as Array<{
     assetId: string;
     revisionId: string;
@@ -211,6 +210,8 @@ try {
     width: 24,
     height: 16,
     alt: "Retained logo candidate; inspect the pixels.",
+    sheet: 1,
+    cell: 1,
     mimeType: "image/webp",
     contentHash: assetEvidence[0]!.contentHash,
     dataUrl: assetEvidence[0]!.dataUrl

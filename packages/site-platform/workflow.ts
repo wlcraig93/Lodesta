@@ -86,6 +86,7 @@ import {
   leadFormConfigurationSchema,
   siteAgentRunSchema,
   siteAgentProvisionalMediaSchema,
+  siteAgentAssetCurationSchema,
   siteAgentArchitectureSchema,
   siteAgentContinuationHeadSchema,
   siteAgentContinuationSegmentSchema,
@@ -104,6 +105,7 @@ import {
   type SiteAgentRun,
   type SiteAgentContinuationHead,
   type AssetRevision,
+  type SiteAgentAssetCuration,
   type AssetRevisionRef,
   type BusinessFact,
   type BusinessState,
@@ -158,6 +160,9 @@ import {
   sourcePhotoPageRole,
   sourcePhotoPageRoles,
   sourceResourceIsAdoptableImage,
+  sourceImageHostIsFirstParty,
+  stockImageSignal,
+  type SourceAssetCandidate,
   type SourcePhotoPageRole
 } from "./source-resource-ranking";
 import {
@@ -180,10 +185,28 @@ import { websiteSetupOwnerInstruction } from "@/lib/website-setup-copy";
 import { scopedVisualInspectionRoutePaths } from "./visual-inspection-scope";
 import { logoPresentationRecipeVersion } from "./logo-preparation";
 import { prepareSourcePhoto, sourcePhotoWebRecipeVersion } from "./source-photo-preparation";
+import {
+  createOpenAiPhotoLabeler,
+  curateSourcePhotos,
+  sourcePhotoCurationModelId,
+  sourcePhotoCurationPoolLimit,
+  sourcePhotoCurationRemainderLimit,
+  type PhotoCurationCandidate,
+  type PhotoLabeler
+} from "./source-photo-curation";
 import { canonicalSourceLogoAssetId, canonicalSourceLogoRevisionId, materializeCanonicalSourceLogo, materializeSourceLogo } from "./source-logo-materialization";
 
 export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
+
+export type SourcePhotoPoolItem = {
+  candidate: SourceAssetCandidate;
+  page: SourceSnapshotPage | undefined;
+  path: string;
+  role: SourcePhotoPageRole;
+  pixels: { bytes: Buffer; width: number; height: number };
+};
 const idleLeaseMs = 10 * 60_000;
+const assetEvidenceSheetSize = 12;
 const rotationMs = 2 * 60 * 60_000;
 export const initialGenerationDeadlineMs = siteAgentRunGuardrailDefaults.initial_build.deadlineMs;
 export const siteEditDeadlineMs = siteAgentRunGuardrailDefaults.edit.deadlineMs;
@@ -217,7 +240,8 @@ export class SiteAuthoringWorkflow {
     sandbox?: AuthoringSandbox,
     private readonly manager = new WebsiteManagerAgent(),
     private readonly operationsRepository: PlatformOperationsRepository = platformOperationsRepository,
-    private readonly imageCreator: typeof createImageBytes = createImageBytes
+    private readonly imageCreator: typeof createImageBytes = createImageBytes,
+    private readonly photoLabeler: () => PhotoLabeler | undefined = () => createOpenAiPhotoLabeler()
   ) {
     this.sandboxWasInjected = Boolean(sandbox);
     this.sandbox = sandbox ?? lazyExternalClient(() => configuredRailwayAuthoringSandbox(this.blobStore));
@@ -2119,28 +2143,14 @@ export class SiteAuthoringWorkflow {
     const authoringProfile = liveAuthoringProfile(run.authoringProfileId, input.kind);
     const approvedArchitecture = input.currentFiles.find((file) => file.path === "src/approved-architecture.ts");
     const approvedPlan = approvedArchitecture ? parseApprovedArchitectureModule(approvedArchitecture.content) : undefined;
-    const sourceEvidenceReferences = await this.createOperatorVisualEvidence(
+    // Initial builds curate from a wider pool than the author's inventory
+    // sheets show; other runs keep the inventory ceiling.
+    const photoPool = await this.selectSourcePhotoPool(
       input.snapshots,
       input.sourcePages,
-      authoringProfile.sourceEvidenceLimit,
-      authoringProfile.sourceEvidenceSheetSize,
+      input.kind === "initial_build" ? sourcePhotoCurationPoolLimit : authoringProfile.sourceEvidenceLimit,
       approvedPlan?.routes.flatMap((route) => route.sourcePaths)
     );
-    const assetEvidenceReferences = await this.createOperatorAssetEvidence(
-      input.buildInput,
-      authoringProfile.assetEvidenceLimit,
-      authoringProfile.assetEvidencePresentation
-    );
-    const activeAuthoringProfile = sourceEvidenceReferences.length || assetEvidenceReferences.length
-      ? { ...authoringProfile, sourceEvidenceReferences, assetEvidenceReferences }
-      : authoringProfile;
-    const activeTaskSkill = activeAuthoringProfile.taskSkill;
-    const profileIdentity = managerAuthoringProfileIdentity(activeAuthoringProfile);
-    if (run.skillVersions["authoring-profile"] !== profileIdentity) {
-      run = await this.updateRun(run, {
-        skillVersions: { ...run.skillVersions, "authoring-profile": profileIdentity }
-      });
-    }
     const baseState = await this.repository.getBusinessState(input.buildInput.businessId);
     if (!baseState || baseState.ownerOperationalRevision !== input.buildInput.ownerOperationalRevision) {
       throw new Error("Authoring input does not match the canonical business state.");
@@ -2199,6 +2209,76 @@ export class SiteAuthoringWorkflow {
       getRetainedRevision: (revisionId) => this.repository.getAssetRevision(revisionId)
     });
     refreshEffectiveMedia(generatedRefs);
+    // Input preparation, not orchestration: an initial build starts with the
+    // business's best first-party photos already adopted as canonical media,
+    // labeled from their pixels. The author still chooses where to use them.
+    const curatedByAssetId = new Map<string, SiteAgentAssetCuration["selected"][number]>();
+    if (input.kind === "initial_build" && photoPool.length) {
+      const curated = await this.curateInitialPhotos({
+        run,
+        pool: photoPool,
+        businessName: effectiveBuildInput.business.name,
+        publicBuildInputId: input.buildInput.id,
+        signal: input.signal
+      });
+      run = curated.run;
+      const newRevisions: AssetRevision[] = [];
+      const newRefs: AssetRevisionRef[] = [];
+      const contentHashes = new Set(effectiveBuildInput.business.assets.map((asset) => asset.contentHash));
+      for (const photo of curated.selected) {
+        try {
+          const adopted = await this.materializeSourcePhoto({
+            snapshot: sourceCatalog.get(photo.sourceId),
+            sourceId: photo.sourceId,
+            resourceId: photo.resourceId,
+            sourcePageId: photo.sourcePageId,
+            kind: "photo",
+            alt: photo.alt,
+            buildInput: effectiveBuildInput
+          });
+          if (adopted.revision) {
+            const known = generatedRevisions.some((revision) => revision.id === adopted.revision!.id)
+              || newRevisions.some((revision) => revision.id === adopted.revision!.id);
+            if (!known) {
+              // Business assets are unique by content; a second resource with
+              // identical prepared bytes adds nothing.
+              if (contentHashes.has(adopted.ref.contentHash)) continue;
+              newRevisions.push(adopted.revision);
+              newRefs.push(adopted.ref);
+            }
+          }
+          contentHashes.add(adopted.ref.contentHash);
+          curatedByAssetId.set(adopted.ref.assetId, photo);
+        } catch {
+          // A curated photo that fails an adoption check is simply not offered.
+        }
+      }
+      if (newRevisions.length) {
+        await persistProvisionalMedia([...generatedRevisions, ...newRevisions], [...generatedRefs, ...newRefs]);
+        refreshEffectiveMedia(generatedRefs);
+      }
+    }
+    const curatedResourceIds = new Set([...curatedByAssetId.values()].map((photo) => photo.resourceId));
+    const sourceEvidenceReferences = await this.renderSourcePhotoEvidence(
+      photoPool.filter((item) => !curatedResourceIds.has(item.candidate.resource.id))
+        .slice(0, curatedResourceIds.size ? sourcePhotoCurationRemainderLimit : authoringProfile.sourceEvidenceLimit),
+      authoringProfile.sourceEvidenceSheetSize
+    );
+    const assetEvidenceReferences = await this.createOperatorAssetEvidence(
+      effectiveBuildInput,
+      authoringProfile.assetEvidenceLimit,
+      { provisionalRevisions: generatedRevisions, curated: curatedByAssetId }
+    );
+    const activeAuthoringProfile = sourceEvidenceReferences.length || assetEvidenceReferences.length
+      ? { ...authoringProfile, sourceEvidenceReferences, assetEvidenceReferences }
+      : authoringProfile;
+    const activeTaskSkill = activeAuthoringProfile.taskSkill;
+    const profileIdentity = managerAuthoringProfileIdentity(activeAuthoringProfile);
+    if (run.skillVersions["authoring-profile"] !== profileIdentity) {
+      run = await this.updateRun(run, {
+        skillVersions: { ...run.skillVersions, "authoring-profile": profileIdentity }
+      });
+    }
     const sourceWorkspace = createSourceWorkspace({
       buildInput: effectiveBuildInput,
       snapshots: [...sourceCatalog.values()],
@@ -2402,149 +2482,56 @@ export class SiteAuthoringWorkflow {
         getBuildInput: () => effectiveBuildInput,
         retainSource: retainProvisionalSource,
         adoptAsset: async ({ sourceId, resourceId, sourcePageId, kind, alt }) => {
-          const snapshot = sourceCatalog.get(sourceId);
-          const [resource, page] = await Promise.all([
-            this.repository.getSourceSnapshotResource(resourceId, sourceId),
-            this.repository.listSourceSnapshotPages(sourceId, sourcePageId).then((pages) => pages[0])
-          ]);
-          if (!snapshot || !resource || resource.sourceSnapshotId !== sourceId || !page) throw new Error("source_asset_not_found");
-          const mimeType = resource.contentType?.split(";", 1)[0]?.trim().toLocaleLowerCase();
-          if (resource.role !== "image" || resource.outcome !== "fetched" || !resource.storageKey || !resource.rawContentHash || !resource.blobContentHash || !resource.storedEncoding) {
-            throw new Error("source_asset_not_adoptable");
-          }
-          const rasterMimeType = mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/webp";
-          if (!rasterMimeType && !(kind === "logo" && mimeType === "image/svg+xml")) throw new Error("source_asset_mime_unsupported");
-          if (kind === "logo") {
-            // Recognition can miss opaque CDN filenames. The author can select
-            // retained pixels, but preparation and existing identity stay owned
-            // by the platform; this is not a logo replacement operation.
-            if (snapshot.businessId !== effectiveBuildInput.businessId || snapshot.sourceType !== "website"
-              || !input.buildInput.sourceSnapshotIds.includes(sourceId)
-              || page.sourceSnapshotId !== sourceId
-              || !resource.initiatorUrls.some((url) => url === page.requestedUrl || url === page.finalUrl)) {
-              throw new Error("source_logo_provenance_invalid");
-            }
-            const existingLogo = effectiveBuildInput.business.assets.find((asset) => asset.kind === "logo" && asset.activeForFutureBuilds);
-            if (existingLogo) {
-              if (existingLogo.assetId === canonicalSourceLogoAssetId(snapshot.businessId)
-                && existingLogo.revisionId === canonicalSourceLogoRevisionId({ sourceSnapshotId: sourceId, sourceContentHash: asContentHash(resource.rawContentHash) })) {
-                return existingLogo;
-              }
-              throw new Error("canonical_logo_already_available");
-            }
-            const retained = await this.blobStore.get(resource.storageKey);
-            if (!retained) throw new Error("source_asset_blob_missing");
-            const canonical = await materializeCanonicalSourceLogo({
-              snapshot, resources: [{ resource, bytes: retained.bytes }], pages: [page],
-              businessName: effectiveBuildInput.business.name, selectedResourceId: resourceId
+          if (kind !== "logo") {
+            const adopted = await this.materializeSourcePhoto({
+              snapshot: sourceCatalog.get(sourceId), sourceId, resourceId, sourcePageId, kind, alt,
+              buildInput: effectiveBuildInput
             });
-            if (canonical.status !== "canonical") throw new Error(`source_logo_unusable:${canonical.reason}`);
-            // Do not rewrite an already-retained non-logo revision's authority
-            // or violate the business/content uniqueness contract.
-            if (effectiveBuildInput.business.assets.some((asset) => asset.contentHash === canonical.ref.contentHash)) {
-              throw new Error("source_logo_already_adopted_as_media");
-            }
-            await this.blobStore.putImmutable({ key: canonical.ref.storageKey, bytes: canonical.materialization.bytes,
-              contentType: canonical.ref.mimeType, contentHash: asContentHash(canonical.ref.contentHash) });
-            await persistProvisionalMedia([...generatedRevisions, canonical.revision], [...generatedRefs, canonical.ref]);
+            if (!adopted.revision) return adopted.ref;
+            await persistProvisionalMedia(
+              generatedRevisions.some((candidate) => candidate.id === adopted.revision!.id) ? [...generatedRevisions] : [...generatedRevisions, adopted.revision],
+              generatedRefs.some((candidate) => candidate.revisionId === adopted.revision!.id) ? [...generatedRefs] : [...generatedRefs, adopted.ref]
+            );
             refreshEffectiveMedia(generatedRefs);
-            return canonical.ref;
+            return adopted.ref;
           }
-          const assetId = deterministicId("asset", { sourceId, resourceId });
-          const existingActiveRef = kind === "photo"
-            ? reusableActiveSourceAssetIdentityRef({ buildInput: effectiveBuildInput, assetId, kind })
-            : undefined;
-          if (existingActiveRef) return existingActiveRef;
-          const blob = await this.blobStore.get(resource.storageKey);
-          if (!blob) throw new Error("source_asset_blob_missing");
-          const raw = decodeRetainedSourceResource(resource, blob.bytes);
-          const sourceRasterMimeType = mimeType as "image/png" | "image/jpeg" | "image/webp";
-          const sourceContentHash = asContentHash(resource.rawContentHash);
-          const prepared = kind === "photo"
-            ? await prepareSourcePhoto({ bytes: raw, mimeType: sourceRasterMimeType, sourceContentHash })
-            : undefined;
-          const adoptedBytes = prepared?.bytes ?? raw;
-          const adoptedMimeType = prepared?.mimeType ?? sourceRasterMimeType;
-          const adoptedContentHash = prepared?.contentHash ?? sourceContentHash;
-          const dimensions = prepared ?? await sharp(raw, { limitInputPixels: 80_000_000, animated: false }).metadata();
-          const revisionId = prepared?.changed
-            ? deterministicId("asset_revision", {
-                sourceId,
-                resourceId,
-                rawContentHash: resource.rawContentHash,
-                sourcePhotoWebRecipeVersion,
-                preparedContentHash: prepared.contentHash
-              })
-            : deterministicId("asset_revision", {
-                sourceId,
-                resourceId,
-                rawContentHash: resource.rawContentHash
-              });
-          // Source-mirror blobs are content-addressed globally and may be
-          // shared by repeated ingestions of the same public website. Asset
-          // revisions are business-bound authorities, so each adopted image
-          // receives an immutable business-scoped copy instead
-          // of claiming or rewriting the shared mirror bytes.
-          const adoptedStorageKey = `site-assets/${effectiveBuildInput.businessId}/source/${revisionId}/${adoptedContentHash.slice("sha256:".length)}`;
-          const activeRef = reusableActiveSourceAssetRef({
-            buildInput: effectiveBuildInput,
-            revisionId,
-            assetId,
-            contentHash: adoptedContentHash,
-            storageKey: adoptedStorageKey,
-            mimeType: adoptedMimeType,
-            reuseContentMatch: !prepared?.changed
+          const { snapshot, resource, page } = await this.loadAdoptableSourceResource({
+            snapshot: sourceCatalog.get(sourceId), sourceId, resourceId, sourcePageId, kind
           });
-          if (activeRef) return activeRef;
-          await this.blobStore.putImmutable({
-            key: adoptedStorageKey,
-            bytes: adoptedBytes,
-            contentType: adoptedMimeType,
-            contentHash: adoptedContentHash
+          // Recognition can miss opaque CDN filenames. The author can select
+          // retained pixels, but preparation and existing identity stay owned
+          // by the platform; this is not a logo replacement operation.
+          if (snapshot.businessId !== effectiveBuildInput.businessId || snapshot.sourceType !== "website"
+            || !input.buildInput.sourceSnapshotIds.includes(sourceId)
+            || page.sourceSnapshotId !== sourceId
+            || !resource.initiatorUrls.some((url) => url === page.requestedUrl || url === page.finalUrl)) {
+            throw new Error("source_logo_provenance_invalid");
+          }
+          const existingLogo = effectiveBuildInput.business.assets.find((asset) => asset.kind === "logo" && asset.activeForFutureBuilds);
+          if (existingLogo) {
+            if (existingLogo.assetId === canonicalSourceLogoAssetId(snapshot.businessId)
+              && existingLogo.revisionId === canonicalSourceLogoRevisionId({ sourceSnapshotId: sourceId, sourceContentHash: asContentHash(resource.rawContentHash) })) {
+              return existingLogo;
+            }
+            throw new Error("canonical_logo_already_available");
+          }
+          const retained = await this.blobStore.get(resource.storageKey);
+          if (!retained) throw new Error("source_asset_blob_missing");
+          const canonical = await materializeCanonicalSourceLogo({
+            snapshot, resources: [{ resource, bytes: retained.bytes }], pages: [page],
+            businessName: effectiveBuildInput.business.name, selectedResourceId: resourceId
           });
-          const revision = assetRevisionSchema.parse({
-            schemaVersion: 1,
-            id: revisionId,
-            assetId,
-            businessId: effectiveBuildInput.businessId,
-            contentHash: adoptedContentHash,
-            storageKey: adoptedStorageKey,
-            mimeType: adoptedMimeType,
-            bytes: adoptedBytes.byteLength,
-            ...(dimensions.width ? { width: dimensions.width } : {}),
-            ...(dimensions.height ? { height: dimensions.height } : {}),
-            origin: "source_website",
-            provenance: {
-              origin: "source_website",
-              sourceUrl: resource.finalUrl ?? resource.requestedUrl,
-              sourcePageUrl: page.finalUrl ?? page.requestedUrl,
-              sourceSnapshotId: sourceId,
-              sourceResourceId: resourceId,
-              alt,
-              ...(prepared?.preparation ? { preparation: prepared.preparation } : {})
-            },
-            createdAt: snapshot.capturedAt
-          });
-          const ref: AssetRevisionRef = {
-            assetId,
-            revisionId: revision.id,
-            kind,
-            contentHash: revision.contentHash,
-            storageKey: revision.storageKey,
-            mimeType: revision.mimeType,
-            alt,
-            ...(revision.width ? { width: revision.width } : {}),
-            ...(revision.height ? { height: revision.height } : {}),
-            origin: revision.origin,
-            sourceFactIds: [],
-            activeForFutureBuilds: true
-          };
-          await persistProvisionalMedia(
-            generatedRevisions.some((candidate) => candidate.id === revision.id) ? [...generatedRevisions] : [...generatedRevisions, revision],
-            generatedRefs.some((candidate) => candidate.revisionId === revision.id) ? [...generatedRefs] : [...generatedRefs, ref]
-          );
+          if (canonical.status !== "canonical") throw new Error(`source_logo_unusable:${canonical.reason}`);
+          // Do not rewrite an already-retained non-logo revision's authority
+          // or violate the business/content uniqueness contract.
+          if (effectiveBuildInput.business.assets.some((asset) => asset.contentHash === canonical.ref.contentHash)) {
+            throw new Error("source_logo_already_adopted_as_media");
+          }
+          await this.blobStore.putImmutable({ key: canonical.ref.storageKey, bytes: canonical.materialization.bytes,
+            contentType: canonical.ref.mimeType, contentHash: asContentHash(canonical.ref.contentHash) });
+          await persistProvisionalMedia([...generatedRevisions, canonical.revision], [...generatedRefs, canonical.ref]);
           refreshEffectiveMedia(generatedRefs);
-          return ref;
+          return canonical.ref;
         },
         signal: input.signal
       }),
@@ -4703,6 +4690,20 @@ export class SiteAuthoringWorkflow {
     sheetSize: number,
     preferredSourcePaths: readonly string[] = []
   ): Promise<ManagerSourceEvidenceReference[]> {
+    const pool = await this.selectSourcePhotoPool(snapshots, pages, limit, preferredSourcePaths);
+    return this.renderSourcePhotoEvidence(pool, sheetSize);
+  }
+
+  /**
+   * Every distinct usable retained photo up to `limit`, decoded, in the order
+   * the author's inventory presents them.
+   */
+  private async selectSourcePhotoPool(
+    snapshots: SourceSnapshot[],
+    pages: SourceSnapshotPage[],
+    limit: number,
+    preferredSourcePaths: readonly string[] = []
+  ): Promise<SourcePhotoPoolItem[]> {
     const websiteSourceIds = new Set(snapshots
       .filter((snapshot) => websiteSourceSnapshotPayloadSchema.safeParse(snapshot.payload).success)
       .map((snapshot) => snapshot.id));
@@ -4808,13 +4809,21 @@ export class SiteAuthoringWorkflow {
       || right.candidate.relevanceScore - left.candidate.relevanceScore
       || left.candidate.resource.id.localeCompare(right.candidate.resource.id)
     );
+    return selected.map((item) => ({ ...item, pixels: decoded.get(item)! }));
+  }
+
+  /** Numbered contact sheets over a decoded photo pool. */
+  private async renderSourcePhotoEvidence(
+    selected: readonly SourcePhotoPoolItem[],
+    sheetSize: number
+  ): Promise<ManagerSourceEvidenceReference[]> {
     const references: ManagerSourceEvidenceReference[] = [];
     const sheetCount = Math.ceil(selected.length / sheetSize);
     let totalSheetBytes = 0;
     for (let sheetIndex = 0; sheetIndex < sheetCount; sheetIndex += 1) {
       const items = selected.slice(sheetIndex * sheetSize, (sheetIndex + 1) * sheetSize);
       const cells = items.map((item, index) => {
-        const pixels = decoded.get(item)!;
+        const pixels = item.pixels;
         return {
           item,
           pixels,
@@ -4863,15 +4872,248 @@ export class SiteAuthoringWorkflow {
     return references;
   }
 
+  /** Resolve and validate one retained source image for adoption. */
+  private async loadAdoptableSourceResource(input: {
+    snapshot: SourceSnapshot | undefined;
+    sourceId: string;
+    resourceId: string;
+    sourcePageId: string;
+    kind: "logo" | "photo" | "icon" | "other";
+  }) {
+    const { snapshot, sourceId, resourceId, sourcePageId, kind } = input;
+    const [resource, page] = await Promise.all([
+      this.repository.getSourceSnapshotResource(resourceId, sourceId),
+      this.repository.listSourceSnapshotPages(sourceId, sourcePageId).then((pages) => pages[0])
+    ]);
+    if (!snapshot || !resource || resource.sourceSnapshotId !== sourceId || !page) throw new Error("source_asset_not_found");
+    const mimeType = resource.contentType?.split(";", 1)[0]?.trim().toLocaleLowerCase();
+    if (resource.role !== "image" || resource.outcome !== "fetched" || !resource.storageKey || !resource.rawContentHash || !resource.blobContentHash || !resource.storedEncoding) {
+      throw new Error("source_asset_not_adoptable");
+    }
+    const rasterMimeType = mimeType === "image/png" || mimeType === "image/jpeg" || mimeType === "image/webp";
+    if (!rasterMimeType && !(kind === "logo" && mimeType === "image/svg+xml")) throw new Error("source_asset_mime_unsupported");
+    return {
+      snapshot,
+      resource: resource as SourceSnapshotResource & { storageKey: string; rawContentHash: string },
+      page,
+      mimeType: mimeType as "image/png" | "image/jpeg" | "image/webp" | "image/svg+xml"
+    };
+  }
+
+  /**
+   * The one non-logo source-image adoption path, shared by adopt_source_asset
+   * and pre-authoring photo curation: validate the retained resource, prepare
+   * a photo with the source-photo web recipe, keep an immutable business-scoped
+   * copy and return its provisional revision and ref. An active identity or
+   * revision is reused (no revision returned). The caller persists provisional
+   * media.
+   */
+  private async materializeSourcePhoto(input: {
+    snapshot: SourceSnapshot | undefined;
+    sourceId: string;
+    resourceId: string;
+    sourcePageId: string;
+    kind: "photo" | "icon" | "other";
+    alt: string;
+    buildInput: SitePublicBuildInput;
+  }): Promise<{ ref: AssetRevisionRef; revision?: AssetRevision }> {
+    const { sourceId, resourceId, kind, alt, buildInput } = input;
+    const { snapshot, resource, page, mimeType } = await this.loadAdoptableSourceResource(input);
+    const assetId = deterministicId("asset", { sourceId, resourceId });
+    const existingActiveRef = kind === "photo"
+      ? reusableActiveSourceAssetIdentityRef({ buildInput, assetId, kind })
+      : undefined;
+    if (existingActiveRef) return { ref: existingActiveRef };
+    const blob = await this.blobStore.get(resource.storageKey);
+    if (!blob) throw new Error("source_asset_blob_missing");
+    const raw = decodeRetainedSourceResource(resource, blob.bytes);
+    const sourceRasterMimeType = mimeType as "image/png" | "image/jpeg" | "image/webp";
+    const sourceContentHash = asContentHash(resource.rawContentHash);
+    const prepared = kind === "photo"
+      ? await prepareSourcePhoto({ bytes: raw, mimeType: sourceRasterMimeType, sourceContentHash })
+      : undefined;
+    const adoptedBytes = prepared?.bytes ?? raw;
+    const adoptedMimeType = prepared?.mimeType ?? sourceRasterMimeType;
+    const adoptedContentHash = prepared?.contentHash ?? sourceContentHash;
+    const dimensions = prepared ?? await sharp(raw, { limitInputPixels: 80_000_000, animated: false }).metadata();
+    const revisionId = prepared?.changed
+      ? deterministicId("asset_revision", {
+          sourceId,
+          resourceId,
+          rawContentHash: resource.rawContentHash,
+          sourcePhotoWebRecipeVersion,
+          preparedContentHash: prepared.contentHash
+        })
+      : deterministicId("asset_revision", {
+          sourceId,
+          resourceId,
+          rawContentHash: resource.rawContentHash
+        });
+    // Source-mirror blobs are content-addressed globally and may be
+    // shared by repeated ingestions of the same public website. Asset
+    // revisions are business-bound authorities, so each adopted image
+    // receives an immutable business-scoped copy instead
+    // of claiming or rewriting the shared mirror bytes.
+    const adoptedStorageKey = `site-assets/${buildInput.businessId}/source/${revisionId}/${adoptedContentHash.slice("sha256:".length)}`;
+    const activeRef = reusableActiveSourceAssetRef({
+      buildInput,
+      revisionId,
+      assetId,
+      contentHash: adoptedContentHash,
+      storageKey: adoptedStorageKey,
+      mimeType: adoptedMimeType,
+      reuseContentMatch: !prepared?.changed
+    });
+    if (activeRef) return { ref: activeRef };
+    await this.blobStore.putImmutable({
+      key: adoptedStorageKey,
+      bytes: adoptedBytes,
+      contentType: adoptedMimeType,
+      contentHash: adoptedContentHash
+    });
+    const revision = assetRevisionSchema.parse({
+      schemaVersion: 1,
+      id: revisionId,
+      assetId,
+      businessId: buildInput.businessId,
+      contentHash: adoptedContentHash,
+      storageKey: adoptedStorageKey,
+      mimeType: adoptedMimeType,
+      bytes: adoptedBytes.byteLength,
+      ...(dimensions.width ? { width: dimensions.width } : {}),
+      ...(dimensions.height ? { height: dimensions.height } : {}),
+      origin: "source_website",
+      provenance: {
+        origin: "source_website",
+        sourceUrl: resource.finalUrl ?? resource.requestedUrl,
+        sourcePageUrl: page.finalUrl ?? page.requestedUrl,
+        sourceSnapshotId: sourceId,
+        sourceResourceId: resourceId,
+        alt,
+        ...(prepared?.preparation ? { preparation: prepared.preparation } : {})
+      },
+      createdAt: snapshot.capturedAt
+    });
+    const ref: AssetRevisionRef = {
+      assetId,
+      revisionId: revision.id,
+      kind,
+      contentHash: revision.contentHash,
+      storageKey: revision.storageKey,
+      mimeType: revision.mimeType,
+      alt,
+      ...(revision.width ? { width: revision.width } : {}),
+      ...(revision.height ? { height: revision.height } : {}),
+      origin: revision.origin,
+      sourceFactIds: [],
+      activeForFutureBuilds: true
+    };
+    return { ref, revision };
+  }
+
+  /**
+   * Label and select the initial build's curated photo gallery from the
+   * retained first-party pool. The labels are a regenerable run intermediate
+   * with producer/model/input-hash provenance; a matching retained curation is
+   * reused on resume. A failed or unavailable vision pass falls back to
+   * ranking-only selection.
+   */
+  private async curateInitialPhotos(input: {
+    run: SiteAgentRun;
+    pool: readonly SourcePhotoPoolItem[];
+    businessName: string;
+    publicBuildInputId: string;
+    signal?: AbortSignal;
+  }) {
+    let run = input.run;
+    const candidates = sourcePhotoCurationCandidates(input.pool);
+    if (!candidates.length) return { run, selected: [] as SiteAgentAssetCuration["selected"] };
+    if (!run.guardrails) throw new Error("responses_run_guardrails_required");
+    managerGuardrailsAfterPriorUsage(run.guardrails, run.usage);
+    const labeler = this.photoLabeler();
+    const recorder = new SiteAgentEventRecorder(this.repository, this.blobStore, run.id);
+    const event = await recorder.open({
+      kind: "model_request",
+      name: "responses.create.photo_curation",
+      apiProvider: "openai",
+      modelId: labeler?.modelId ?? sourcePhotoCurationModelId,
+      summary: { candidates: candidates.length }
+    });
+    try {
+      const result = await curateSourcePhotos({
+        candidates,
+        labeler,
+        publicBuildInputId: input.publicBuildInputId,
+        businessName: input.businessName,
+        retained: run.assetCuration,
+        signal: input.signal
+      });
+      const usage = result.reused ? undefined : result.curation.usage;
+      await recorder.close(event, {
+        status: "succeeded",
+        apiProvider: "openai",
+        modelId: result.curation.modelId,
+        ...(usage ? {
+          inputTokens: usage.inputTokens,
+          cachedInputTokens: usage.cachedInputTokens,
+          reasoningTokens: usage.reasoningTokens,
+          outputTokens: usage.outputTokens,
+          costUsd: usage.costUsd,
+          costSource: usage.costSource,
+          upstreamInferenceCostUsd: usage.upstreamInferenceCostUsd,
+          modelDurationMs: usage.durationMs
+        } : {}),
+        summary: {
+          candidates: candidates.length,
+          duplicates: result.curation.duplicates.length,
+          labeled: result.curation.labels.length,
+          selected: result.curation.selected.length,
+          labeler: result.curation.labeler,
+          ...(result.curation.fallbackReason ? { fallbackReason: result.curation.fallbackReason } : {}),
+          inputHash: result.curation.inputHash,
+          reused: result.reused
+        }
+      });
+      if (!result.reused) {
+        run = await this.updateRun(run, {
+          assetCuration: siteAgentAssetCurationSchema.parse(result.curation),
+          usage: addRunUsage(run.usage, result.curation.usage)
+        });
+      }
+      return { run, selected: result.curation.selected };
+    } catch (error) {
+      await recorder.close(event, {
+        status: input.signal?.aborted ? "cancelled" : "failed",
+        apiProvider: "openai",
+        errorCode: error instanceof Error ? error.name : "photo_curation_failed",
+        summary: { candidates: candidates.length }
+      }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /**
+   * The canonical media the author may use directly: the logo, then curated
+   * photos (with their pixel labels), then other active media, on labeled
+   * contact sheets of twelve. Provisional revisions adopted earlier in this
+   * run are read from the run rather than the repository.
+   */
   private async createOperatorAssetEvidence(
     buildInput: SitePublicBuildInput,
-    limit: 2 | 4 | 8,
-    presentation: "individual" | "contact-sheet" = "individual"
+    limit: number,
+    options: {
+      provisionalRevisions?: readonly AssetRevision[];
+      curated?: ReadonlyMap<string, SiteAgentAssetCuration["selected"][number]>;
+    } = {}
   ): Promise<ManagerAssetEvidenceReference[]> {
+    const curated = options.curated ?? new Map();
     const active = buildInput.business.assets.filter((asset) => asset.activeForFutureBuilds);
+    const curatedOrder = [...curated.keys()];
     const ordered = [
       ...active.filter((asset) => asset.kind === "logo").slice(0, 1),
-      ...active.filter((asset) => asset.kind === "photo"),
+      ...active.filter((asset) => asset.kind === "photo" && curated.has(asset.assetId))
+        .sort((left, right) => curatedOrder.indexOf(left.assetId) - curatedOrder.indexOf(right.assetId)),
+      ...active.filter((asset) => asset.kind === "photo" && !curated.has(asset.assetId)),
       ...active.filter((asset) => asset.kind !== "logo" && asset.kind !== "photo")
     ];
     const selected = [] as typeof active;
@@ -4882,65 +5124,77 @@ export class SiteAuthoringWorkflow {
       selected.push(asset);
       if (selected.length === limit) break;
     }
-    const references: ManagerAssetEvidenceReference[] = [];
-    const sheetAssets: Array<{ asset: AssetRevisionRef; bytes: Buffer }> = [];
-    let totalBytes = 0;
+    const provisional = new Map((options.provisionalRevisions ?? []).map((revision) => [revision.id, revision]));
+    const entries: Array<{ asset: AssetRevisionRef; revision: AssetRevision; bytes: Buffer }> = [];
     for (const asset of selected) {
-      const revision = await this.repository.getAssetRevision(asset.revisionId);
+      const revision = provisional.get(asset.revisionId) ?? await this.repository.getAssetRevision(asset.revisionId);
       if (!revision || revision.contentHash !== asset.contentHash) continue;
       const blob = await this.blobStore.get(revision.storageKey).catch(() => undefined);
       if (!blob || sha256(blob.bytes) !== revision.contentHash) continue;
-      const preview = await sharp(blob.bytes, { limitInputPixels: 80_000_000, animated: false })
-        .rotate()
-        .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
-        .webp({ quality: 80, effort: 4 })
-        .toBuffer()
-        .catch(() => undefined);
-      if (!preview || totalBytes + preview.length > 2_500_000) continue;
-      totalBytes += preview.length;
-      sheetAssets.push({ asset, bytes: blob.bytes });
-      references.push({
-        assetId: asset.assetId,
-        revisionId: asset.revisionId,
-        kind: asset.kind,
-        origin: revision.provenance.origin,
-        ...(revision.provenance.origin === "source_website" ? {
-          sourceSnapshotId: revision.provenance.sourceSnapshotId,
-          ...(revision.provenance.sourceResourceId ? { sourceResourceId: revision.provenance.sourceResourceId } : {}),
-          sourcePageUrl: revision.provenance.sourcePageUrl
-        } : {}),
-        ...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {}),
-        ...(asset.kind === "photo" ? {
-          photoNotes: sourcePhotoNotes({
-            imageUrl: revision.provenance.origin === "source_website" ? revision.provenance.sourceUrl : undefined,
-            pagePath: revision.provenance.origin === "source_website" ? urlPath(revision.provenance.sourcePageUrl) : undefined,
-            width: asset.width,
-            height: asset.height
-          })
-        } : {}),
-        // Operator evidence is deliberately pixel-led. Retained alt text can
-        // be stale or plainly wrong (for example, a plumbing stock photo
-        // labeled as a service professional), so it must not prime the model
-        // before the paired pixels are inspected.
-        alt: asset.kind === "logo"
-          ? "Retained logo candidate; inspect the pixels."
-          : "Retained visual candidate; inspect the pixels.",
-        mimeType: "image/webp",
-        contentHash: sha256(preview),
-        dataUrl: `data:image/webp;base64,${preview.toString("base64")}`
-      });
+      entries.push({ asset, revision, bytes: blob.bytes });
     }
-    if (presentation === "contact-sheet" && references.length) {
-      const sheet = await createMediaContactSheet(sheetAssets, { neutralSemantics: true });
-      if (!sheet) return [];
+    const references: ManagerAssetEvidenceReference[] = [];
+    const sheetCount = Math.ceil(entries.length / assetEvidenceSheetSize);
+    let totalSheetBytes = 0;
+    for (let sheetIndex = 0; sheetIndex < sheetCount; sheetIndex += 1) {
+      const items = entries.slice(sheetIndex * assetEvidenceSheetSize, (sheetIndex + 1) * assetEvidenceSheetSize);
+      const cells = items.map((entry, index) => ({
+        ...entry,
+        cell: sheetIndex * assetEvidenceSheetSize + index + 1,
+        curation: curated.get(entry.asset.assetId)
+      }));
+      const sheet = await createMediaContactSheet(cells.map(({ asset, bytes, cell, curation }) => ({
+        asset,
+        bytes,
+        cell,
+        ...(curation ? { curation: { subject: curation.subject, quality: curation.quality, heroCapable: curation.heroCapable, alt: curation.alt } } : {})
+      })), {
+        neutralSemantics: true,
+        sheet: { number: sheetIndex + 1, count: sheetCount, total: entries.length, curated: curated.size > 0 }
+      }).catch(() => undefined);
+      if (!sheet || totalSheetBytes + sheet.length > 6_000_000) break;
+      totalSheetBytes += sheet.length;
       const contentHash = sha256(sheet);
       const dataUrl = `data:image/webp;base64,${sheet.toString("base64")}`;
-      return references.map((reference) => ({
-        ...reference,
-        mimeType: "image/webp" as const,
-        contentHash,
-        dataUrl
-      }));
+      for (const { asset, revision, cell, curation } of cells) {
+        references.push({
+          assetId: asset.assetId,
+          revisionId: asset.revisionId,
+          kind: asset.kind,
+          origin: revision.provenance.origin,
+          ...(revision.provenance.origin === "source_website" ? {
+            sourceSnapshotId: revision.provenance.sourceSnapshotId,
+            ...(revision.provenance.sourceResourceId ? { sourceResourceId: revision.provenance.sourceResourceId } : {}),
+            sourcePageUrl: revision.provenance.sourcePageUrl
+          } : {}),
+          ...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {}),
+          ...(asset.kind === "photo" ? {
+            photoNotes: sourcePhotoNotes({
+              imageUrl: revision.provenance.origin === "source_website" ? revision.provenance.sourceUrl : undefined,
+              pagePath: revision.provenance.origin === "source_website" ? urlPath(revision.provenance.sourcePageUrl) : undefined,
+              width: asset.width,
+              height: asset.height
+            })
+          } : {}),
+          // Operator evidence is pixel-led. Retained alt text can be stale or
+          // plainly wrong (for example, a plumbing stock photo labeled as a
+          // service professional), so only alt text this run derived from the
+          // pixels themselves is shown before the paired pixels are inspected.
+          alt: curation
+            ? curation.alt
+            : asset.kind === "logo"
+              ? "Retained logo candidate; inspect the pixels."
+              : "Retained visual candidate; inspect the pixels.",
+          ...(curation ? {
+            curation: { subject: curation.subject, quality: curation.quality, heroCapable: curation.heroCapable }
+          } : {}),
+          sheet: sheetIndex + 1,
+          cell,
+          mimeType: "image/webp",
+          contentHash,
+          dataUrl
+        });
+      }
     }
     return references;
   }
@@ -5797,6 +6051,38 @@ function addRunUsage(base: SiteAgentRun["usage"], next: SiteAgentRun["usage"]): 
     upstreamInferenceCostUsd: base.upstreamInferenceCostUsd + next.upstreamInferenceCostUsd,
     durationMs: base.durationMs + next.durationMs
   };
+}
+
+/**
+ * The curation candidates in a decoded photo pool: only the business's own
+ * photographs, served from a first-party host for the page that published
+ * them and carrying no stock evidence.
+ */
+export function sourcePhotoCurationCandidates(pool: readonly SourcePhotoPoolItem[]): PhotoCurationCandidate[] {
+  return pool.flatMap((item) => {
+    const resource = item.candidate.resource;
+    const imageUrl = resource.finalUrl ?? resource.requestedUrl;
+    let firstParty = false;
+    try {
+      firstParty = sourceImageHostIsFirstParty(new URL(imageUrl), new URL(item.candidate.sourcePageUrl));
+    } catch {
+      firstParty = false;
+    }
+    if (!firstParty || stockImageSignal(imageUrl) || !resource.rawContentHash) return [];
+    return [{
+      resourceId: resource.id,
+      sourceId: resource.sourceSnapshotId,
+      sourcePageId: item.candidate.sourcePageId,
+      sourcePageUrl: item.candidate.sourcePageUrl,
+      imageUrl,
+      rawContentHash: resource.rawContentHash,
+      pageRole: item.role,
+      relevanceScore: item.candidate.relevanceScore,
+      width: item.pixels.width,
+      height: item.pixels.height,
+      bytes: item.pixels.bytes
+    }];
+  });
 }
 
 function webResearchUsageForRun(usage: WebResearchUsage): SiteAgentRun["usage"] {

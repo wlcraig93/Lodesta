@@ -1231,6 +1231,47 @@ assert.equal(isLikelyInjectedSpamSourcePage({ path: "/residential/bed-bugs", tit
     "Closed versus open on the same day was not recorded as a conflict.");
 }
 
+// Proactive rendering: the homepage and gallery/review pages render even when
+// their static HTML has text, so JS-loaded quotes and photos are seen. A
+// failed proactive render keeps the static page without a crawl failure, and
+// the per-site cap bounds the work.
+{
+  const renderOrigin = "https://proactive-render.example";
+  const rendered: string[] = [];
+  const crawlRender = (maximumProactiveBrowserRenders: number) => crawlWebsiteForGeneration({
+    url: `${renderOrigin}/`,
+    validateUrl: async (value) => value,
+    limits: { minimumStartSpacingMs: 0, transientRetries: 0, maximumProactiveBrowserRenders },
+    sleep: async () => undefined,
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = new URL(url).pathname;
+      if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+      if (path === "/sitemap.xml") return response("", 404, "text/plain");
+      if (path === "/") return response(pageHtml("Home", ["/gallery", "/reviews", "/services"]), 200);
+      if (path === "/gallery") return response(pageHtml("Gallery"), 200);
+      if (path === "/reviews") return response(pageHtml("Reviews"), 200);
+      if (path === "/services") return response(pageHtml("Services"), 200);
+      throw new Error(`unexpected_render_fixture_url:${url}`);
+    },
+    browserFetch: async (url) => {
+      const path = new URL(url).pathname;
+      rendered.push(path);
+      if (path === "/reviews") throw new Error("render_timeout_fixture");
+      return pageHtml(path === "/" ? "Home" : "Gallery", [], "", "</p><blockquote>“The crew rebuilt our deck in two days and left the yard spotless.”</blockquote><p>");
+    }
+  });
+  const proactive = await crawlRender(8);
+  assert.deepEqual([...rendered].sort(), ["/", "/gallery", "/reviews"], "The homepage, gallery and reviews pages were not rendered proactively; ordinary pages must not be.");
+  assert.equal(proactive.ingestion.counts.failed, 0, "A failed proactive render was recorded as a crawl failure.");
+  const gallerySummary = proactive.crawl.pageSummaries.find((page) => new URL(page.url).pathname === "/gallery");
+  assert.ok(gallerySummary?.sourceTextBlocks.some((block) => /rebuilt our deck/.test(block.displayText)),
+    "JS-loaded gallery content was not captured from the rendered page.");
+  rendered.length = 0;
+  await crawlRender(1);
+  assert.equal(rendered.length, 1, "The per-site proactive render cap was not enforced.");
+}
+
 // A text block over the size cap is split into verbatim sentence-aligned
 // pieces, never dropped whole.
 {
@@ -2001,7 +2042,12 @@ assert(comprehensive.ingestion.counts.discovered > 260, "The crawler did not ret
 assert(comprehensive.ingestion.counts.fetched >= 263, "An implicit page cap prevented complete fetching.");
 assert.equal(comprehensive.ingestion.counts.unfinished, 0);
 assert.equal(comprehensive.ingestion.counts.failed, 0);
-assert.equal(comprehensive.ingestion.counts.browserRendered, 1);
+// The near-empty JavaScript shell must render; the homepage also renders
+// proactively (JS-loaded galleries and reviews), within the per-site cap.
+assert.equal(comprehensive.ingestion.counts.browserRendered, 2);
+assert.equal(comprehensive.ingestion.pages.find((page) => page.url === `${origin}/`)?.browserRendered, true,
+  "The homepage was not rendered proactively.");
+assert.equal(comprehensive.ingestion.limits.maximumProactiveBrowserRenders, 8);
 assert.equal(comprehensive.ingestion.pages.every((page) => ["fetched", "excluded", "failed", "unfinished"].includes(page.outcome)), true);
 assert.equal(comprehensive.ingestion.pages.some((page) => page.reason === "selection_limit"), false);
 assert.equal(comprehensive.ingestion.pages.find((page) => page.url === `${origin}/private/secret`)?.reason, "robots_disallowed");

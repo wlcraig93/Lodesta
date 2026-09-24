@@ -26,7 +26,9 @@ export const generationIngestionLimits = {
   requestTimeoutMs: 10_000,
   maximumResponseBytes: 32 * 1024 * 1024,
   transientRetries: 2,
-  rawResponseFuseBytes: 1024 * 1024 * 1024
+  rawResponseFuseBytes: 1024 * 1024 * 1024,
+  /** Per-site cap on content-rich pages rendered for JS-loaded galleries and reviews. */
+  maximumProactiveBrowserRenders: 8
 } as const;
 type GenerationIngestionLimitValues = { [Key in keyof typeof generationIngestionLimits]: number };
 
@@ -62,7 +64,8 @@ export const websiteGenerationIngestionSchema = z.object({
     requestTimeoutMs: z.number().int().positive(),
     maximumResponseBytes: z.number().int().positive(),
     transientRetries: z.number().int().nonnegative(),
-    rawResponseFuseBytes: z.number().int().positive()
+    rawResponseFuseBytes: z.number().int().positive(),
+    maximumProactiveBrowserRenders: z.number().int().nonnegative()
   }).strict(),
   counts: z.object({
     discovered: z.number().int().nonnegative(),
@@ -269,6 +272,7 @@ export async function crawlWebsiteForGeneration(input: {
   let fuseReached = false;
   let auxiliaryFailure = false;
   let browserRendered = 0;
+  let proactiveBrowserRenders = 0;
   let rawBytes = 0;
   let browserFallbackMs = 0;
 
@@ -410,17 +414,31 @@ export async function crawlWebsiteForGeneration(input: {
       summary.canonical ??= canonicalFromLinkHeader(fetched.linkHeader, fetched.finalUrl ?? item.url);
       let usedBrowser = false;
       let renderedCaptureKey: string | undefined;
-      if (shouldBrowserRender(summary)) {
+      // Near-empty static pages must be rendered. The homepage and gallery,
+      // portfolio, project, testimonial and review pages are also rendered,
+      // up to a per-site cap, because they commonly load photos and customer
+      // quotes with JavaScript. Third-party review widgets stay excluded as
+      // testimonials downstream. A proactive render that fails, or that shows
+      // less text than the static page, keeps the static page.
+      const requiredRender = shouldBrowserRender(summary);
+      const proactiveRender = !requiredRender
+        && proactiveBrowserRenders < limits.maximumProactiveBrowserRenders
+        && proactivelyRenderedPage(item.url, source);
+      if (requiredRender || proactiveRender) {
         const browserStarted = now();
+        if (proactiveRender) proactiveBrowserRenders += 1;
         try {
           const browserResult = await browserFetch(item.url, signal);
-          html = typeof browserResult === "string" ? browserResult : browserResult.html;
+          const renderedHtml = typeof browserResult === "string" ? browserResult : browserResult.html;
+          const renderedBytes = Buffer.from(renderedHtml);
+          if (renderedBytes.length > limits.maximumResponseBytes) throw new Error("browser_response_too_large");
+          const renderedSummary = summarizeCrawlHtml(renderedHtml, item.url);
+          if (proactiveRender && visibleTextLength(renderedSummary) < visibleTextLength(summary)) throw new Error("browser_render_not_richer");
+          html = renderedHtml;
           if (typeof browserResult !== "string") {
             for (const capture of browserResult.captures) retainCapture(capture);
           }
-          const renderedBytes = Buffer.from(html);
-          if (renderedBytes.length > limits.maximumResponseBytes) throw new Error("browser_response_too_large");
-          summary = summarizeCrawlHtml(html, item.url);
+          summary = renderedSummary;
           summary.canonical ??= canonicalFromLinkHeader(fetched.linkHeader, fetched.finalUrl ?? item.url);
           browserRendered += 1;
           usedBrowser = true;
@@ -438,8 +456,11 @@ export async function crawlWebsiteForGeneration(input: {
             initiatorUrls: [item.url]
           });
         } catch (error) {
-          auxiliaryFailure = true;
-          failures.push({ url: item.url, reason: "browser_failed", message: boundedMessage(error) });
+          // Only a required render's failure leaves the page incomplete.
+          if (requiredRender) {
+            auxiliaryFailure = true;
+            failures.push({ url: item.url, reason: "browser_failed", message: boundedMessage(error) });
+          }
         } finally {
           browserFallbackMs += Math.max(0, now() - browserStarted);
         }
@@ -456,7 +477,9 @@ export async function crawlWebsiteForGeneration(input: {
         };
       }
       const evidenceClass = classifyPageEvidence(summary, source.href);
-      const allLinks = extractDocumentLinks(html, fetched.finalUrl ?? item.url, source.hostname);
+      // A rendered page keeps every link its static HTML already exposed.
+      const allLinks = extractDocumentLinks(usedBrowser ? `${fetched.text}
+${html}` : html, fetched.finalUrl ?? item.url, source.hostname);
       const extractedText = extractDocumentText(html, summary);
       summaries.set(item.url, summary);
       documents.push({ url: item.url, finalUrl: fetched.finalUrl ?? item.url, html, extractedText, summary });
@@ -1301,9 +1324,27 @@ function classifyPageEvidence(page: CrawlPageSummary, sourceUrl: string): Eviden
   return "first_party";
 }
 
+function visibleTextLength(summary: CrawlPageSummary) {
+  return summary.sourceTextBlocks.reduce((total, block) => total + block.displayText.length, 0);
+}
+
 function shouldBrowserRender(summary: CrawlPageSummary) {
-  const text = summary.sourceTextBlocks.reduce((total, block) => total + block.displayText.length, 0);
+  const text = visibleTextLength(summary);
   return text < 200 && (summary.internalLinkCount > 0 || summary.imageCount > 0 || summary.title !== undefined);
+}
+
+/** The homepage and gallery, portfolio, project, testimonial and review pages. */
+function proactivelyRenderedPage(url: string, source: URL) {
+  let path: string;
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.replace(/^www\./, "") !== source.hostname.replace(/^www\./, "")) return false;
+    path = parsed.pathname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (path === "/" || path === "" || /^\/(?:index\.html?|home)\/?$/.test(path)) return true;
+  return /(?:^|\/|-)(?:gallery|galleries|portfolio|projects?|our-work|work|testimonials?|reviews?|case-stud(?:y|ies))(?:\/|-|\.html?|$)/.test(path);
 }
 
 export async function fetchGenerationPageWithBrowser(url: string, signal: AbortSignal, requestTimeoutMs: number, validateUrl: UrlValidator, validateNavigation: UrlValidator, maximumResponseBytes = generationIngestionLimits.maximumResponseBytes) {

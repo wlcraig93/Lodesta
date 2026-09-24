@@ -1060,6 +1060,39 @@ assert.throws(
   }
 }
 
+// Best Pest / Haynes regressions: a first-party "Testimonials" section on a
+// non-review page (a Wix homepage strip with id-scoped cards, an About-page
+// tab label) yields verbatim attributed testimonials; a Google widget does not.
+{
+  const wixHome = summarizeCrawlHtml(`<!doctype html><title>Best Pest</title><main>
+    <div id="WRchTxt8"><h5>Testimonials</h5></div>
+    <div id="comp-card1"><p>Best Pest &amp; Animal Control have done an outstanding job! They came out and placed traps the same day.</p><p>​</p><p>Kerry Dean, Essexville</p></div>
+    <div id="comp-card2"><p>Very professional and not out to make a quick buck. I wish ALL companies were this honest.</p><p>​</p><p>Kendra Avery, Bay City</p></div>
+  </main>`, "https://www.bestpestanimalcontrol.net/");
+  assert.deepEqual(
+    selectObservedFirstPartyTestimonials([wixHome], "https://www.bestpestanimalcontrol.net/").map((item) => item.author),
+    ["Kerry Dean", "Kendra Avery"],
+    "Attributed testimonial cards in a labeled homepage section were missed."
+  );
+  const tabbedAbout = summarizeCrawlHtml(`<!doctype html><title>About</title><main>
+    <div><div>Overview</div><div>Testimonials</div></div>
+    <div><p>We are a third generation family business.</p></div>
+    <div><div>Testimonials</div>
+      <div><div>“I have used him in the past, have recommended him to several people and am using him now.”</div></div>
+      <div><div>— Aimee B.</div></div>
+      <div><div>“Great service n dependable great prices too. Recommend to all.”</div></div>
+      <div><div>— Nancy A.</div></div>
+    </div>
+    <div><div>Customer Reviews</div><div>Based on 166 reviews</div><div>Posted on Google</div><div>Brenda Schmidt</div><div>“Had Haynes out today for annual pest control service and as always very thorough.”</div></div>
+  </main>`, "https://haynespestcontrol.com/about");
+  const tabbed = selectObservedFirstPartyTestimonials([tabbedAbout], "https://haynespestcontrol.com/");
+  assert.deepEqual(tabbed.map((item) => item.author), ["Aimee B.", "Nancy A."]);
+  assert.ok(tabbed.every((item) => !/Had Haynes out today/.test(item.text)), "A Google review widget became first-party testimony.");
+  const unlabeled = summarizeCrawlHtml(`<!doctype html><title>Home</title><main><div id="hero"><p>“We have served this valley with care for three decades and counting.”</p><p>Jim Smith</p></div></main>`, "https://unlabeled.example/");
+  assert.deepEqual(selectObservedFirstPartyTestimonials([unlabeled], "https://unlabeled.example/"), [],
+    "Quoted copy outside a review page or labeled testimonial section became a testimonial.");
+}
+
 // Altura regression: broken-markup link artifacts are never crawl inventory,
 // and injected off-topic posts are recognized only when the homepage never
 // mentions their topic.

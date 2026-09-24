@@ -1284,15 +1284,22 @@ export function selectObservedFirstPartyTestimonials(
   };
   for (const page of pages) {
     if (!sameSourceHost(page.url, sourceHost) || !sourceFactPageEligible(page, sourceUrl)) continue;
-    if (page.purposeTags.includes("reviews")) {
-      const widgetBlocks = new Set(page.thirdPartyReviewBlockIds ?? []);
-      const blocks = page.sourceTextBlocks
-        .filter((block) => !widgetBlocks.has(block.id))
-        .sort((left, right) => left.order - right.order);
-      for (const block of blocks) {
+    const widgetBlocks = new Set(page.thirdPartyReviewBlockIds ?? []);
+    const pageBlocks = page.sourceTextBlocks
+      .filter((block) => !widgetBlocks.has(block.id) && block.displayText.replace(/[\s​-‍⁠﻿]/g, ""))
+      .sort((left, right) => left.order - right.order);
+    // A review page is all review content; elsewhere only a section the
+    // business itself labels "Testimonials"/"Reviews" (a heading or a tab
+    // label) is, e.g. a homepage testimonial strip or an About-page tab.
+    const reviewSections = page.purposeTags.includes("reviews")
+      ? [pageBlocks]
+      : labeledTestimonialSections(pageBlocks);
+    for (const blocks of reviewSections) {
+      for (const [index, block] of blocks.entries()) {
         const blockquote = /^blockquote(?:[#.:]|$)/.test(block.containerId.split(" > ").at(-1) ?? "");
         const visiblyQuoted = /(?:^|\s)[“"][^”"]{20,}[”"](?:\s|$)/u.test(block.displayText);
-        if (blockquote || visiblyQuoted) accept({ text: block.displayText, sourceUrl: block.sourceUrl, sourceBlockId: block.id });
+        const author = blocks[index + 1] ? reviewAttributionName(blocks[index + 1]!.displayText) : undefined;
+        if (blockquote || visiblyQuoted) accept({ text: block.displayText, sourceUrl: block.sourceUrl, sourceBlockId: block.id, ...(author ? { author } : {}) });
       }
       for (const card of attributedReviewCards(blocks)) accept(card);
     }
@@ -1301,6 +1308,33 @@ export function selectObservedFirstPartyTestimonials(
     }
   }
   return testimonials.slice(0, 8);
+}
+
+const testimonialSectionLabel = /^(?:(?:our|client|customer)\s+)?(?:testimonials?|reviews?)\s*:?$|^what\s+(?:our\s+)?(?:customers|clients|neighbors|homeowners)\s+(?:are\s+)?say(?:ing)?(?:\s+about\s+us)?\s*:?$/i;
+const reviewPlatformMarker = /\b(?:posted on (?:google|yelp|facebook)|based on \d[\d,]* reviews|powered by|verified by)\b/i;
+
+/**
+ * Blocks following a first-party "Testimonials" label, up to the next heading
+ * or other short section label. A review-platform widget marker ends the
+ * section: widget content is the platform's, not the business's.
+ */
+function labeledTestimonialSections(blocks: SourceTextBlock[]) {
+  const sections: SourceTextBlock[][] = [];
+  for (let index = 0; index < blocks.length; index += 1) {
+    if (!testimonialSectionLabel.test(blocks[index]!.displayText.trim())) continue;
+    const section: SourceTextBlock[] = [];
+    for (let next = index + 1; next < blocks.length && section.length < 40; next += 1) {
+      const block = blocks[next]!;
+      const text = block.displayText.trim();
+      if (reviewPlatformMarker.test(text)) break;
+      if (sourceBlockHeadingLevel(block) && !reviewAttributionName(text)) break;
+      if (testimonialSectionLabel.test(text)) break;
+      section.push(block);
+    }
+    if (section.length) sections.push(section);
+    index += section.length;
+  }
+  return sections;
 }
 
 function sameSourceHost(url: string, sourceHost: string) {
@@ -1324,7 +1358,9 @@ function attributedReviewCards(blocks: SourceTextBlock[]): ObservedTestimonial[]
     if (!author) continue;
     const attribution = blocks[index];
     const card = sharedContainerPath(attribution.containerId, blocks[index - 1].containerId);
-    if (!card || card.split(" > ").length < 2) continue;
+    // A single shared ancestor is a card only when it is a specific element
+    // (an id), not a generic page-level wrapper.
+    if (!card || (card.split(" > ").length < 2 && !/#/.test(card))) continue;
     const inCard = (block: SourceTextBlock) => block.containerId.startsWith(`${card} > `);
     if (blocks.some((block, other) => other !== index && attributions[other] && inCard(block))) continue;
     const quote: SourceTextBlock[] = [];

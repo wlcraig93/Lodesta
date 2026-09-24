@@ -1563,7 +1563,6 @@ function mergeExtractedFacts(left: ExtractedBusinessFacts, right: ExtractedBusin
     reviewsSummary: left.reviewsSummary ?? right.reviewsSummary,
     categories: unique([...left.categories, ...right.categories]),
     services: unique([...left.services, ...right.services]),
-    serviceHighlights: unique([...(left.serviceHighlights ?? []), ...(right.serviceHighlights ?? [])]),
     serviceAreas: unique([...left.serviceAreas, ...right.serviceAreas]),
     socialLinks: unique([...left.socialLinks, ...right.socialLinks]),
     bookingLinks: unique([...left.bookingLinks, ...right.bookingLinks]),

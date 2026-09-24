@@ -111,7 +111,6 @@ export type ExtractedBusinessFacts = {
   hours?: Record<string, string>;
   categories: string[];
   services: string[];
-  serviceHighlights?: string[];
   serviceAreas: string[];
   socialLinks: string[];
   bookingLinks: string[];
@@ -686,7 +685,6 @@ function emptyExtractedFacts(): ExtractedBusinessFacts {
   return {
     categories: [],
     services: [],
-    serviceHighlights: [],
     serviceAreas: [],
     socialLinks: [],
     bookingLinks: [],
@@ -873,10 +871,8 @@ function extractBusinessFacts(
   facts.serviceAreas = unique([...facts.serviceAreas, ...extractVisibleServiceAreas(html)]);
   facts.services = unique([
     ...facts.services,
-    ...extractVisibleServices(html, page, facts.name),
-    ...extractServiceMentionsFromText(html)
+    ...extractVisibleServices(html, page, facts.name)
   ]).slice(0, 12);
-  facts.serviceHighlights = unique([...(facts.serviceHighlights ?? []), ...extractServiceHighlightsFromText(html)]).slice(0, 8);
   // The number the page links for calling is what customers use; structured
   // data alone does not override it, and loose page text is the last resort.
   facts.phone = normalizePhone(extractTelLinks(html)[0]) ?? facts.phone ?? normalizePhone(extractPhoneFromText(html));
@@ -891,7 +887,6 @@ function extractBusinessFacts(
 
   facts.categories = unique(facts.categories).slice(0, 8);
   facts.services = unique(facts.services).slice(0, 12);
-  facts.serviceHighlights = unique(facts.serviceHighlights).slice(0, 8);
   facts.serviceAreas = unique(facts.serviceAreas).slice(0, 50);
   facts.socialLinks = unique(facts.socialLinks).slice(0, 10);
   facts.orderingLinks = unique(facts.orderingLinks).slice(0, 6);
@@ -1157,6 +1152,19 @@ function extractVisibleServices(html: string, page: { url: string; title?: strin
   return unique(candidates.map(cleanServiceCandidate).filter((service): service is string => Boolean(service))).slice(0, 12);
 }
 
+/**
+ * "Services", "Our Services", "Roofing Services", "What We Do": a section
+ * heading that introduces the business's own list of services. At most two
+ * qualifying words may precede the noun, and a question or call to action
+ * ("Why Choose Our Services") is not a list heading.
+ */
+function isServiceSectionHeading(text: string) {
+  const value = text.trim();
+  if (/^(?:why|how|what(?! we)|when|where|who|choose|about|more|other|additional|explore|view|see|see all|all|book|request|get|call|contact)\b/i.test(value)) return false;
+  return /^(?:[a-z&'’-]+\s+){0,2}(?:services|treatments|solutions)\b/i.test(value)
+    || /^what we (?:do|treat|handle|help with|offer)$/i.test(value);
+}
+
 function extractServiceSectionHeadings(html: string) {
   const headings = [...html.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)]
     .map((match) => ({ level: Number(match[1]), text: cleanText(match[2]), html: match[2] }))
@@ -1164,7 +1172,7 @@ function extractServiceSectionHeadings(html: string) {
   const values: string[] = [];
   for (let index = 0; index < headings.length; index += 1) {
     const heading = headings[index];
-    if (!/^(?:(?:our|pest control|wildlife) )?(?:services|treatments|solutions)|what we (?:do|treat|handle|help with)$/i.test(heading.text)
+    if (!isServiceSectionHeading(heading.text)
       && !(heading.level === 1 && /\b(?:services|treatments|solutions)$/i.test(heading.text))) continue;
     for (let candidateIndex = index + 1; candidateIndex < headings.length; candidateIndex += 1) {
       const candidate = headings[candidateIndex];
@@ -1309,50 +1317,6 @@ function normalizeStateRegion(value: string | undefined) {
   return states[normalized] ?? value.toUpperCase();
 }
 
-function extractServiceMentionsFromText(html: string) {
-  const text = htmlToTextLines(html).join(" ");
-  const likelyFoodBusiness = /\b(restaurant|cafe|pizza|taqueria|bakery|coffee|dine[- ]?in|kitchen|bar and grill|breakfast|lunch|dinner)\b/i.test(text);
-  const servicePatterns: Array<[RegExp, string, { foodOnly?: boolean }?]> = [
-    [/\bhigh[-\s]?quality auto body repair\b|\bauto body repair\b|\bbody repair\b/i, "Auto Body Repair"],
-    [/\bpaintless dent repair\b|\bPDR\b/i, "Paintless Dent Repair"],
-    [/\bhail(?: damage)? repair\b|\bhail damage\b/i, "Hail Damage Repair"],
-    [/\bautomotive glass services?\b|\bauto glass\b|\bwindshields?\b|\bwindows alike\b/i, "Automotive Glass Services"],
-    [/\bcollision repair\b|\bfender benders?\b/i, "Collision Repair"],
-    [/\bprofessional paint services?\b|\bpaint services?\b|\bpaint\s*(?:and|&)\s*body\b|\bauto(?:motive)? paint\b|\bpaint repair\b/i, "Professional Paint Services"],
-    [/\bminor scratches\b|\bscratch(?:es)? repair\b|\bscratch damage\b|\bscuffs?\b/i, "Scratch Repair"],
-    [/\bframe repair\b|\bstructural repair\b/i, "Frame Repair"],
-    [/\bbumper repair\b/i, "Bumper Repair"],
-    [/\bdent repair\b/i, "Dent Repair"],
-    [/\bcatering\b/i, "Catering", { foodOnly: true }],
-    [/\btakeout\b|\bpickup\b/i, "Takeout And Pickup", { foodOnly: true }],
-    [/\bdelivery\b/i, "Delivery", { foodOnly: true }],
-    [/\bconsultations?\b/i, "Consultations"],
-    [/\bpreventive care\b|\bdental exams?\b/i, "Preventive Care"],
-    [/\bcosmetic dentistry\b|\bwhitening\b/i, "Cosmetic Dentistry"],
-    [/\blawn care\b/i, "Lawn Care"],
-    [/\blandscape design\b/i, "Landscape Design"],
-    [/\bseasonal cleanup\b/i, "Seasonal Cleanup"],
-    [/\bplumbing repairs?\b/i, "Plumbing Repair"],
-    [/\bhvac\b|\bheating and cooling\b/i, "HVAC Service"],
-    [/\belectrical repairs?\b/i, "Electrical Repair"]
-  ];
-  return servicePatterns.flatMap(([pattern, label, options]) => (!options?.foodOnly || likelyFoodBusiness) && pattern.test(text) ? [label] : []);
-}
-
-function extractServiceHighlightsFromText(html: string) {
-  const text = htmlToTextLines(html).join(" ");
-  const highlights: string[] = [];
-  if (/\bPDR\b|\bpaintless dent repair\b/i.test(text) && /\bhail\b/i.test(text)) {
-    highlights.push("PDR for smaller dents and hail repair");
-  } else if (/\bPDR\b|\bpaintless dent repair\b/i.test(text)) {
-    highlights.push("Paintless dent repair questions");
-  }
-  if (/\bautomotive glass services?\b|\bauto glass\b|\bwindshields?\b|\bwindows alike\b/i.test(text)) {
-    highlights.push("Automotive glass for windshields and windows");
-  }
-  return unique(highlights).slice(0, 6);
-}
-
 function isServicePath(pathname: string) {
   return /\/(?:services?|treatments?|practice-areas?|menu|repairs?|solutions?|what-we-do)(?:\/|$)/i.test(pathname);
 }
@@ -1368,7 +1332,8 @@ function serviceNameFromPath(pathname: string) {
 }
 
 function serviceTextLooksSpecific(value: string) {
-  if (!/\b(repair|install|clean|cleaning|consult|consultation|treatment|service|menu|catering|delivery|booking|appointment|estate|planning|injury|hvac|plumbing|electrical|landscap|lawn|color|cut|crowns?|whitening|exam|portrait|photography|collision|automotive|paint|body|dent|hail|windshield|glass|pdr)\b/i.test(value)) {
+  // Generic service-action words only; the trade itself never decides.
+  if (!/\b(?:repairs?|install(?:ation|s)?|replacements?|clean(?:ing)?|consult(?:ation)?s?|treatments?|services?|maintenance|inspections?|removal|control|care|menu|booking|appointments?|planning)\b/i.test(value)) {
     return false;
   }
   return Boolean(cleanServiceCandidate(value));
@@ -1525,7 +1490,7 @@ function plausibleVisibleServiceArea(value: string) {
     && words.length <= 6
     && value.length <= 80
     && /[a-z]/i.test(value)
-    && !/\b(?:areas?|customers?|clients?|homes?|businesses?|properties|residential|commercial|plumbing|repair|installation|service|needs?|community)\b/i.test(value)
+    && !/\b(?:areas?|customers?|clients?|homes?|businesses?|properties|residential|commercial|repairs?|installation|services?|needs?|community)\b/i.test(value)
     && !/^(?:local|nearby|nationwide|everywhere|all|surrounding)$/.test(normalized);
 }
 
@@ -1651,18 +1616,25 @@ function isPlaceholderEmail(email: string) {
   return /^(user|name|email|you|yourname|test|example)$/i.test(local) && /(?:domain|example|yourdomain)\./i.test(domain);
 }
 
+const titlePageLabel = /^(?:home|about(?: us)?|contact(?: us)?|gallery|portfolio|privacy policy|terms|services?|reviews?|testimonials?|faqs?|blog|careers?)$/i;
+
 function inferNameFromTitle(title: string | undefined, hostname: string) {
   const candidates = title
     ?.split(titleSegmentSeparator)
     .map((candidate) => cleanText(candidate))
     .filter((candidate): candidate is string => Boolean(candidate && candidate.length >= 2 && candidate.length <= 80));
-  const scored = (candidates ?? [])
+  // "Acme Co | About": a segment that labels the page marks the other
+  // segment as the site's name, whatever words that name uses.
+  const named = (candidates ?? []).filter((candidate) => !titlePageLabel.test(candidate));
+  const pairedWithPageLabel = named.length > 0 && named.length < (candidates?.length ?? 0);
+  const scored = named
     .map((candidate, index) => ({
       candidate,
-      score: titleNameScore(candidate, hostname, index === (candidates?.length ?? 0) - 1)
+      score: titleNameScore(candidate, hostname, index === named.length - 1)
     }))
     .sort((left, right) => right.score - left.score);
-  const best = scored.find((candidate) => candidate.score > 0);
+  const best = scored.find((candidate) => candidate.score > 0
+    || (pairedWithPageLabel && candidate.score >= 0 && candidate.candidate.trim().split(/\s+/).length >= 2));
   return best?.candidate;
 }
 
@@ -1690,7 +1662,7 @@ function extractVisibleBusinessNameCandidate(html: string, hostname: string) {
 /**
  * Site builders often carry a placeholder or shortened site title ("bob") in
  * <title>, og:site_name, and WebSite JSON-LD while every page displays the
- * real name ("Bob’s Pest Control") in a heading or copyright line. Only a
+ * real name ("Bob’s Roofing") in a heading or copyright line. Only a
  * displayed phrase that begins with the current name and scores at least as
  * well for this hostname may replace it; unrelated headlines never compete.
  */
@@ -1883,7 +1855,6 @@ function mergeExtractedBusinessFacts(left: ExtractedBusinessFacts, right: Extrac
     hours: mergeHours(left.hours, right.hours),
     categories: unique([...left.categories, ...right.categories]).slice(0, 8),
     services: unique([...left.services, ...right.services]).slice(0, 12),
-    serviceHighlights: unique([...(left.serviceHighlights ?? []), ...(right.serviceHighlights ?? [])]).slice(0, 8),
     serviceAreas: unique([...left.serviceAreas, ...right.serviceAreas]).slice(0, 50),
     socialLinks: unique([...left.socialLinks, ...right.socialLinks]).slice(0, 10),
     bookingLinks: unique([...left.bookingLinks, ...right.bookingLinks]).slice(0, 6),

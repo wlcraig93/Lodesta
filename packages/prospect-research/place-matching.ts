@@ -9,6 +9,12 @@ export type ProspectPlaceSeed = {
   county?: string | null;
   postalCode?: string | null;
   phone?: string | null;
+  /**
+   * The prospect's declared category ("pest_control", "Roofing contractor").
+   * When present, a candidate must carry that category, and its words are
+   * treated as generic when comparing names.
+   */
+  category?: string | null;
 };
 
 export type ProspectPlaceCandidate = {
@@ -26,19 +32,17 @@ export type ProspectPlaceCandidate = {
 export type ProspectPlaceEvaluation = {
   plausible: boolean;
   score: number;
-  verifiedPestBusiness: boolean;
+  categoryAgreement: boolean;
   compatibleName: boolean;
   geographyCompatible: boolean;
   strongIdentityAgreement: boolean;
   reasons: string[];
 };
 
-const pestTerms = /\b(pest|termite|exterminat(?:e|ing|or|ors|ion)?|fumigat(?:e|ing|ion)?|mosquito|bed\s*bug|wildlife\s+control)\b/i;
-const genericNameTokens = new Set([
-  "and", "the", "to", "pest", "pests", "control", "termite", "termites", "service", "services",
-  "solution", "solutions", "management", "exterminating", "exterminator", "exterminators", "extermination",
-  "fumigation", "tree", "company", "co", "inc", "incorporated", "llc", "ltd", "corp", "corporation"
-]);
+const baseGenericNameTokens = [
+  "and", "the", "to", "of", "service", "services", "solution", "solutions", "management",
+  "company", "co", "inc", "incorporated", "llc", "ltd", "corp", "corporation"
+];
 
 export function evaluateProspectPlace(seed: ProspectPlaceSeed, place: ProspectPlaceCandidate): ProspectPlaceEvaluation {
   const reasons: string[] = [];
@@ -59,21 +63,32 @@ export function evaluateProspectPlace(seed: ProspectPlaceSeed, place: ProspectPl
   const sourceStreetNumber = seed.addressLine1?.match(/^\s*(\d+)/)?.[1];
   const candidateStreetNumber = placeAddress.address_line_1?.match(/^\s*(\d+)/)?.[1];
   const sameStreet = Boolean(sourceStreetNumber && candidateStreetNumber && sourceStreetNumber === candidateStreetNumber && samePostal);
-  const name = nameAgreement(seed.names, placeName);
   const primaryType = place.primaryType?.toLowerCase();
-  const types = new Set([primaryType, ...(place.types ?? []).map((type) => type.toLowerCase())].filter(Boolean));
-  const categoryText = `${place.primaryTypeDisplayName?.text ?? ""} ${placeName}`;
-  const verifiedPestBusiness = types.has("pest_control_service") || pestTerms.test(categoryText);
+  const types = [primaryType, ...(place.types ?? []).map((type) => type.toLowerCase())].filter((type): type is string => Boolean(type));
+  const seedCategoryWords = categoryWords(seed.category);
+  const candidateCategoryWords = [
+    ...categoryWords(place.primaryTypeDisplayName?.text),
+    ...categoryWords(primaryType)
+  ];
+  // Words that name the category are shared by every business in it, so they
+  // never distinguish one business name from another.
+  const genericNameTokens = new Set([...baseGenericNameTokens, ...seedCategoryWords, ...candidateCategoryWords]);
+  const name = nameAgreement(seed.names, placeName, genericNameTokens);
+  const listingWords = normalizedText(`${place.primaryTypeDisplayName?.text ?? ""} ${placeName}`).split(" ");
+  const categoryAgreement = !seedCategoryWords.length
+    || types.some((type) => seedCategoryWords.every((word) => categoryWords(type).includes(word)))
+    || seedCategoryWords.every((word) => listingWords.includes(word));
+  const listedBusiness = businessPlace(types);
   const strongIdentityAgreement = samePhone || sameWebsite || sameStreet;
   const operational = place.businessStatus !== "CLOSED_PERMANENTLY";
   // The source roster is a discovery seed, not an identity authority. A county
-  // mismatch lowers confidence and is retained for review, but a verified pest
-  // business with a compatible name in the same state is still a valid Place-led
+  // mismatch lowers confidence and is retained for review, but a business of
+  // the declared category with a compatible name in the same state is still a valid Place-led
   // prospect. State conflicts remain disqualifying.
   const geographyCompatible = !regionConflict;
 
   let score = 0;
-  if (verifiedPestBusiness) { score += 4; reasons.push("verified_pest_business"); }
+  if (seedCategoryWords.length && categoryAgreement) { score += 4; reasons.push("same_category"); }
   if (place.businessStatus === "OPERATIONAL") { score += 1; reasons.push("operational"); }
   if (name.exact) { score += 8; reasons.push("exact_normalized_name"); }
   else if (name.brandExact) { score += 6; reasons.push("same_distinctive_name"); }
@@ -89,16 +104,18 @@ export function evaluateProspectPlace(seed: ProspectPlaceSeed, place: ProspectPl
   if (regionConflict) reasons.push("conflicting_state");
   if (countyConflict) reasons.push("conflicting_county");
   if (!operational) reasons.push("permanently_closed");
-  if (!verifiedPestBusiness) reasons.push("not_verified_as_pest_business");
+  if (!categoryAgreement) reasons.push("category_not_verified");
+  if (!listedBusiness) reasons.push("not_a_business_listing");
   if (!name.compatible && !strongIdentityAgreement) reasons.push("name_not_compatible");
 
   return {
     plausible: operational
-      && verifiedPestBusiness
+      && categoryAgreement
+      && listedBusiness
       && geographyCompatible
       && (name.compatible || strongIdentityAgreement),
     score,
-    verifiedPestBusiness,
+    categoryAgreement,
     compatibleName: name.compatible,
     geographyCompatible,
     strongIdentityAgreement,
@@ -106,16 +123,25 @@ export function evaluateProspectPlace(seed: ProspectPlaceSeed, place: ProspectPl
   };
 }
 
-function nameAgreement(sourceNames: string[], candidateName: string) {
+/** A geocoded address or area is not a business listing. */
+function businessPlace(types: string[]) {
+  return !types.length || !types.every((type) => /^(?:street_address|route|premise|subpremise|geocode|intersection|plus_code|postal_code|locality|political|administrative_area_level_\d|neighborhood|sublocality(?:_level_\d)?)$/.test(type));
+}
+
+function categoryWords(value?: string | null) {
+  return value ? normalizedText(value.replace(/_/g, " ")).split(" ").filter((word) => word && !baseGenericNameTokens.includes(word)) : [];
+}
+
+function nameAgreement(sourceNames: string[], candidateName: string, genericNameTokens: ReadonlySet<string>) {
   const candidate = normalizedBusinessName(candidateName);
-  const candidateBrand = distinctiveName(candidate);
+  const candidateBrand = distinctiveName(candidate, genericNameTokens);
   let compatible = false;
   let exact = false;
   let brandExact = false;
   for (const sourceName of sourceNames) {
     const source = normalizedBusinessName(sourceName);
     if (!source || !candidate) continue;
-    const sourceBrand = distinctiveName(source);
+    const sourceBrand = distinctiveName(source, genericNameTokens);
     const sourceCompact = source.replaceAll(" ", "");
     const candidateCompact = candidate.replaceAll(" ", "");
     const exactForName = source === candidate || sourceCompact === candidateCompact;
@@ -170,8 +196,10 @@ function normalizedBusinessName(value: string) {
     .trim();
 }
 
-function distinctiveName(value: string) {
-  return value.split(" ").filter((token) => token && !genericNameTokens.has(token)).join(" ");
+function distinctiveName(value: string, genericNameTokens: ReadonlySet<string>) {
+  return value.split(" ")
+    .filter((token) => token && !genericNameTokens.has(token) && !genericNameTokens.has(token.replace(/s$/, "")))
+    .join(" ");
 }
 
 function regionFromFormattedAddress(value?: string) {

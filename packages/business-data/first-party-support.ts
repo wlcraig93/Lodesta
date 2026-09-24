@@ -374,7 +374,7 @@ const topicPatterns: Array<[SensitiveFirstPartyTopic, RegExp]> = [
   ["offer", /\b(?:discounts?|coupons?|specials?|promo(?:tion)?s?|loyalty program|% off|save \d+%|limited[- ]time offer|free (?:estimates?|inspections?|quotes?|consultations?)|at no (?:additional|extra) cost|free of charge|free re[- ]?(?:treat|service))\b/i],
   ["guarantee", /\b(?:guarantee(?:d|s)?|warrant(?:y|ies|ied))\b/i],
   ["rating", /\b(?:\d(?:\.\d)?\s*(?:stars?|out of 5)|five[- ]star|5[- ]star|a\+ rating|bbb|ratings?)\b/i],
-  ["credential", /\b(?:licen[cs]ed|licensure|insured|bonded|certified|certification|accredited|award(?:ed|s)?|years? of experience|master (?:electrician|plumber))\b/i],
+  ["credential", /\b(?:licen[cs]ed|licensure|insured|bonded|certified|certification|accredited|award(?:ed|s)?|years? of experience|master [a-z]+(?:ian|er|ist))\b/i],
   ["availability", /\b(?:24\s*\/\s*7|24 hours|same[- ]day|next[- ]day|emergency|respond within|by appointment|business hours|open (?:daily|weekends|7 days)|(?:mon|tues|wednes|thurs|fri|satur|sun)day(?:s)?\s+(?:through|thru|to|-|–))\b/i],
   ["cadence", /\b(?:every \d+\s*(?:-|–|to)\s*\d+\s*(?:days?|weeks?|months?|years?)|every (?:\d+|one|two|three|other) (?:months?|weeks?)|every month|quarterly|bi[- ]?monthly|recurring visits?)\b/i],
   ["safety", /\b(?:safe(?:ty|r|st)?|eco[- ]?friendly|environmentally friendly|non[- ]?toxic|pet[- ]?safe|child[- ]?safe|organic|gentle on (?:your )?home|kind to the earth)\b/i]

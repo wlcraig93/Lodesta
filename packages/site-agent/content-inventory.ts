@@ -527,7 +527,7 @@ function extractFaqs(pages: InventoryPage[]) {
   return results;
 }
 
-const roleWords = "owner|co-owner|founder|co-founder|president|vice president|ceo|operator|general manager|office manager|operations manager|project manager|manager|foreman|crew lead|lead technician|technician|master electrician|electrician|arborist|estimator|installer|plumber|designer|detailer"
+const roleWords = "owner|co-owner|founder|co-founder|president|vice president|ceo|operator|general manager|office manager|operations manager|project manager|manager|foreman|crew lead|lead technician|technician|master [A-Za-z]+|licensed [A-Za-z]+|certified [A-Za-z]+|specialist|estimator|installer|designer"
   .split("|").map((role) => `[${role[0]!.toUpperCase()}${role[0]}]${role.slice(1)}`).join("|");
 const personName = "[A-Z][a-z'’]+(?:\\s+(?:[A-Z]\\.|[A-Z][a-z'’]+|“[A-Z][a-z]+”|\"[A-Z][a-z]+\")){0,2}";
 const rolePatterns = [
@@ -784,7 +784,7 @@ function extractMedia(pages: InventoryPage[]) {
 function plausiblePersonName(name: string) {
   const first = name.split(/\s+/)[0]!.replace(/[“”"]/g, "");
   if (first.length < 2) return false;
-  return !/^(?:The|Our|We|Your|This|That|Owner|Founder|President|Manager|Operator|Technician|Electrician|Arborist|Master|Lead|General|Office|Project|Operations|Contact|Call|Family|Local|Certified|Licensed|Professional|Home|About|Meet|Team|Service|Services|Company|Business|North|South|East|West|Central|Every|Each|All|Any|Both|Our|If|When|After|Before|With|From|For|And|But|Or|At|In|On|To|A|An|It|He|She|They|His|Her|Their|Finally|Also|However|Then|Next|First|Second|Lastly|Plus|Additionally|Today|Yes|No|Please|Thanks|Thank|Great|Good|Best|New|Free|Why|How|What|Who|Where)$/.test(first)
+  return !/^(?:The|Our|We|Your|This|That|Owner|Founder|President|Manager|Operator|Technician|Specialist|Master|Lead|General|Office|Project|Operations|Contact|Call|Family|Local|Certified|Licensed|Professional|Home|About|Meet|Team|Service|Services|Company|Business|North|South|East|West|Central|Every|Each|All|Any|Both|Our|If|When|After|Before|With|From|For|And|But|Or|At|In|On|To|A|An|It|He|She|They|His|Her|Their|Finally|Also|However|Then|Next|First|Second|Lastly|Plus|Additionally|Today|Yes|No|Please|Thanks|Thank|Great|Good|Best|New|Free|Why|How|What|Who|Where)$/.test(first)
     && !/\b(?:LLC|Inc|Corp|Company|Co|Group|Service|Services|Solutions)\b/.test(name);
 }
 

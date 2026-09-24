@@ -463,7 +463,7 @@ export async function ingestWebsite(input: {
       name,
       status: identityStatus,
       description: clean(facts.description),
-      categories: selectBusinessCategories(facts.categories, [name, ...facts.services])
+      categories: selectBusinessCategories(facts.categories)
     },
     contacts: { phone: clean(facts.phone), email: clean(facts.email) },
     locations,
@@ -565,16 +565,14 @@ export function sourceSnapshotIdForBusiness(businessId: string, contentHash: str
 }
 
 
-export function selectBusinessCategories(values: string[], sourceHints: string[] = []) {
-  const specific = unique(values.map((value) => clean(value)).filter((value): value is string => Boolean(value)))
-    .filter((value) => !/^(?:web ?page|profile ?page|collection ?page|item ?page|web ?site|breadcrumb ?list|site navigation element|thing|creative ?work|professional ?service|organization|local ?business)$/i.test(value));
-  const hintText = normalizedText(sourceHints.join(" "));
-  return unique([
-    ...specific,
-    ...(specific.some((value) => /pest|exterminat/i.test(value)) || /\b(?:pest control|exterminat(?:or|ion))\b/.test(hintText)
-      ? ["Pest Control Service"]
-      : [])
-  ]).slice(0, 20);
+/**
+ * Categories the business declares for itself. Generic schema.org
+ * presentation types are dropped; nothing is inferred from names or services.
+ */
+export function selectBusinessCategories(values: string[]) {
+  return unique(values.map((value) => clean(value)).filter((value): value is string => Boolean(value)))
+    .filter((value) => !/^(?:web ?page|profile ?page|collection ?page|item ?page|web ?site|breadcrumb ?list|site navigation element|thing|creative ?work|professional ?service|organization|local ?business)$/i.test(value))
+    .slice(0, 20);
 }
 
 export function selectSourceOfferingFacts(
@@ -609,13 +607,12 @@ export function selectSourceOfferingFacts(
     const segment = path.split("/").filter(Boolean).at(-1)
       ?.replace(/\.(?:html?|php|aspx?)$/i, "");
     if (!segment || isUtilityOfferingRouteSegment(segment)) return [];
-    // A city landing page ("/midland-mi-pest-control") markets a place, not a
+    // A city landing page ("/austin-tx-roofing") markets a place, not a
     // distinct offering; the offerings themselves come from service pages.
     if (!explicitServicePath && isLocationLandingOfferingSegment(segment, serviceAreaIdentities)) return [];
-    const name = canonicalOfferingName(segment.replace(/[-_]+/g, " "), serviceAreaIdentities);
+    const name = routeOfferingName(segment, page.title, serviceAreaIdentities);
     if (!name || !isPlausibleOfferingName(name)) return [];
-    const serviceShapedPath = explicitServicePath
-      || /\b(?:control|removal|extermination|exclusion|fumigation|inspection|management|repair|installation|replacement|testing|treatment|filtration|sanitizing|abandonment|trenching|drilling|service)s?\b/i.test(name);
+    const serviceShapedPath = explicitServicePath || genericServiceNounPattern.test(name);
     if (!page.purposeTags.includes("service_detail") && !serviceShapedPath) return [];
     const supporting = page.sourceTextBlocks.find((block) => normalizedText(block.displayText).includes(normalizedText(name)));
     return [{
@@ -716,6 +713,28 @@ export function selectSourceOfferingFacts(
     }));
 }
 
+/**
+ * The slug names a route's offering unless it is a category-first legacy
+ * slug that does not end in a service noun while the page's own title, using
+ * only the slug's words, does: "/insect-control-bed-bugs" titled "Bed Bug
+ * Control" is "Bed Bug Control".
+ */
+function routeOfferingName(segment: string, title: string | undefined, serviceAreaIdentities: string[]) {
+  const slugName = canonicalOfferingName(segment.replace(/[-_]+/g, " "), serviceAreaIdentities);
+  const titleName = canonicalOfferingName(title?.split(/\s+(?:[|•·]|[-–—])\s+/)[0], serviceAreaIdentities);
+  if (!slugName || !titleName) return slugName;
+  const words = (value: string) => normalizedText(value).split(" ").filter(Boolean).map(singularWord);
+  const endsInServiceNoun = (value: string) => genericServiceNounPattern.test(normalizedText(value).split(" ").at(-1) ?? "");
+  const slugWords = new Set(words(slugName));
+  const titleWords = words(titleName);
+  return !endsInServiceNoun(slugName)
+    && endsInServiceNoun(titleName)
+    && titleWords.length >= 2
+    && titleWords.every((word) => slugWords.has(word))
+    ? titleName
+    : slugName;
+}
+
 function explicitServiceSectionCandidates(blocks: SourceTextBlock[]) {
   const ordered = [...blocks].sort((left, right) => left.order - right.order);
   const candidates: Array<{ value: string; block: SourceTextBlock }> = [];
@@ -764,15 +783,16 @@ function isPlausibleOfferingName(value: string) {
   if (words.length < 1 || words.length > 8 || value.length > 100) return false;
   if (/^(?:\d+\s+)?(?:questions?|advantages?|benefits?|signs?|ways?|tips?|reasons?|things?)\b/.test(normalized)) return false;
   if (/^(?:how|why|when|what|where|can|should|guide to|complete guide|difference between)\b/.test(normalized)) return false;
-  if (/\b(?:header|footer|slider?|slide|mega(?:menu)?|builder|off canvas|bootstrap|font awesome|index php|option panel|tab content|portfolio|archive|category|infosurgepest|faq|blog|cost|price|pricing|online|20\d{2})\b/.test(normalized)) return false;
+  if (/\b(?:header|footer|slider?|slide|mega(?:menu)?|builder|off canvas|bootstrap|font awesome|index php|option panel|tab content|portfolio|archive|category|faq|blog|cost|price|pricing|online|20\d{2})\b/.test(normalized)) return false;
   if (/^(?:our\s+)?(?:services?|solutions?|offerings?)$/.test(normalized)) return false;
   if (/\b(?:gallery|specials?|discounts?|coupons?|covid(?:-?19)?|coronavirus)\b/.test(normalized)) return false;
   if (/^(?:other|additional|more)\b.*\b(?:services?|things?|products?)\b/.test(normalized)) return false;
+  if (/^(?:and\s+)?(?:much\s+)?(?:more|others?|etc)$/.test(normalized)) return false;
   if (/^(?:areas?|explore|more frequent|start consultation|get your quote|consultations?|residential|commercial|request(?: service)?|contact(?: us)?|call(?: now)?|email(?: us)?|submit|send|schedule|book|quote|get started|learn more|read more|view more)$/i.test(value)) return false;
   if (/^(?:commercial and residential|residential and commercial)$/.test(normalized)) return false;
   if (/^(?:schedule|call|book|request|get|contact|text|email)\b/.test(normalized) || /\d{3}\s?\d{3}\s?\d{4}/.test(normalized)) return false;
   if (looksLikeLocationLandingName(normalized)) return false;
-  if (/\b(?:family owned|locally owned|local and loved|environmentally friendly|safe for pets?|response times?|treatment around|foundation)\b/.test(normalized)) return false;
+  if (/\b(?:family owned|locally owned|local and loved|environmentally friendly|safe for (?:pets?|kids|children|families)|response times?)\b/.test(normalized)) return false;
   return true;
 }
 
@@ -793,16 +813,8 @@ function canonicalOfferingName(value: string | undefined, serviceAreaIdentities:
       .replace(new RegExp(`\\s+(?:in\\s+)?(?:${escaped})(?:\\s+(?:${usStateCodePatternSource}))?$`, "i"), "")
       .trim();
   }
-  normalized = normalized.replace(/\s+(?:nc|tx|fl|ga|va)$/i, "").trim();
+  normalized = normalized.replace(new RegExp(`\\s+(?:${unambiguousStateCodes})$`, "i"), "").trim();
   if (isUtilityOfferingRouteSegment(normalized.replace(/\s+/g, "-"))) return undefined;
-  if (normalized === "animal wildlife trapping") normalized = "animal and wildlife trapping";
-  else if (normalized === "insect control") normalized = "insect and pest control";
-  else if (/^insect control\s+/.test(normalized)) {
-    const subject = canonicalPestSubject(normalized.replace(/^insect control\s+/, ""));
-    normalized = `${subject} control`;
-  } else if (/\s+control trapping removal$/.test(normalized)) {
-    normalized = `${normalized.replace(/\s+control trapping removal$/, "")} trapping and removal`;
-  }
   if (!normalized) return undefined;
   return normalized
     .split(" ")
@@ -815,10 +827,10 @@ function canonicalOfferingName(value: string | undefined, serviceAreaIdentities:
 const usStateCodePatternSource = "al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc";
 
 /**
- * "midland-mi-pest-control", "saginaw-pest-control", "pest-control-in-midland":
+ * "austin-tx-roofing", "round-rock-hair-salon", "roof-repair-in-austin":
  * a known service area, or a leading place followed by a state code, marks a
  * location landing page. State codes that are also English words ("in", "or",
- * "me") only count after a known area, so "mice-in-walls" stays a service.
+ * "me") only count after a known area, so "leaks-in-walls" stays a service.
  */
 function isLocationLandingOfferingSegment(segment: string, serviceAreaIdentities: string[]) {
   const words = normalizedText(segment.replace(/[-_]+/g, " "));
@@ -831,14 +843,17 @@ function isLocationLandingOfferingSegment(segment: string, serviceAreaIdentities
 
 const unambiguousStateCodes = "al|ak|az|ar|ca|ct|fl|ga|ia|il|ks|ky|md|mi|mn|ms|mt|nc|nd|nh|nj|nm|nv|ny|ri|sc|sd|tn|tx|ut|vt|va|wa|wi|wv|wy|dc";
 const usStateNames = "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming";
-const serviceNoun = "control|services?|exterminators?|extermination|removal|inspections?|treatments?|management|company";
+/** Generic service-action nouns that end a service name in any trade. */
+const serviceNoun = "control|services?|removal|inspections?|treatments?|management|company|companies|repairs?|installations?|replacements?|cleaning|maintenance|contractors?|care";
+/** A route named for a generic service action ("/roof-repair", "/drain-cleaning"). */
+const genericServiceNounPattern = /\b(?:control|removal|inspection|management|repair|installation|replacement|testing|treatment|maintenance|cleaning|service)s?\b/i;
 const nonPlaceTargets = "homes?|houses?|attics?|walls?|kitchens?|hotels?|restaurants?|schools?|offices?|businesses|apartments?|crawl ?spaces?|yards?|gardens?|lawns?|basements?|garages?|warehouses?|the home|your home|winter|summer|spring|fall";
 
 /**
- * Offering names that are really city landing pages: "Midland Mi Pest
- * Control", "Pest Control Brooklyn Ny", "Termite Control Avon Park Florida",
- * "Pest Control In Frostproof". A state after the place, or "<service> in
- * <Place>", marks a location; "Rodent Control In Attics" stays a service.
+ * Offering names that are really city landing pages: "Austin Tx Roof
+ * Repair", "Roof Repair Brooklyn Ny", "Gutter Cleaning Avon Park Florida",
+ * "Roof Repair In Frostproof". A state after the place, or "<service> in
+ * <Place>", marks a location; "Drain Cleaning In Basements" stays a service.
  */
 function looksLikeLocationLandingName(normalized: string) {
   const state = `(?:${unambiguousStateCodes}|${usStateNames})`;
@@ -852,28 +867,21 @@ function isUtilityOfferingRouteSegment(value: string) {
   return /^(?:index|home|default|about(?:-us)?|contact(?:-us)?|image-credit|privacy(?:-policy)?|terms(?:-of-(?:use|service))?|cookies?|accessibility|sitemap|search|login|account)$/i.test(value.trim());
 }
 
-function canonicalPestSubject(value: string) {
-  const subjects: Record<string, string> = {
-    ants: "ant",
-    "bed bugs": "bed bug",
-    "bees and wasps": "bee and wasp",
-    fleas: "flea",
-    flies: "fly",
-    mosquitos: "mosquito",
-    mosquitoes: "mosquito",
-    roach: "cockroach",
-    roaches: "cockroach",
-    spiders: "spider"
-  };
-  return subjects[value] ?? value;
+/**
+ * One identity per offering regardless of the generic service noun a page
+ * uses or a plural: "Gutter Cleaning Service" and "Gutter Cleanings" match.
+ */
+function offeringIdentity(value: string) {
+  const words = normalizedText(value).split(" ").filter(Boolean);
+  const subject = words.filter((word) => !/^(?:services?|treatments?|control|solutions?)$/.test(word));
+  return (subject.length ? subject : words).map(singularWord).join(" ");
 }
 
-function offeringIdentity(value: string) {
-  return normalizedText(value)
-    .replace(/\b(?:services?|exterminator|extermination|treatment)\b/g, "control")
-    .replace(/\b(?:pests?|bugs?)\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+function singularWord(word: string) {
+  if (word.length <= 3 || /(?:ss|us|is)$/.test(word)) return word;
+  if (/ies$/.test(word)) return `${word.slice(0, -3)}y`;
+  if (/(?:ches|shes|xes|sses|zes)$/.test(word)) return word.slice(0, -2);
+  return word.replace(/s$/, "");
 }
 
 export function sourcePreparationDiagnosticsFor(
@@ -1104,17 +1112,26 @@ function serviceAreaCandidateIsTrailingOffering(label: string, supportingText: s
   return !foundOutsideOfferingTail;
 }
 
+/**
+ * A candidate that is the subject of one of the business's own services
+ * ("Gutters" beside "Gutter Cleaning") is an offering fragment, not a place.
+ */
 function serviceAreaCandidateMatchesOffering(label: string, services: string[]) {
-  const identity = normalizedText(label);
-  const words = identity.split(" ").filter(Boolean);
+  const words = normalizedText(label).split(" ").filter(Boolean).map(singularWord);
+  const identity = words.join(" ");
+  const genericNoun = new RegExp(`^(?:${serviceNoun}|solutions?)$`);
   return services.some((service) => {
-    const serviceWords = normalizedText(service)
-      .replace(/\b(?:services?|solutions?|treatments?)\b/g, " ")
+    const normalizedService = normalizedText(service);
+    // "Roof Repair In Frostproof Fl" markets the place; it does not make the
+    // place one of the business's services.
+    if (looksLikeLocationLandingName(normalizedService)
+      || new RegExp(`\\b(?:in|near|serving)\\s+${escapeRegExp(normalizedText(label))}\\b`).test(normalizedService)) return false;
+    const serviceWords = normalizedService
       .split(" ")
-      .filter(Boolean);
+      .filter((word) => word && !genericNoun.test(word))
+      .map(singularWord);
     if (!serviceWords.length) return false;
-    const serviceIdentity = serviceWords.join(" ");
-    return serviceIdentity === identity
+    return serviceWords.join(" ") === identity
       || (words.length === 1 && serviceWords.includes(identity));
   });
 }
@@ -1133,7 +1150,7 @@ export function isExplicitNamedServiceArea(value: string) {
     && !/\d|[:;!?]/.test(value)
     && /(?:^|[\s-])[A-Z][A-Za-z'-]*/.test(value)
     && !/\b(?:surrounding|greater|metro(?:politan)?|radius|miles?|nearby)\b/.test(normalized)
-    && !/\b(?:homeowners?|customers?|clients?|residents?|restaurants?|businesses?|properties|communities|families|people|you|your|our|we|team|technicians?|including|anthem|climate|challenges?|solutions?|response|times?|insight|concerns?|activity|provides?|bring|understand|common|unique|housing|precise|fast|local|reviews?|reviewers?|apartments?|offices?|pets?|environment|more|include|microhab|corridors?|every|days?|across|not|services?|removal|trapping|control|exterminat(?:or|ion)|wildlife|pests?|bugs?|ants?|termites?|mosquitoes?|rodents?|cockroaches?|well|drilling)\b/.test(normalized)
+    && !/\b(?:homeowners?|customers?|clients?|residents?|restaurants?|businesses?|properties|communities|families|people|you|your|our|we|team|technicians?|including|anthem|climate|challenges?|solutions?|response|times?|insight|concerns?|activity|provides?|bring|understand|common|unique|housing|precise|fast|local|reviews?|reviewers?|apartments?|offices?|pets?|environment|more|include|microhab|corridors?|every|days?|across|not|services?|removal|control|repairs?|installation|treatments?|inspections?|cleaning|maintenance)\b/.test(normalized)
     && !/&|\band\b/.test(normalized)
     && (!value.includes(",") || /,\s*[A-Z]{2}\s*$/i.test(value))
     && !/^(?:united states|usa|nationwide|everywhere|local area|surrounding areas?)$/.test(normalized);
@@ -1208,16 +1225,16 @@ function serviceAreaHasGeographicEvidence(
     && /\bservices?\s+in\b/.test(context)) {
     return true;
   }
-  if (new RegExp(`/(?:local-pest-control|locations?|service-areas?|areas-we-serve)/${escapedSlug}(?:-(?:pest-control|exterminators?|services?))?(?:/|$)`).test(path)) {
-    return true;
-  }
-  if (new RegExp(`/${escapedSlug}-(?:pest-control|exterminators?|service-area)(?:/|$)`).test(path)) {
+  // A first-party route named for the place ("/areas/round-rock",
+  // "/round-rock-roofing", "/roof-repair-in-round-rock") is a location page
+  // for it, whatever the trade words around the place name are.
+  if (!page.purposeTags.includes("blog") && pathNamesPlace(path, escapedSlug)) {
     return true;
   }
   if (/^\/(?:locations?|service-areas?|areas-we-serve)\/?$/.test(path)) {
     const hasMatchingChildLocation = internalLinks.some((href) => {
       const linkedPath = new URL(href).pathname.toLocaleLowerCase();
-      return new RegExp(`^/(?:locations?|service-areas?|areas-we-serve)/${escapedSlug}(?:-(?:pest-control|exterminators?|services?))?/?$`).test(linkedPath);
+      return /^\/(?:locations?|service-areas?|areas-we-serve)\//.test(linkedPath) && pathNamesPlace(linkedPath, escapedSlug);
     });
     if (!hasMatchingChildLocation) return false;
   }
@@ -1231,6 +1248,12 @@ function serviceAreaHasGeographicEvidence(
   // explicit first-party coverage statement is the evidence, not the filename.
   if (page.purposeTags.includes("about") && !page.purposeTags.includes("blog")) return true;
   return /^\/(?:about(?:-us)?|contact(?:-us)?|locations?|service-areas?|areas-we-serve)(?:\/|$)/.test(path);
+}
+
+/** The final path segment names the place as a whole hyphen-bounded phrase. */
+function pathNamesPlace(path: string, escapedSlug: string) {
+  const segment = path.replace(/\/+$/, "").split("/").at(-1)?.replace(/\.(?:html?|php|aspx?)$/, "") ?? "";
+  return new RegExp(`(?:^|-)${escapedSlug}(?:-|$)`).test(segment);
 }
 
 function escapeRegExp(value: string) {

@@ -92,7 +92,7 @@ export function corroboratedHomepageBusinessName(input: {
   const current = input.current;
   if (candidates.length < 2 || !current || !candidates.some(candidate => normalizedId(candidate) === normalizedId(current))) return current;
   const eligible = candidates.filter(candidate => candidate.length <= 80
-    && businessNameCandidateScore(candidate, input.hostname) > 0
+    && businessNameCandidateScore(candidate, input.hostname) >= 0
     && businessNameCandidateScore(candidate, input.hostname) >= businessNameCandidateScore(current, input.hostname));
   const supported = eligible.map(candidate => ({ candidate, count: input.otherPageNames.filter(name => name
     && normalizedId(name) === normalizedId(candidate)).length })).sort((left, right) => right.count - left.count);
@@ -106,7 +106,8 @@ export function businessNameCandidateScore(candidate: string, hostname: string) 
   const normalizedHost = normalizedId(hostname.replace(/^www\./, "").split(".")[0] ?? "");
   let score = 0;
   if (normalizedCandidate && normalizedHost && (normalizedHost.includes(normalizedCandidate) || normalizedCandidate.includes(normalizedHost))) score += 6;
-  if (/\b(auto|automotive|body|paint|collision|repair|restaurant|cafe|dental|law|salon|spa|clinic|plumbing|hvac|landscap|studio|shop|company|co\.?|llc|inc\.?)\b/i.test(candidate)) score += 2;
+  // Entity words mark a business name in any trade; trade words never do.
+  if (/\b(?:company|co\.?|llc|inc\.?|corp(?:oration)?|ltd|group|shop|studio|(?:&|and) sons|brothers|bros\.?)(?=\W|$)/i.test(candidate)) score += 2;
   if (/\b(you can trust|count on|welcome|done right|best|affordable|professional)\b/i.test(candidate)) score -= 4;
   if (/\b(experts?|quality service|trusted choice)\b/i.test(candidate)) score -= 2;
   if (/[!?]/.test(candidate)) score -= 2;

@@ -24,7 +24,7 @@ assert.deepEqual(prospectAddressFromGoogleComponents([
   county: "Gulf County"
 });
 
-assert.equal(evaluateProspectPlace({ names: ["99 Pest Solutions LLC"], region: "TX" }, {
+assert.equal(evaluateProspectPlace({ names: ["99 Pest Solutions LLC"], region: "TX", category: "pest_control" }, {
   displayName: { text: "99 Pest Solutions, LLC" },
   primaryType: "pest_control_service",
   types: ["pest_control_service"],
@@ -35,14 +35,14 @@ assert.equal(evaluateProspectPlace({ names: ["99 Pest Solutions LLC"], region: "
   businessStatus: "OPERATIONAL"
 }).plausible, true);
 
-assert.equal(evaluateProspectPlace({ names: ["2 Brothers Environmental Services"], region: "FL" }, {
+assert.equal(evaluateProspectPlace({ names: ["2 Brothers Environmental Services"], region: "FL", category: "pest_control" }, {
   displayName: { text: "4642 NW 3rd Dr" },
   primaryType: "street_address",
   types: ["street_address"],
   formattedAddress: "4642 NW 3rd Dr, Delray Beach, FL 33445, USA"
 }).plausible, false);
 
-assert.equal(evaluateProspectPlace({ names: ["1up Pest Control LLC"], region: "GA" }, {
+assert.equal(evaluateProspectPlace({ names: ["1up Pest Control LLC"], region: "GA", category: "pest_control" }, {
   displayName: { text: "1up Pest Control" },
   primaryType: "pest_control_service",
   types: ["pest_control_service"],
@@ -53,70 +53,100 @@ assert.equal(evaluateProspectPlace({ names: ["1up Pest Control LLC"], region: "G
   businessStatus: "OPERATIONAL"
 }).plausible, false);
 
-assert.equal(evaluateProspectPlace({ names: ["410 Pest Control"], region: "TX" }, {
+assert.equal(evaluateProspectPlace({ names: ["410 Pest Control"], region: "TX", category: "pest_control" }, {
   displayName: { text: "4D Pest Control, LLC" },
   primaryType: "service",
   formattedAddress: "631 Blueberry Hl Rd, Somerville, TX 77879, USA",
   businessStatus: "OPERATIONAL"
 }).plausible, false);
 
-assert.equal(evaluateProspectPlace({ names: ["A J Pest Control"], region: "TX" }, {
+assert.equal(evaluateProspectPlace({ names: ["A J Pest Control"], region: "TX", category: "pest_control" }, {
   displayName: { text: "J&J Pest Control Inc" },
   primaryType: "service",
   formattedAddress: "2300 Pasadena Dr Ste A, Austin, TX 78757, USA",
   businessStatus: "OPERATIONAL"
 }).plausible, false);
 
-assert.equal(evaluateProspectPlace({ names: ["A + Pest Control"], region: "TX" }, {
+assert.equal(evaluateProspectPlace({ names: ["A + Pest Control"], region: "TX", category: "pest_control" }, {
   displayName: { text: "Alta Pest Control" },
   primaryType: "pest_control_service",
   formattedAddress: "Austin, TX 78701, USA",
   businessStatus: "OPERATIONAL"
 }).plausible, false);
 
-assert.equal(evaluateProspectPlace({ names: ["A Plus Pest Control"], region: "TX" }, {
+assert.equal(evaluateProspectPlace({ names: ["A Plus Pest Control"], region: "TX", category: "pest_control" }, {
   displayName: { text: "A-Plus Pest Control Midland" },
   primaryType: "pest_control_service",
   formattedAddress: "111 W Wall St, Midland, TX 79701, USA",
   businessStatus: "OPERATIONAL"
 }).plausible, true);
 
-assert.equal(evaluateProspectPlace({ names: ["A Plus Pest Services LLC"], region: "NY" }, {
+assert.equal(evaluateProspectPlace({ names: ["A Plus Pest Services LLC"], region: "NY", category: "pest_control" }, {
   displayName: { text: "A + Pest Services" },
   primaryType: "pest_control_service",
   formattedAddress: "123 N Main St, New City, NY 10956, USA",
   businessStatus: "OPERATIONAL"
 }).plausible, true);
 
-assert.equal(evaluateProspectPlace({ names: ["05 Total Solutions LLC"], region: "FL" }, {
+assert.equal(evaluateProspectPlace({ names: ["05 Total Solutions LLC"], region: "FL", category: "pest_control" }, {
   displayName: { text: "Total Pest Solutions" },
   primaryType: "pest_control_service",
   formattedAddress: "Tampa, FL 33602, USA",
   businessStatus: "OPERATIONAL"
 }).plausible, false);
 
-assert.equal(evaluateProspectPlace({ names: ["A Aardvark Pest Control"], region: "TX" }, {
+assert.equal(evaluateProspectPlace({ names: ["A Aardvark Pest Control"], region: "TX", category: "pest_control" }, {
   displayName: { text: "Aardvark Pest Control Services" },
   primaryType: "pest_control_service",
   formattedAddress: "San Antonio, TX 78201, USA",
   businessStatus: "OPERATIONAL"
 }).plausible, true);
 
-assert.equal(evaluateProspectPlace({ names: ["A 1 Shot Pest Control"], region: "TX" }, {
+assert.equal(evaluateProspectPlace({ names: ["A 1 Shot Pest Control"], region: "TX", category: "pest_control" }, {
   displayName: { text: "A-1 Pest Control Service Inc" },
   primaryType: "pest_control_service",
   formattedAddress: "Fort Worth, TX 76133, USA",
   businessStatus: "OPERATIONAL"
 }).plausible, false);
 
-assert.equal(evaluateProspectPlace({ names: ["A Bear Pest Control And Tree Service"], region: "TX" }, {
+// A second trade in the roster name is a distinctive word, not a generic one:
+// the name alone no longer agrees, but a matching phone still identifies it.
+assert.equal(evaluateProspectPlace({ names: ["A Bear Pest Control And Tree Service"], region: "TX", category: "pest_control" }, {
   displayName: { text: "A-Bear Pest Control" },
   primaryType: "pest_control_service",
   formattedAddress: "San Antonio, TX 78212, USA",
   businessStatus: "OPERATIONAL"
+}).plausible, false);
+assert.equal(evaluateProspectPlace({ names: ["A Bear Pest Control And Tree Service"], region: "TX", category: "pest_control", phone: "(210) 555-0142" }, {
+  displayName: { text: "A-Bear Pest Control" },
+  primaryType: "pest_control_service",
+  nationalPhoneNumber: "210-555-0142",
+  formattedAddress: "San Antonio, TX 78212, USA",
+  businessStatus: "OPERATIONAL"
 }).plausible, true);
 
-const sameStateDifferentCounty = evaluateProspectPlace({ names: ["A And B Pest Control"], region: "TX", county: "Harris" }, {
+// The same rules hold for any category: its words are generic in names, and a
+// listing outside the declared category is not a match.
+assert.equal(evaluateProspectPlace({ names: ["Summit Roofing LLC"], region: "CO", category: "roofing_contractor" }, {
+  displayName: { text: "Summit Roofing Contractors" },
+  primaryType: "roofing_contractor",
+  formattedAddress: "Denver, CO 80202, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, true);
+assert.equal(evaluateProspectPlace({ names: ["Summit Roofing LLC"], region: "CO", category: "roofing_contractor" }, {
+  displayName: { text: "Peak Roofing" },
+  primaryType: "roofing_contractor",
+  formattedAddress: "Denver, CO 80202, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, false);
+assert.equal(evaluateProspectPlace({ names: ["Summit Roofing LLC"], region: "CO", category: "roofing_contractor" }, {
+  displayName: { text: "Summit Hair Salon" },
+  primaryType: "hair_salon",
+  formattedAddress: "Denver, CO 80202, USA",
+  businessStatus: "OPERATIONAL"
+}).plausible, false);
+
+const sameStateDifferentCounty = evaluateProspectPlace({ names: ["A And B Pest Control"], region: "TX", category: "pest_control", county: "Harris" }, {
   displayName: { text: "A and B Pest Control, Inc." },
   primaryType: "pest_control_service",
   addressComponents: [

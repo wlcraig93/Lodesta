@@ -59,7 +59,8 @@ const supportingPhoneBlock = selectSupportingSourceBlock([
 assert.equal(supportingPhoneBlock?.id, "homepage_phone", "Repeated contact facts must prefer first-party page evidence over review-page evidence.");
 
 assert.deepEqual(selectBusinessCategories(["Web Page", "Profile Page", "Pest Control Service"]), ["Pest Control Service"]);
-assert.deepEqual(selectBusinessCategories(["Professional Service", "Organization", "Local Business"], ["Kind Pest Control"]), ["Pest Control Service"]);
+assert.deepEqual(selectBusinessCategories(["Professional Service", "Organization", "Local Business"]), [], "A category is never inferred from the business name or services.");
+assert.deepEqual(selectBusinessCategories(["Web Page", "Roofing Contractor"]), ["Roofing Contractor"]);
 assert.equal(classifySourcePagePath("/header/header-4/"), "technical_or_utility");
 assert.equal(classifySourcePagePath("/trimprimblocks/home-1-slide-1"), "technical_or_utility");
 assert.equal(classifySourcePagePath("/service_category/rodents"), "mechanical_archive");
@@ -70,6 +71,9 @@ assert.equal(normalizeServiceAreaCandidate("all of Orange County"), "Orange Coun
 assert.equal(normalizeServiceAreaCandidate("100 five-star reviewers"), undefined);
 assert.equal(normalizeServiceAreaCandidate("bed bugs"), undefined);
 assert.equal(normalizeServiceAreaCandidate("our team provides fast"), undefined);
+assert.equal(normalizeServiceAreaCandidate("Round Rock"), "Round Rock");
+assert.equal(normalizeServiceAreaCandidate("Roof Repair"), undefined, "A generic service action is not a place in any trade.");
+assert.equal(normalizeServiceAreaCandidate("Gutter Cleaning"), undefined);
 
 const retainedKindNoise = [
   "100 five-star Google reviews",

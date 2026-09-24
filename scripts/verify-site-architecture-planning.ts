@@ -803,7 +803,7 @@ assert.doesNotMatch(siteArchitectureSystemPromptFor("commercial-core-pull"), /pu
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /purpose field as a compact authoring brief/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /concrete customer decision or question/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /Do not draft slogans, headlines, or prose/i);
-assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /safe bee removal/i);
+assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /safe gutter cleaning/i);
 assert.match(siteArchitectureSystemPromptFor("commercial-core-message-target"), /authoringGuidance limited to route ownership, consolidation, reachability.*never prescribe factual page content, service methods, proof, timing, safety, or outcomes/i);
 assert.notEqual(siteArchitecturePromptIdentityFor("commercial-core-message-target"), siteArchitecturePromptIdentityFor("commercial-core-pull"));
 const reconstructionSource = await readFile("scripts/reconstruct-site-agent-workspace.ts", "utf8");

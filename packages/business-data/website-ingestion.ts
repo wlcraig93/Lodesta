@@ -529,7 +529,9 @@ export function selectSourceOfferingFacts(
 ) {
   const serviceAreaIdentities = unique(serviceAreaLabels.flatMap((label) => [
     normalizedText(label),
-    serviceAreaIdentity(label)
+    serviceAreaIdentity(label),
+    // "Midland County" also names the city pages that market to it.
+    serviceAreaIdentity(label).replace(/\s+(?:county|parish|borough)$/, "")
   ]).filter(Boolean));
   const evidenceClassByUrl = new Map(ingestion.pages.flatMap((page) => [
     [page.url, page.evidenceClass] as const,
@@ -552,6 +554,9 @@ export function selectSourceOfferingFacts(
     const segment = path.split("/").filter(Boolean).at(-1)
       ?.replace(/\.(?:html?|php|aspx?)$/i, "");
     if (!segment || isUtilityOfferingRouteSegment(segment)) return [];
+    // A city landing page ("/midland-mi-pest-control") markets a place, not a
+    // distinct offering; the offerings themselves come from service pages.
+    if (!explicitServicePath && isLocationLandingOfferingSegment(segment, serviceAreaIdentities)) return [];
     const name = canonicalOfferingName(segment.replace(/[-_]+/g, " "), serviceAreaIdentities);
     if (!name || !isPlausibleOfferingName(name)) return [];
     const serviceShapedPath = explicitServicePath
@@ -710,6 +715,8 @@ function isPlausibleOfferingName(value: string) {
   if (/^(?:other|additional|more)\b.*\b(?:services?|things?|products?)\b/.test(normalized)) return false;
   if (/^(?:areas?|explore|more frequent|start consultation|get your quote|consultations?|residential|commercial|request(?: service)?|contact(?: us)?|call(?: now)?|email(?: us)?|submit|send|schedule|book|quote|get started|learn more|read more|view more)$/i.test(value)) return false;
   if (/^(?:commercial and residential|residential and commercial)$/.test(normalized)) return false;
+  if (/^(?:schedule|call|book|request|get|contact|text|email)\b/.test(normalized) || /\d{3}\s?\d{3}\s?\d{4}/.test(normalized)) return false;
+  if (looksLikeLocationLandingName(normalized)) return false;
   if (/\b(?:family owned|locally owned|local and loved|environmentally friendly|safe for pets?|response times?|treatment around|foundation)\b/.test(normalized)) return false;
   return true;
 }
@@ -727,8 +734,8 @@ function canonicalOfferingName(value: string | undefined, serviceAreaIdentities:
   for (const area of sortedAreas) {
     const escaped = escapeRegExp(area);
     normalized = normalized
-      .replace(new RegExp(`^(?:${escaped})(?:\\s+(?:nc|tx|fl|ga|va))?\\s+`, "i"), "")
-      .replace(new RegExp(`\\s+(?:in\\s+)?(?:${escaped})(?:\\s+(?:nc|tx|fl|ga|va))?$`, "i"), "")
+      .replace(new RegExp(`^(?:${escaped})(?:\\s+(?:${usStateCodePatternSource}))?\\s+`, "i"), "")
+      .replace(new RegExp(`\\s+(?:in\\s+)?(?:${escaped})(?:\\s+(?:${usStateCodePatternSource}))?$`, "i"), "")
       .trim();
   }
   normalized = normalized.replace(/\s+(?:nc|tx|fl|ga|va)$/i, "").trim();
@@ -748,6 +755,42 @@ function canonicalOfferingName(value: string | undefined, serviceAreaIdentities:
       ? word
       : word.replace(/^\w/, (character) => character.toUpperCase()))
     .join(" ");
+}
+
+const usStateCodePatternSource = "al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc";
+
+/**
+ * "midland-mi-pest-control", "saginaw-pest-control", "pest-control-in-midland":
+ * a known service area, or a leading place followed by a state code, marks a
+ * location landing page. State codes that are also English words ("in", "or",
+ * "me") only count after a known area, so "mice-in-walls" stays a service.
+ */
+function isLocationLandingOfferingSegment(segment: string, serviceAreaIdentities: string[]) {
+  const words = normalizedText(segment.replace(/[-_]+/g, " "));
+  if (serviceAreaIdentities.some((area) => area && (
+    new RegExp(`^${escapeRegExp(area)}\\s`, "i").test(words)
+    || new RegExp(`\\s(?:in\\s+)?${escapeRegExp(area)}(?:\\s+(?:${usStateCodePatternSource}))?$`, "i").test(words)
+  ))) return true;
+  return looksLikeLocationLandingName(words);
+}
+
+const unambiguousStateCodes = "al|ak|az|ar|ca|ct|fl|ga|ia|il|ks|ky|md|mi|mn|ms|mt|nc|nd|nh|nj|nm|nv|ny|ri|sc|sd|tn|tx|ut|vt|va|wa|wi|wv|wy|dc";
+const usStateNames = "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming";
+const serviceNoun = "control|services?|exterminators?|extermination|removal|inspections?|treatments?|management|company";
+const nonPlaceTargets = "homes?|houses?|attics?|walls?|kitchens?|hotels?|restaurants?|schools?|offices?|businesses|apartments?|crawl ?spaces?|yards?|gardens?|lawns?|basements?|garages?|warehouses?|the home|your home|winter|summer|spring|fall";
+
+/**
+ * Offering names that are really city landing pages: "Midland Mi Pest
+ * Control", "Pest Control Brooklyn Ny", "Termite Control Avon Park Florida",
+ * "Pest Control In Frostproof". A state after the place, or "<service> in
+ * <Place>", marks a location; "Rodent Control In Attics" stays a service.
+ */
+function looksLikeLocationLandingName(normalized: string) {
+  const state = `(?:${unambiguousStateCodes}|${usStateNames})`;
+  return new RegExp(`^[a-z]+(?:\\s[a-z]+){0,2}\\s${state}\\s(?:[a-z]+\\s){0,3}(?:${serviceNoun})$`).test(normalized)
+    || new RegExp(`\\b(?:${serviceNoun})\\s(?:in\\s|near\\s)?[a-z]+(?:\\s[a-z]+){0,2}\\s${state}$`).test(normalized)
+    || (new RegExp(`\\b(?:${serviceNoun})\\s(?:in|near)\\s[a-z]+(?:\\s[a-z]+){0,2}$`).test(normalized)
+      && !new RegExp(`\\s(?:in|near)\\s(?:${nonPlaceTargets})$`).test(normalized));
 }
 
 function isUtilityOfferingRouteSegment(value: string) {
@@ -913,7 +956,7 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
           ...crawl.extractedFacts.services
         ])) continue;
       const identity = serviceAreaIdentity(label);
-      const matchingBlocks = page.sourceTextBlocks.filter((block) => normalizedText(block.displayText).includes(identity));
+      const matchingBlocks = page.sourceTextBlocks.filter((block) => textMentionsServiceArea(block.displayText, label));
       const listed = explicitList.find((entry) => serviceAreaIdentity(entry.label) === identity);
       const supporting = listed?.block ?? matchingBlocks.find((block) =>
         /\b(?:service areas?|areas? we serve|we (?:proudly )?serve|serving|services? in)\b/.test(normalizedText(block.displayText))
@@ -1025,6 +1068,7 @@ function isBroadServiceAreaLabel(value: string) {
 export function normalizeServiceAreaCandidate(value: string | undefined) {
   if (!value) return undefined;
   const stripped = value
+    .replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "")
     .replace(/^\s*(?:(?:serving|throughout|across|near|in)\s+(?:the\s+)?|(?:all|rest)\s+of\s+(?:the\s+)?|(?:entire|wider|broader)\s+)/i, "")
     .replace(/\s+region\s*$/i, "")
     .trim();
@@ -1035,6 +1079,20 @@ function serviceAreaIdentity(value: string) {
   return normalizedText(value)
     .replace(/\s+(?:al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc)$/, "")
     .trim();
+}
+
+/**
+ * "Bay County" is supported by "serving Bay, Saginaw and Midland counties":
+ * the shared plural type noun applies to each listed place.
+ */
+function textMentionsServiceArea(text: string, label: string) {
+  const normalized = normalizedText(text);
+  const identity = serviceAreaIdentity(label);
+  if (normalized.includes(identity)) return true;
+  const typed = identity.match(/^(.+)\s+(county|parish|borough)$/);
+  if (!typed) return false;
+  const plural = { county: "counties", parish: "parishes", borough: "boroughs" }[typed[2] as "county" | "parish" | "borough"];
+  return new RegExp(`\\b${escapeRegExp(typed[1]!)}\\b[^.;:]{0,120}\\b${plural}\\b`).test(normalized);
 }
 
 function serviceAreaSpecificity(value: string) {
@@ -1081,7 +1139,7 @@ function serviceAreaHasGeographicEvidence(
     if (!hasMatchingChildLocation) return false;
   }
   if (!context
-    || !context.includes(identity)
+    || !textMentionsServiceArea(context, label)
     || !/\b(?:service areas?|areas? we serve|we (?:proudly )?serve|serving|services? in|(?:install(?:s|ed|ing)?|provid(?:e|es|ed|ing)|offer(?:s|ed|ing)?|perform(?:s|ed|ing)?|work(?:s|ed|ing)?)\b.{0,180}\bin)\b/.test(context)) {
     return false;
   }

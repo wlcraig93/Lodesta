@@ -1019,6 +1019,47 @@ assert.throws(
   assert.equal(unrelated.extractedFacts.name, "Acme Roofing");
 }
 
+// Best Pest / Haynes / Central NYC regressions: a shared "counties in
+// Michigan" qualifier applies to every listed place, and city landing pages
+// are locations, not offerings.
+{
+  const countyAreas = summarizeCrawlHtml(`<!doctype html><title>Best Pest</title><main><h3>Your local, family owned pest control company proudly serving Bay, Saginaw and Midland counties in Michigan.</h3></main>`,
+    "https://www.bestpestanimalcontrol.net/").extractedFacts.serviceAreas;
+  assert.deepEqual(countyAreas, ["Bay County", "Saginaw County", "Midland County"]);
+  const locationOrigin = "https://location-landing.example";
+  const locationDocuments = new Map([
+    ["/", pageHtml("Location Landing Pest", ["/rodent-control", "/services/termite-control", "/midland-mi-pest-control", "/pest-control-brooklyn-ny", "/pest-control-in-frostproof", "/termite-control-avon-park-florida", "/rodent-control-in-attics"], "", "Proudly serving Bay, Saginaw and Midland counties in Michigan.")],
+    ["/rodent-control", pageHtml("Rodent Control")],
+    ["/services/termite-control", pageHtml("Termite Control")],
+    ["/midland-mi-pest-control", pageHtml("Midland, MI Pest Control")],
+    ["/pest-control-brooklyn-ny", pageHtml("Pest Control Brooklyn NY")],
+    ["/pest-control-in-frostproof", pageHtml("Pest Control in Frostproof")],
+    ["/termite-control-avon-park-florida", pageHtml("Termite Control Avon Park Florida")],
+    ["/rodent-control-in-attics", pageHtml("Rodent Control in Attics")]
+  ]);
+  const locationCrawl = await crawlWebsiteForGeneration({
+    url: `${locationOrigin}/`,
+    validateUrl: async (value) => value,
+    limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+    sleep: async () => undefined,
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = new URL(url).pathname;
+      if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+      if (path === "/sitemap.xml") return response("", 404, "text/plain");
+      const document = locationDocuments.get(path);
+      return document ? response(document, 200) : response("missing", 404, "text/plain");
+    }
+  });
+  const locationOfferings = new Set(selectSourceOfferingFacts(locationCrawl.crawl, locationCrawl.ingestion).map((offering) => offering.name));
+  for (const expected of ["Rodent Control", "Termite Control", "Rodent Control In Attics"]) {
+    assert.ok(locationOfferings.has(expected), `Service page ${expected} lost offering authority: ${[...locationOfferings].join(", ")}`);
+  }
+  for (const location of ["Midland Mi Pest Control", "Mi Pest Control", "Pest Control Brooklyn Ny", "Pest Control In Frostproof", "Termite Control Avon Park Florida"]) {
+    assert.ok(!locationOfferings.has(location), `City landing page ${location} became an offering.`);
+  }
+}
+
 // Altura regression: broken-markup link artifacts are never crawl inventory,
 // and injected off-topic posts are recognized only when the homepage never
 // mentions their topic.

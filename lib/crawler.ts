@@ -1388,7 +1388,7 @@ function cleanServiceCandidate(value: string | undefined) {
     .trim();
   if (!cleaned) return undefined;
   if (/^(?:&m?dash;|[–—-])\s*/i.test(cleaned)) return undefined;
-  if (/^(skip\s+(?:to\s+)?content|view|learn more|read more|show more|close|back|next|previous)$/i.test(cleaned)) return undefined;
+  if (/^(skip\s+(?:to\s+)?content|view|learn more|read more|show more|see more|view more|more|explore|details|click here|close|back|next|previous)$/i.test(cleaned)) return undefined;
   if (cleaned.length < 3 || cleaned.length > 64) return undefined;
   if (/[{}<>@]/.test(cleaned)) return undefined;
   if (/\b(home|about|contact|gallery|reviews?|testimonials?|blog|careers?|privacy|terms|login|sign in)\b/i.test(cleaned)) return undefined;
@@ -1496,8 +1496,21 @@ function extractVisibleServiceAreas(html: string) {
       .replace(/\s+(?:and|&|plus)\s+(?:the\s+)?surrounding areas?\s+(?:to include|including|such as)\s+/i, ", ")
       .replace(/\b(?:and|plus)\s+(?:the\s+)?surrounding areas?\b.*$/i, "")
       .replace(/([A-Za-z][A-Za-z .'-]{1,60}),\s*([A-Z]{2})(?=$|[,;]|\s+(?:and|&)\s+)/g, "$1 $2");
-    for (const candidate of list.split(/\s*(?:,|;|\||\s+(?:and|&)\s+)\s*/)) {
-      const area = cleanText(candidate)?.replace(/^(?:(?:and|&)\s+)?(?:the\s+)?/i, "").trim();
+    // "Bay, Saginaw and Midland counties in Michigan": the plural type noun
+    // and the state qualifier belong to every listed place, not the last one.
+    let sharedAreaType: string | undefined;
+    const scopedList = list
+      .trim()
+      .replace(new RegExp(`\\s+(?:in|of)\\s+(?:the\\s+state\\s+of\\s+)?(?:${usStateNameOrCodePatternSource})$`, "i"), "")
+      .replace(/\s+(counties|parishes|boroughs)$/i, (_match, noun: string) => {
+        sharedAreaType = ({ counties: "County", parishes: "Parish", boroughs: "Borough" } as Record<string, string>)[noun.toLowerCase()];
+        return "";
+      });
+    for (const candidate of scopedList.split(/\s*(?:,|;|\||\s+(?:and|&)\s+)\s*/)) {
+      const cleaned = cleanText(candidate)?.replace(/^(?:(?:and|&)\s+)?(?:the\s+)?/i, "").trim();
+      const area = cleaned && sharedAreaType && !new RegExp(`\\b${sharedAreaType}$`, "i").test(cleaned)
+        ? `${cleaned} ${sharedAreaType}`
+        : cleaned;
       if (!area || !plausibleVisibleServiceArea(area)) continue;
       values.push(area);
     }

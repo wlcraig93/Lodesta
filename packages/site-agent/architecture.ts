@@ -956,12 +956,12 @@ export function createArchitectureEvidenceFiles(
       || input.retainedContentMode === "indexed-pull-preview-author-digest"
       ? 2
       : undefined;
-    const sourceIndexModule = (bounds: ApprovedSourceIndexBounds) => `export const approvedSourceIndex = ${JSON.stringify(
+    const sourceIndexModule = (bounds: ApprovedSourceIndexBounds, withoutPreviews = false) => `export const approvedSourceIndex = ${JSON.stringify(
       createApprovedSourceIndex(pages, plan, {
         approvedDocuments: input.approvedDocuments,
-        includePreviews: input.retainedContentMode !== "indexed-pull",
-        authorDigest: input.retainedContentMode === "indexed-pull-preview-author-digest",
-        answerPacket: readableAnswer,
+        includePreviews: !withoutPreviews && input.retainedContentMode !== "indexed-pull",
+        authorDigest: !withoutPreviews && input.retainedContentMode === "indexed-pull-preview-author-digest",
+        answerPacket: !withoutPreviews && readableAnswer,
         offerings: input.offerings,
         routeImages: input.routeImages,
         // The readable index carries each mapped source's customer answer.
@@ -971,7 +971,7 @@ export function createArchitectureEvidenceFiles(
         ...bounds
       }),
       null,
-      indent
+      withoutPreviews ? undefined : indent
     )} as const;\n`;
     // Large sites (hundreds of consolidated pages) would otherwise exceed the
     // workspace file limit and fail after the architecture spend. Tighten the
@@ -981,6 +981,12 @@ export function createArchitectureEvidenceFiles(
     for (const bounds of approvedSourceIndexBoundSteps) {
       if (sourceIndexContent.length <= maximumApprovedSourceIndexCharacters) break;
       sourceIndexContent = sourceIndexModule(bounds);
+    }
+    // The planner has already been paid for: rather than failing the run,
+    // fall back to a route-to-contentFiles index without inline previews.
+    // Every source stays readable through its contentFiles.
+    if (sourceIndexContent.length > maximumApprovedSourceIndexCharacters) {
+      sourceIndexContent = sourceIndexModule({ omitConsolidatedHeadings: true }, true);
     }
     if (sourceIndexContent.length > maximumApprovedSourceIndexCharacters) {
       throw new Error(`approved_source_index_too_large:${sourceIndexContent.length}`);

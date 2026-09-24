@@ -286,6 +286,19 @@ assert.ok(!emptyFiles.some((file) => file.path === contentInventoryPath), "no mo
     assert.ok(route.answer.omittedDistinctions, "bounded excerpts name their omissions");
     assert.equal(route.answer.distinctions.length + route.answer.omittedDistinctions.count, 350);
   }
+  // After planner spend, an index whose per-source previews cannot fit falls
+  // back to a route-to-contentFiles index without previews instead of throwing.
+  const hugePages = Array.from({ length: 1_300 }, (_, index) => page(`/blog/story-${index}`, `Story ${index}`,
+    Array.from({ length: 12 }, (_line, line) => `Story ${index} paragraph ${line} carries enough ordinary prose about local work to fill a full preview line for readers.`)));
+  const hugePlan = {
+    ...plan,
+    routes: hugePages.map((entry) => ({ path: entry.path, label: entry.title ?? entry.path, purpose: "Answer the story question.", pageType: "article", parentPath: null, navigation: "none", sourcePaths: [entry.path] }))
+  } as unknown as SiteArchitecturePlan;
+  const hugeFiles = createArchitectureEvidenceFiles(hugePages, hugePlan, { retainedContentMode: "indexed-pull-preview-author-digest" });
+  const hugeIndex = hugeFiles.find((file) => file.path === "src/approved-source-index.ts")!;
+  assert.ok(hugeIndex.content.length <= maximumApprovedSourceIndexCharacters, "the no-preview fallback exceeded the index bound");
+  assert.doesNotMatch(hugeIndex.content, /"evidencePreviews"/, "the fallback index still carries inline previews");
+  assert.match(hugeIndex.content, /story-1299/, "the fallback index lost a mapped source");
 }
 
 if (process.env.CONTENT_INVENTORY_DEBUG) console.log(module);

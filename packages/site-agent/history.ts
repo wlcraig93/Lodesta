@@ -2,6 +2,14 @@ import type { ResponseInputItem } from "openai/resources/responses/responses";
 import { sha256, stableJson } from "@/packages/business-data";
 import type { ManagerToolName } from "./contracts";
 
+export const runtimeStateMessagePrefix = "Current deterministic workspace state:";
+
+export function runtimeStateMessage(summary: Record<string, unknown>): ResponseInputItem {
+  return { role: "user", type: "message", content: [{ type: "input_text", text: `${runtimeStatePrefixLine}${JSON.stringify(summary)}` }] };
+}
+
+const runtimeStatePrefixLine = `${runtimeStateMessagePrefix}\n`;
+
 /**
  * Stateless Responses replay preserves every model output item so encrypted
  * reasoning remains available across tool turns. When OpenAI emits an opaque
@@ -41,7 +49,14 @@ export class DeterministicManagerHistory {
     return [...this.tail];
   }
 
+  /**
+   * Only the latest workspace state is replayed. Earlier copies are removed so
+   * the history does not re-bill a superseded snapshot on every turn. The
+   * removed copy was the last item of the previous request, so the automatic
+   * prefix cache for everything before it is unaffected.
+   */
   appendRuntimeState(item: ResponseInputItem) {
+    removeRuntimeStateMessages(this.tail);
     this.tail.push(item);
     this.pending.push(item);
   }
@@ -168,9 +183,11 @@ export class DeterministicManagerHistory {
       this.tail.push(...items.slice(latestCompactionIndex));
       this.compactions = items.filter(isCompactionItem).length;
       this.prunedItems = latestCompactionIndex;
-      return;
+    } else {
+      this.tail.push(...items);
     }
-    this.tail.push(...items);
+    // The next turn appends a fresh workspace state.
+    removeRuntimeStateMessages(this.tail);
   }
 
   private stripSpentInspectionScreenshots() {
@@ -245,6 +262,19 @@ function mutatedPaths(toolName: ManagerToolName, args: Record<string, unknown>) 
     const file = objectValue(value);
     return typeof file?.path === "string" ? [file.path] : [];
   });
+}
+
+function isRuntimeStateMessage(value: ResponseInputItem) {
+  const record = objectValue(value);
+  if (record?.type !== "message" || record.role !== "user" || !Array.isArray(record.content)) return false;
+  const first = objectValue(record.content[0]);
+  return record.content.length === 1 && first?.type === "input_text" && typeof first.text === "string" && first.text.startsWith(runtimeStatePrefixLine);
+}
+
+function removeRuntimeStateMessages(items: ResponseInputItem[]) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (isRuntimeStateMessage(items[index]!)) items.splice(index, 1);
+  }
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

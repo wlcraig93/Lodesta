@@ -91,6 +91,9 @@ export type WorkspaceManagerRuntimeSnapshot<Checkpoint> = {
 export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   private files = new Map<string, string>();
   private referenceFiles = new Map<string, string>();
+  // Content hashes of the workspace this runtime started from. The per-turn
+  // state summary details only files changed since then.
+  private startingHashes = new Map<string, `sha256:${string}`>();
   private workspaceHash?: `sha256:${string}`;
   private sandboxRevision: string;
   private successfulBuild?: { workspaceHash: `sha256:${string}`; sandboxRevision: string; result: BuildResult };
@@ -139,6 +142,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
     const snapshot = options.initialSnapshot;
     this.sandboxRevision = snapshot?.sandboxRevision ?? options.initialSandboxRevision;
     for (const file of snapshot?.files ?? options.initialFiles ?? []) this.files.set(file.path, file.content);
+    for (const file of options.initialFiles ?? snapshot?.files ?? []) this.startingHashes.set(file.path, sha256(file.content));
     for (const file of options.referenceFiles ?? []) this.referenceFiles.set(file.path, file.content);
     if (snapshot) {
       this.workspaceHash = snapshot.workspaceHash;
@@ -264,16 +268,34 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
   }
 
   stateSummary() {
+    const changedFiles: Array<{ path: string; status: "created" | "modified"; contentHash: `sha256:${string}`; lines: number; outline: string }> = [];
+    const unchangedPaths: string[] = [];
+    for (const file of this.currentFiles()) {
+      const contentHash = sha256(file.content);
+      const startingHash = this.startingHashes.get(file.path);
+      if (startingHash === contentHash) {
+        unchangedPaths.push(file.path);
+        continue;
+      }
+      changedFiles.push({
+        path: file.path,
+        status: startingHash ? "modified" : "created",
+        contentHash,
+        lines: file.content.split("\n").length,
+        outline: sourceOutline(file)
+      });
+    }
+    const deletedPaths = [...this.startingHashes.keys()].filter((path) => !this.files.has(path)).sort();
     return {
       workspace: {
         hash: this.workspaceHash,
         sandboxRevision: this.sandboxRevision,
-        files: this.currentFiles().map((file) => ({
-          path: file.path,
-          contentHash: sha256(file.content),
-          lines: file.content.split("\n").length,
-          outline: sourceOutline(file)
-        }))
+        changedFiles,
+        ...(deletedPaths.length ? { deletedFiles: deletedPaths } : {}),
+        unchangedStartingFiles: {
+          note: "Present and unchanged since this run started (starter kit, design library, platform files or the current site). Use list_files or read_files for hashes, lines and content.",
+          paths: unchangedPaths
+        }
       },
       latestBuild: this.successfulBuild && this.successfulBuild.workspaceHash === this.workspaceHash
         ? { status: "passed", workspaceHash: this.successfulBuild.workspaceHash, sandboxRevision: this.successfulBuild.sandboxRevision, previewPath: this.successfulBuild.result.previewPath }
@@ -397,13 +419,15 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
         endLine: end,
         totalLines: lines.length,
         bytes,
-        lines: lines.slice(start - 1, end).map((line, index) => ({
-          line: start + index,
-          content: line
-        }))
+        // "12: text" per line; the "N: " prefix is not part of the file.
+        content: lines.slice(start - 1, end).map((line, index) => `${start + index}: ${line}`).join("\n")
       };
     });
-    const diagnosticFiles = files.map(({ lines: _lines, ...file }) => file);
+    const diagnosticFiles = files.map((file) => {
+      if (!file.ok) return file;
+      const { content: _content, ...rest } = file;
+      return rest;
+    });
     const succeededCount = files.filter((file) => file.ok).length;
     const failedCount = files.length - succeededCount;
     const complete = failedCount === 0;
@@ -1500,12 +1524,23 @@ function failedBuildResult(
   };
 }
 
+const stateOutlineMaxEntries = 40;
+const stateOutlineMaxChars = 1_200;
+
+/** Bounded "line label" landmarks for one changed file in the per-turn state message. */
 function sourceOutline(file: WorkspaceSourceFile) {
-  const patterns = file.path.endsWith(".css") ? /^([^@][^{]{0,120})\{/ : /^(?:export\s+)?(?:const|function|class|interface|type)\s+([A-Za-z0-9_$-]+)/;
-  return file.content.split("\n").flatMap((line, index) => {
-    const match = line.trim().match(patterns);
-    return match ? [{ line: index + 1, label: match[1].trim().slice(0, 120) }] : [];
-  }).slice(0, 80);
+  const pattern = file.path.endsWith(".css") ? /^([^@][^{]{0,120})\{/ : /^(?:export\s+)?(?:const|function|class|interface|type)\s+([A-Za-z0-9_$-]+)/;
+  const entries = file.content.split("\n").flatMap((line, index) => {
+    const match = line.trim().match(pattern);
+    return match ? [`${index + 1} ${match[1].trim().slice(0, 60)}`] : [];
+  });
+  let outline = "";
+  for (const [index, entry] of entries.entries()) {
+    const next = `${outline ? "; " : ""}${entry}`;
+    if (index >= stateOutlineMaxEntries || outline.length + next.length > stateOutlineMaxChars) return `${outline}; …`;
+    outline += next;
+  }
+  return outline;
 }
 
 function summaryFindings(summary: Record<string, unknown>) {

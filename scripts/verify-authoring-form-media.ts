@@ -600,7 +600,7 @@ try {
       return JSON.parse(result.modelOutput as string);
     };
     const before = await readDocument();
-    assert.equal(before.files[0].lines.map((line: { content: string }) => line.content).join("\n"), approvedDocument);
+    assert.equal(before.files[0].content, approvedDocument.split("\n").map((line, index) => `${index + 1}: ${line}`).join("\n"));
     await runtime.execute({ callId: "unrelated_edit", name: "write_file", arguments: { path: "src/styles.css", content: "body{color:#222}" } });
     assert.equal((await readDocument()).files[0].contentHash, sha256(approvedDocument), "Ordinary edits must preserve read-only document authority.");
     await assert.rejects(() => runtime.execute({ callId: "forged_authority", name: "write_file", arguments: { path: documentPath, content: "forged" } }));

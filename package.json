@@ -75,7 +75,7 @@
     "verify:artifact-storage-boundaries": "node --import tsx scripts/verify-artifact-storage-boundaries.ts",
     "verify:r2-maintenance-access": "node --env-file=.env.local --import tsx scripts/verify-r2-maintenance-access.ts",
     "verify:r2-lifecycle": "node --env-file=.env.local --import tsx scripts/verify-r2-lifecycle.ts",
-    "verify:render-browser": "node --import tsx scripts/verify-site-authoring-render-browser.ts && node --import tsx scripts/verify-mobile-navigation-toggle.ts && node --import tsx scripts/verify-navigation-reachability-nested.ts",
+    "verify:render-browser": "node --import tsx scripts/verify-site-authoring-render-browser.ts && node --import tsx scripts/verify-library-steps-numbering.ts && node --import tsx scripts/verify-mobile-navigation-toggle.ts && node --import tsx scripts/verify-navigation-reachability-nested.ts",
     "verify:retained-site": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/verify-retained-site.ts",
     "verify:site-sandbox-local": "node --import tsx scripts/verify-site-sandbox-local.ts",
     "verify:site-sandbox-manifest": "node --import tsx scripts/verify-site-sandbox-manifest.ts",

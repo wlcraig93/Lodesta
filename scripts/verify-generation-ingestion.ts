@@ -26,6 +26,7 @@ import { PublicFetchUrlError } from "../lib/url-safety";
 import {
   assertSourceSuitableForGeneration,
   createLooseWebsiteBootstrap,
+  hasContradictoryFirstPartyLocationHours,
   ingestWebsite,
   observedProof,
   retainedContactConsensus,
@@ -1002,6 +1003,27 @@ assert.throws(
   /multi-location directory/i,
   "A broad location directory silently became a single arbitrary branch project."
 );
+
+// Foothills Pest regression: the same hours rendered in two display formats on
+// two first-party pages for one street address are not a contradiction.
+{
+  const hoursOrigin = "https://hours-format.example";
+  const addressLine = "<p>1200 Canyon Road, Boise, ID 83702</p>";
+  const hoursPage = (path: string, hoursHtml: string) =>
+    summarizeCrawlHtml(`<!doctype html><title>Hours fixture</title><main>${addressLine}${hoursHtml}</main>`, `${hoursOrigin}${path}`);
+  const compact = hoursPage("/", "<p>Mon-Fri 8am-5pm</p>");
+  const longForm = hoursPage("/contact", "<p>Monday: 8:00 AM - 5:00 PM</p><p>Tuesday: 8:00 AM - 5:00 PM</p><p>Friday: 8:00 AM - 5:00 PM</p><p>Saturday: Closed</p>");
+  const different = hoursPage("/about", "<p>Mon-Fri 9am-6pm</p>");
+  assert.ok(compact.extractedFacts.hours && longForm.extractedFacts.hours && different.extractedFacts.hours,
+    "The hours fixture did not extract visible hours.");
+  const hoursCrawl = (pages: typeof compact[]) => ({ ...activeCrawlShell(`${hoursOrigin}/`), pageSummaries: pages });
+  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([compact, longForm])), false,
+    "Equivalent hours in different display formats were rejected as contradictory.");
+  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([compact, different])), true,
+    "Genuinely different hours for the same address were not flagged.");
+  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([longForm, hoursPage("/visit", "<p>Saturday: 9am-1pm</p>")])), true,
+    "Closed versus open on the same day was not flagged.");
+}
 
 const authorityOrigin = "https://authority-filter.example";
 const authorityFiltered = await crawlWebsiteForGeneration({

@@ -2,6 +2,7 @@ export * from "./hash";
 export * from "./availability";
 export * from "./public-projection";
 export * from "./website-ingestion";
+export * from "./weekly-schedule";
 export * from "./web-research";
 export * from "./generation-crawler";
 export * from "./crawl-errors";

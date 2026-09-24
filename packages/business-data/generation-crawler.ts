@@ -12,6 +12,7 @@ import { assertPublicFetchUrl, PublicFetchUrlError } from "@/lib/url-safety";
 import { corroboratedHomepageBusinessName, preferBusinessNameCandidate } from "@/lib/business-fact-normalization";
 import { WebsiteCrawlError, type WebsiteCrawlFailureCode } from "./crawl-errors";
 import { isLikelyCmsTemplateOrSystemSourcePage, isMalformedSourceLinkPath } from "./source-page-classification";
+import { canonicalWeekDays, canonicalWeeklySchedule } from "./weekly-schedule";
 import {
   generationCrawlerUserAgent,
   parseRobotsPolicy,
@@ -1576,25 +1577,48 @@ function consensusPhone(pages: CrawlPageSummary[]) {
   return winner[0];
 }
 
+/**
+ * Hours consensus compares canonical per-day schedules. Pages that agree on
+ * every day they both state (in any display format) are consistent, so split
+ * schedules such as Mon-Fri 8-5 and Sat 9-1 survive. Only a day that two
+ * first-party statements give different times (or open vs closed) withholds
+ * hours. The most complete agreeing extraction is kept verbatim.
+ */
 function consensusHours(pages: CrawlPageSummary[]) {
   const candidates = new Map<string, Record<string, string>>();
-  const visibleCandidates = new Set<string>();
+  const known = new Map<string, string>();
+  const unparsed = new Set<string>();
+  const agrees = (schedule: Map<string, string>) => {
+    for (const [day, value] of schedule) {
+      const existing = known.get(day);
+      if (existing !== undefined && existing !== value) return false;
+    }
+    for (const [day, value] of schedule) known.set(day, value);
+    return true;
+  };
   for (const page of pages) {
     for (const block of page.sourceTextBlocks) {
       const visible = visibleWeeklyHours(block.displayText);
-      if (visible) visibleCandidates.add(visible);
+      if (visible && !agrees(new Map(canonicalWeekDays.map((day) => [day, visible])))) return undefined;
     }
     const hours = page.extractedFacts.hours;
     if (!hours || !Object.keys(hours).length) continue;
     const normalized = Object.fromEntries(Object.entries(hours).sort(([left], [right]) => left.localeCompare(right)));
-    candidates.set(JSON.stringify(normalized), normalized);
-    for (const value of Object.values(normalized)) {
-      const stored = normalizedHourRange(value);
-      if (stored) visibleCandidates.add(stored);
+    const key = JSON.stringify(normalized);
+    candidates.set(key, normalized);
+    const schedule = canonicalWeeklySchedule(normalized);
+    if (!schedule) {
+      unparsed.add(key);
+      continue;
     }
+    if (!agrees(schedule)) return undefined;
   }
-  if (candidates.size !== 1 || visibleCandidates.size > 1) return undefined;
-  return [...candidates.values()][0];
+  if (!candidates.size) return undefined;
+  // An extraction the canonical parser cannot read is only trusted alone.
+  if (unparsed.size && candidates.size > 1) return undefined;
+  return [...candidates.values()].sort((left, right) =>
+    (canonicalWeeklySchedule(right)?.size ?? 0) - (canonicalWeeklySchedule(left)?.size ?? 0)
+      || Object.keys(right).length - Object.keys(left).length)[0];
 }
 
 function normalizedTelPhone(value: string) {
@@ -1613,14 +1637,6 @@ function visiblePhoneCandidates(value: string) {
 
 function visibleWeeklyHours(value: string) {
   const match = value.match(/\bMon(?:day)?\s*[-–—]\s*Sun(?:day)?\s*:?\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\s*[-–—]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
-  if (!match) return undefined;
-  const start = normalizedClockTime(match[1]);
-  const end = normalizedClockTime(match[2]);
-  return start && end ? `${start}-${end}` : undefined;
-}
-
-function normalizedHourRange(value: string) {
-  const match = value.match(/(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–—]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
   if (!match) return undefined;
   const start = normalizedClockTime(match[1]);
   const end = normalizedClockTime(match[2]);

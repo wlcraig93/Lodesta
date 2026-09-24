@@ -1178,6 +1178,35 @@ assert.equal(isLikelyInjectedSpamSourcePage({ path: "/residential/bed-bugs", tit
     "Closed versus open on the same day was not flagged.");
 }
 
+// Split schedules (Mon-Fri 8-5, Sat 9-1) stated in different formats on two
+// first-party pages agree day by day; only a same-day conflict withholds hours.
+{
+  const splitOrigin = "https://split-hours.example";
+  const address = "<p>1200 Canyon Road, Boise, ID 83702</p>";
+  const crawlSplit = (contactHours: string) => crawlWebsiteForGeneration({
+    url: `${splitOrigin}/`,
+    validateUrl: async (value) => value,
+    limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+    sleep: async () => undefined,
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = new URL(url).pathname;
+      if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+      if (path === "/sitemap.xml") return response("", 404, "text/plain");
+      if (path === "/") return response(pageHtml("Home", ["/contact"], "", `</p>${address}<p>Mon-Fri 8am-5pm</p><p>Saturday: 9am-1pm</p><p>`), 200);
+      if (path === "/contact") return response(pageHtml("Contact", [], "", `</p>${address}${contactHours}<p>`), 200);
+      throw new Error(`unexpected_split_hours_fixture_url:${url}`);
+    }
+  });
+  const agreeing = await crawlSplit("<p>Monday - Friday: 8:00 AM - 5:00 PM</p><p>Sat: 9:00 AM - 1:00 PM</p><p>Sunday: Closed</p>");
+  const agreedHours = agreeing.crawl.extractedFacts.hours;
+  assert.ok(agreedHours && Object.keys(agreedHours).some((label) => /saturday/i.test(label)),
+    `Split hours stated in two formats were withheld: ${JSON.stringify(agreedHours)}`);
+  assert.ok(Object.keys(agreedHours!).some((label) => /friday/i.test(label)), "Weekday hours were lost from the split schedule.");
+  const conflicting = await crawlSplit("<p>Monday - Friday: 8:00 AM - 5:00 PM</p><p>Saturday: 10:00 AM - 2:00 PM</p>");
+  assert.equal(conflicting.crawl.extractedFacts.hours, undefined, "A same-day hours conflict was not withheld.");
+}
+
 const authorityOrigin = "https://authority-filter.example";
 const authorityFiltered = await crawlWebsiteForGeneration({
   url: `${authorityOrigin}/`,

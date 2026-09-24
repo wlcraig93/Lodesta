@@ -863,11 +863,11 @@ function extractBusinessFacts(
   // A business's own LocalBusiness/Organization declaration names the entity;
   // a visible heading is usually a service headline, so it only fills gaps.
   facts.structuredName = structuredName;
-  facts.name = structuredName ?? preferBusinessNameCandidate(
+  facts.name = structuredName ?? expandTruncatedBusinessName(preferBusinessNameCandidate(
     facts.name,
     extractVisibleBusinessNameCandidate(html, base.hostname),
     base.hostname
-  );
+  ), html, base.hostname);
   facts.hours ||= extractVisibleHours(html);
   facts.address ||= extractVisibleAddress(html);
   facts.serviceAreas = unique([...facts.serviceAreas, ...extractVisibleServiceAreas(html)]);
@@ -1388,7 +1388,7 @@ function cleanServiceCandidate(value: string | undefined) {
     .trim();
   if (!cleaned) return undefined;
   if (/^(?:&m?dash;|[–—-])\s*/i.test(cleaned)) return undefined;
-  if (/^(skip\s+(?:to\s+)?content|view|learn more|read more|show more|close|back|next|previous)$/i.test(cleaned)) return undefined;
+  if (/^(skip\s+(?:to\s+)?content|view|learn more|read more|show more|see more|view more|more|explore|details|click here|close|back|next|previous)$/i.test(cleaned)) return undefined;
   if (cleaned.length < 3 || cleaned.length > 64) return undefined;
   if (/[{}<>@]/.test(cleaned)) return undefined;
   if (/\b(home|about|contact|gallery|reviews?|testimonials?|blog|careers?|privacy|terms|login|sign in)\b/i.test(cleaned)) return undefined;
@@ -1496,8 +1496,21 @@ function extractVisibleServiceAreas(html: string) {
       .replace(/\s+(?:and|&|plus)\s+(?:the\s+)?surrounding areas?\s+(?:to include|including|such as)\s+/i, ", ")
       .replace(/\b(?:and|plus)\s+(?:the\s+)?surrounding areas?\b.*$/i, "")
       .replace(/([A-Za-z][A-Za-z .'-]{1,60}),\s*([A-Z]{2})(?=$|[,;]|\s+(?:and|&)\s+)/g, "$1 $2");
-    for (const candidate of list.split(/\s*(?:,|;|\||\s+(?:and|&)\s+)\s*/)) {
-      const area = cleanText(candidate)?.replace(/^(?:(?:and|&)\s+)?(?:the\s+)?/i, "").trim();
+    // "Bay, Saginaw and Midland counties in Michigan": the plural type noun
+    // and the state qualifier belong to every listed place, not the last one.
+    let sharedAreaType: string | undefined;
+    const scopedList = list
+      .trim()
+      .replace(new RegExp(`\\s+(?:in|of)\\s+(?:the\\s+state\\s+of\\s+)?(?:${usStateNameOrCodePatternSource})$`, "i"), "")
+      .replace(/\s+(counties|parishes|boroughs)$/i, (_match, noun: string) => {
+        sharedAreaType = ({ counties: "County", parishes: "Parish", boroughs: "Borough" } as Record<string, string>)[noun.toLowerCase()];
+        return "";
+      });
+    for (const candidate of scopedList.split(/\s*(?:,|;|\||\s+(?:and|&)\s+)\s*/)) {
+      const cleaned = cleanText(candidate)?.replace(/^(?:(?:and|&)\s+)?(?:the\s+)?/i, "").trim();
+      const area = cleaned && sharedAreaType && !new RegExp(`\\b${sharedAreaType}$`, "i").test(cleaned)
+        ? `${cleaned} ${sharedAreaType}`
+        : cleaned;
       if (!area || !plausibleVisibleServiceArea(area)) continue;
       values.push(area);
     }
@@ -1672,6 +1685,43 @@ function extractVisibleBusinessNameCandidate(html: string, hostname: string) {
     .sort((left, right) => right.score - left.score || left.index - right.index)
     .find(({ score }) => score > 0)
     ?.candidate;
+}
+
+/**
+ * Site builders often carry a placeholder or shortened site title ("bob") in
+ * <title>, og:site_name, and WebSite JSON-LD while every page displays the
+ * real name ("Bob’s Pest Control") in a heading or copyright line. Only a
+ * displayed phrase that begins with the current name and scores at least as
+ * well for this hostname may replace it; unrelated headlines never compete.
+ */
+function expandTruncatedBusinessName(current: string | undefined, html: string, hostname: string) {
+  if (!current) return current;
+  const currentId = businessNameId(current);
+  if (!currentId || current.trim().split(/\s+/).length > 2) return current;
+  const phrases: string[] = [];
+  for (const match of html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)) phrases.push(cleanText(match[1]) ?? "");
+  for (const match of html.matchAll(/(?:©|&copy;|&#169;|copyright)\s*(?:\d{4}(?:\s*[-\u2013]\s*\d{4})?)?\s*([^<|.]{3,80})/gi)) phrases.push(cleanText(match[1]) ?? "");
+  const currentScore = businessNameCandidateScore(current, hostname);
+  const counts = new Map<string, { candidate: string; count: number; score: number }>();
+  for (const phrase of phrases) {
+    const candidate = phrase.replace(/[\s,.]*all rights reserved\.?$/i, "").trim();
+    const words = candidate.split(/\s+/).length;
+    const id = businessNameId(candidate);
+    if (!candidate || candidate.length > 60 || words > 6 || id === currentId || !id.startsWith(currentId)) continue;
+    if (!new RegExp(`^${escapeRegExp(current.trim())}(?:[\\s'\u2019]|$)`, "i").test(candidate)) continue;
+    const score = businessNameCandidateScore(candidate, hostname);
+    if (score < currentScore) continue;
+    const entry = counts.get(id) ?? { candidate, count: 0, score };
+    entry.count += 1;
+    counts.set(id, entry);
+  }
+  return [...counts.values()]
+    .sort((left, right) => right.score - left.score || right.count - left.count || left.candidate.localeCompare(right.candidate))[0]
+    ?.candidate ?? current;
+}
+
+function businessNameId(value: string) {
+  return value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function normalizeBusinessNameCandidate(value: string | undefined, hostname: string) {

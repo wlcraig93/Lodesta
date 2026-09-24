@@ -10,7 +10,7 @@ import {
 import type { WorkspaceSourceFile } from "./contracts";
 import { sourceWorkspaceContentFilePaths } from "./source-workspace";
 import { normalizeSiteRedirectPath } from "@/packages/platform-operations/contracts";
-import { isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
+import { isLegalSourcePagePath, isLikelyInjectedSpamSourcePage, isMalformedSourceLinkPath } from "@/packages/business-data/source-page-classification";
 import type { ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
 import { containsGatedBusinessClaim } from "./claim-gates";
 import {
@@ -163,6 +163,16 @@ export function buildSiteArchitectureInventory(
   pages: SourceSnapshotPage[],
   sourcePhotoCounts?: ReadonlyMap<string, number>
 ): SiteArchitectureInventoryEntry[] {
+  // Broken-markup link artifacts are not pages the site publishes; they can
+  // never become routes, so they never enter the planner's ledger.
+  // Off-topic posts injected into a hacked CMS (casino, pharma) are not the
+  // business's content; keep them out of the plan so they never become routes.
+  const homepageText = pages
+    .filter((page) => canonicalPathname(page.path) === "/")
+    .map((page) => `${page.title ?? ""}\n${page.extractedText}`)
+    .join("\n");
+  pages = pages.filter((page) => !isMalformedSourceLinkPath(page.path)
+    && !isLikelyInjectedSpamSourcePage(page, homepageText));
   const pagePathById = new Map(pages.map((page) => [page.id, canonicalPathname(page.path)]));
   const fetchedPages = pages.filter((page) => page.outcome === "fetched" && Boolean(page.extractedText));
   const evidencePageByPath = new Map<string, SourceSnapshotPage>();
@@ -304,11 +314,11 @@ export function siteArchitectureOutputJsonSchema(inventory: SiteArchitectureInve
           properties: {
             disposition: {
               type: "string",
-              enum: isLegalSourcePagePath(page.path)
+              enum: isPreservableLegalSourcePath(page.path)
                 ? ["preserved"]
                 : ["preserved", "redirected", "canonical_duplicate", "retired"]
             },
-            targetPath: isLegalSourcePagePath(page.path)
+            targetPath: isPreservableLegalSourcePath(page.path)
               ? { type: "string", const: page.path }
               : { ...liveRoutePath, type: ["string", "null"] }
           }
@@ -326,18 +336,43 @@ export function siteArchitectureOutputJsonSchema(inventory: SiteArchitectureInve
  */
 export function normalizeSiteArchitecturePlan(
   raw: RawSiteArchitecturePlan,
-  inventory: SiteArchitectureInventoryEntry[]
+  inventory: SiteArchitectureInventoryEntry[],
+  findings: string[] = []
 ) {
   const sourceDispositions: SiteArchitecturePlan["sourceDispositions"] = inventory.map(({ path }) => ({
     sourcePath: path,
     ...raw.sourceDispositions[path]
   }));
+  // A route or target the static site cannot represent is dropped with a
+  // finding instead of failing the whole plan, but only when nothing real is
+  // lost: a broken-markup link artifact or a path that never yielded content.
+  // An unrepresentable path to a real page still fails loudly as before.
+  const contentlessPaths = new Set(inventory
+    .filter((entry) => !entry.outcomes.includes("fetched") || entry.wordCount === 0)
+    .map((entry) => entry.path));
+  const droppable = (path: string) => !isStaticSiteRoutePath(path)
+    && (isMalformedSourceLinkPath(path) || contentlessPaths.has(path));
+  for (const item of sourceDispositions) {
+    const target = item.disposition === "preserved" && item.targetPath === null ? item.sourcePath : item.targetPath;
+    if (item.disposition === "retired" || target === null || !droppable(target)) continue;
+    findings.push(`retired ${item.sourcePath}: target ${target} is not a representable static route`);
+    item.disposition = "retired";
+    item.targetPath = null;
+  }
   const routes: SiteArchitecturePlan["routes"] = [];
   const routeIndex = new Map<string, number>();
   for (const route of raw.routes) {
+    if (droppable(route.path)) {
+      findings.push(`dropped route ${route.path}: not a representable static route`);
+      continue;
+    }
     if (routeIndex.has(route.path)) continue;
     routeIndex.set(route.path, routes.length);
-    routes.push({ ...route, sourcePaths: [] });
+    routes.push({
+      ...route,
+      parentPath: route.parentPath && droppable(route.parentPath) ? null : route.parentPath,
+      sourcePaths: []
+    });
   }
 
   // "Preserved" already makes the target unambiguous: the source remains at
@@ -407,6 +442,7 @@ export function normalizeSiteArchitecturePlan(
   }
 
   const primaryNavigation = raw.primaryNavigation
+    .filter((item) => !droppable(item.path))
     .map((item) => {
       if (!removedPaths.has(item.path)) return item;
       const targetPath = sourceDispositions.find((source) => source.sourcePath === item.path)?.targetPath;
@@ -466,7 +502,7 @@ export function validateSiteArchitecturePlan(
   const invalidNavigationTargets = plan.primaryNavigation.map((item) => item.path).filter((path) => !routePaths.has(path));
   const missingRoutePurposes = plan.routes.filter((route) => route.purpose.trim().length < 12).map((route) => route.path);
   const unsafeLegalDispositions = plan.sourceDispositions.flatMap((item) =>
-    isLegalSourcePagePath(item.sourcePath)
+    isPreservableLegalSourcePath(item.sourcePath)
       && (item.disposition !== "preserved" || item.targetPath !== item.sourcePath)
       ? [{ sourcePath: item.sourcePath, disposition: item.disposition, targetPath: item.targetPath }]
       : []
@@ -659,31 +695,45 @@ export function createArchitectureEvidenceFiles(
     || input.retainedContentMode === "indexed-pull-preview-author-digest"
   ) {
     const readableAnswer = input.retainedContentMode === "indexed-pull-preview-readable";
-    const sourceIndex = createApprovedSourceIndex(pages, plan, {
-      approvedDocuments: input.approvedDocuments,
-      includePreviews: input.retainedContentMode !== "indexed-pull",
-      authorDigest: input.retainedContentMode === "indexed-pull-preview-author-digest",
-      answerPacket: readableAnswer,
-      offerings: input.offerings,
-      routeImages: input.routeImages,
-      // The readable index carries each mapped source's customer answer.
-      // Shorter historical and digest variants stay on their existing bounds.
-      previewCharacters: readableAnswer ? 2_000 : undefined,
-      previewLines: readableAnswer ? 40 : undefined
-    });
+    const indent = input.retainedContentMode === "indexed-pull-preview-readable"
+      || input.retainedContentMode === "indexed-pull-preview-author-digest"
+      ? 2
+      : undefined;
+    const sourceIndexModule = (bounds: ApprovedSourceIndexBounds) => `export const approvedSourceIndex = ${JSON.stringify(
+      createApprovedSourceIndex(pages, plan, {
+        approvedDocuments: input.approvedDocuments,
+        includePreviews: input.retainedContentMode !== "indexed-pull",
+        authorDigest: input.retainedContentMode === "indexed-pull-preview-author-digest",
+        answerPacket: readableAnswer,
+        offerings: input.offerings,
+        routeImages: input.routeImages,
+        // The readable index carries each mapped source's customer answer.
+        // Shorter historical and digest variants stay on their existing bounds.
+        previewCharacters: readableAnswer ? 2_000 : undefined,
+        previewLines: readableAnswer ? 40 : undefined,
+        ...bounds
+      }),
+      null,
+      indent
+    )} as const;\n`;
+    // Large sites (hundreds of consolidated pages) would otherwise exceed the
+    // workspace file limit and fail after the architecture spend. Tighten the
+    // inline answer excerpts, highest-priority first, and name every omission;
+    // the complete text stays readable through each source's contentFiles.
+    let sourceIndexContent = sourceIndexModule({});
+    for (const bounds of approvedSourceIndexBoundSteps) {
+      if (sourceIndexContent.length <= maximumApprovedSourceIndexCharacters) break;
+      sourceIndexContent = sourceIndexModule(bounds);
+    }
+    if (sourceIndexContent.length > maximumApprovedSourceIndexCharacters) {
+      throw new Error(`approved_source_index_too_large:${sourceIndexContent.length}`);
+    }
     const inventory = readableAnswer ? createArchitectureContentInventory(pages, plan, input) : undefined;
     return [
       { path: "src/approved-architecture.ts", content: architectureModule },
       {
         path: "src/approved-source-index.ts",
-        content: `export const approvedSourceIndex = ${JSON.stringify(
-          sourceIndex,
-          null,
-          input.retainedContentMode === "indexed-pull-preview-readable"
-            || input.retainedContentMode === "indexed-pull-preview-author-digest"
-            ? 2
-            : undefined
-        )} as const;\n`
+        content: sourceIndexContent
       },
       ...(inventory && !contentInventoryIsEmpty(inventory)
         ? [{ path: contentInventoryPath, content: contentInventoryModule(inventory) }]
@@ -729,10 +779,31 @@ function inventoryRouteKey(sourcePath: string) {
   return canonicalPathname(sourcePath).replace(/\.html?$/i, "").replace(/\/index$/i, "") || "/";
 }
 
+/** Leaves headroom under the 1,000,000-character workspace file limit. */
+export const maximumApprovedSourceIndexCharacters = 900_000;
+
+type ApprovedSourceIndexBounds = {
+  /** Inline answer distinctions kept per route; the rest are named as omitted. */
+  maxDistinctionsPerRoute?: number;
+  /** Characters per inline distinction body. */
+  distinctionCharacters?: number;
+  /** Consolidated-only sources keep path, title, and contentFiles but drop headings. */
+  omitConsolidatedHeadings?: boolean;
+};
+
+const approvedSourceIndexBoundSteps: ApprovedSourceIndexBounds[] = [
+  { maxDistinctionsPerRoute: 40 },
+  { maxDistinctionsPerRoute: 24, omitConsolidatedHeadings: true },
+  { maxDistinctionsPerRoute: 12, distinctionCharacters: 1_200, omitConsolidatedHeadings: true },
+  { maxDistinctionsPerRoute: 6, distinctionCharacters: 800, omitConsolidatedHeadings: true },
+  { maxDistinctionsPerRoute: 3, distinctionCharacters: 500, omitConsolidatedHeadings: true },
+  { maxDistinctionsPerRoute: 1, distinctionCharacters: 300, omitConsolidatedHeadings: true }
+];
+
 function createApprovedSourceIndex(
   pages: SourceSnapshotPage[],
   plan: SiteArchitecturePlan,
-  input: {
+  input: ApprovedSourceIndexBounds & {
     includePreviews?: boolean;
     authorDigest?: boolean;
     answerPacket?: boolean;
@@ -779,7 +850,9 @@ function createApprovedSourceIndex(
           : "consolidated_evidence_only" as const,
         approvedLinkPath: route.path,
         title: approved ? route.label : page.title ?? "",
-        headings: approved ? undefined : page.headings.slice(0, 24),
+        headings: approved || (input.omitConsolidatedHeadings && canonicalPathname(sourcePath) !== route.path)
+          ? undefined
+          : page.headings.slice(0, 24),
         wordCount: approved ? undefined : page.wordCount,
         sourcePageId: page.id,
         authority: approved ? "owner-approved" : undefined,
@@ -818,14 +891,23 @@ function createApprovedSourceIndex(
           })
           .slice(0, input.answerPacket ? Number.POSITIVE_INFINITY : 2)
       : undefined;
+    const distinctionLimit = input.maxDistinctionsPerRoute ?? Number.POSITIVE_INFINITY;
     const distinctions = input.answerPacket
-      ? (evidencePreviews ?? []).map((preview) => ({
-          sourcePath: preview.sourcePath,
-          sourceRouteRole: preview.sourceRouteRole,
-          approvedLinkPath: preview.approvedLinkPath,
-          body: preview.preview,
-          continuesInContentFile: (bestByPath.get(canonicalPathname(preview.sourcePath))?.extractedText.length ?? 0) > preview.preview.length + 80
-        }))
+      ? (evidencePreviews ?? []).slice(0, distinctionLimit).map((preview) => {
+          const body = input.distinctionCharacters && preview.preview.length > input.distinctionCharacters
+            ? `${preview.preview.slice(0, input.distinctionCharacters).replace(/\s+\S*$/, "")} …`
+            : preview.preview;
+          return {
+            sourcePath: preview.sourcePath,
+            sourceRouteRole: preview.sourceRouteRole,
+            approvedLinkPath: preview.approvedLinkPath,
+            body,
+            continuesInContentFile: (bestByPath.get(canonicalPathname(preview.sourcePath))?.extractedText.length ?? 0) > body.length + 80
+          };
+        })
+      : [];
+    const omittedDistinctionPaths = input.answerPacket
+      ? (evidencePreviews ?? []).slice(distinctionLimit).map((preview) => preview.sourcePath)
       : [];
     const duplicateTarget = route.sourcePaths
       .map((sourcePath) => nearDuplicates.get(canonicalPathname(sourcePath)))
@@ -864,6 +946,13 @@ function createApprovedSourceIndex(
       ...(input.answerPacket ? {
         answer: {
           distinctions,
+          ...(omittedDistinctionPaths.length ? {
+            omittedDistinctions: {
+              count: omittedDistinctionPaths.length,
+              note: "Inline excerpts were bounded for this large site. These mapped sources still belong to this route; read their contentFiles from sources when the page needs their detail.",
+              sourcePaths: omittedDistinctionPaths
+            }
+          } : {}),
           mustName: mustName.get(route.path) ?? [],
           nearDuplicateOf,
           images
@@ -1341,6 +1430,11 @@ function canonicalPhotoCounts(counts?: ReadonlyMap<string, number>) {
     normalized.set(key, (normalized.get(key) ?? 0) + count);
   }
   return normalized;
+}
+
+/** Legal pages are preserved at their exact path only when that path can be a route. */
+function isPreservableLegalSourcePath(path: string) {
+  return isLegalSourcePagePath(path) && isStaticSiteRoutePath(path);
 }
 
 function canonicalPathname(value: string) {

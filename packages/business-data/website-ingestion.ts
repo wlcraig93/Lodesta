@@ -529,7 +529,9 @@ export function selectSourceOfferingFacts(
 ) {
   const serviceAreaIdentities = unique(serviceAreaLabels.flatMap((label) => [
     normalizedText(label),
-    serviceAreaIdentity(label)
+    serviceAreaIdentity(label),
+    // "Midland County" also names the city pages that market to it.
+    serviceAreaIdentity(label).replace(/\s+(?:county|parish|borough)$/, "")
   ]).filter(Boolean));
   const evidenceClassByUrl = new Map(ingestion.pages.flatMap((page) => [
     [page.url, page.evidenceClass] as const,
@@ -552,6 +554,9 @@ export function selectSourceOfferingFacts(
     const segment = path.split("/").filter(Boolean).at(-1)
       ?.replace(/\.(?:html?|php|aspx?)$/i, "");
     if (!segment || isUtilityOfferingRouteSegment(segment)) return [];
+    // A city landing page ("/midland-mi-pest-control") markets a place, not a
+    // distinct offering; the offerings themselves come from service pages.
+    if (!explicitServicePath && isLocationLandingOfferingSegment(segment, serviceAreaIdentities)) return [];
     const name = canonicalOfferingName(segment.replace(/[-_]+/g, " "), serviceAreaIdentities);
     if (!name || !isPlausibleOfferingName(name)) return [];
     const serviceShapedPath = explicitServicePath
@@ -710,6 +715,8 @@ function isPlausibleOfferingName(value: string) {
   if (/^(?:other|additional|more)\b.*\b(?:services?|things?|products?)\b/.test(normalized)) return false;
   if (/^(?:areas?|explore|more frequent|start consultation|get your quote|consultations?|residential|commercial|request(?: service)?|contact(?: us)?|call(?: now)?|email(?: us)?|submit|send|schedule|book|quote|get started|learn more|read more|view more)$/i.test(value)) return false;
   if (/^(?:commercial and residential|residential and commercial)$/.test(normalized)) return false;
+  if (/^(?:schedule|call|book|request|get|contact|text|email)\b/.test(normalized) || /\d{3}\s?\d{3}\s?\d{4}/.test(normalized)) return false;
+  if (looksLikeLocationLandingName(normalized)) return false;
   if (/\b(?:family owned|locally owned|local and loved|environmentally friendly|safe for pets?|response times?|treatment around|foundation)\b/.test(normalized)) return false;
   return true;
 }
@@ -727,8 +734,8 @@ function canonicalOfferingName(value: string | undefined, serviceAreaIdentities:
   for (const area of sortedAreas) {
     const escaped = escapeRegExp(area);
     normalized = normalized
-      .replace(new RegExp(`^(?:${escaped})(?:\\s+(?:nc|tx|fl|ga|va))?\\s+`, "i"), "")
-      .replace(new RegExp(`\\s+(?:in\\s+)?(?:${escaped})(?:\\s+(?:nc|tx|fl|ga|va))?$`, "i"), "")
+      .replace(new RegExp(`^(?:${escaped})(?:\\s+(?:${usStateCodePatternSource}))?\\s+`, "i"), "")
+      .replace(new RegExp(`\\s+(?:in\\s+)?(?:${escaped})(?:\\s+(?:${usStateCodePatternSource}))?$`, "i"), "")
       .trim();
   }
   normalized = normalized.replace(/\s+(?:nc|tx|fl|ga|va)$/i, "").trim();
@@ -748,6 +755,42 @@ function canonicalOfferingName(value: string | undefined, serviceAreaIdentities:
       ? word
       : word.replace(/^\w/, (character) => character.toUpperCase()))
     .join(" ");
+}
+
+const usStateCodePatternSource = "al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc";
+
+/**
+ * "midland-mi-pest-control", "saginaw-pest-control", "pest-control-in-midland":
+ * a known service area, or a leading place followed by a state code, marks a
+ * location landing page. State codes that are also English words ("in", "or",
+ * "me") only count after a known area, so "mice-in-walls" stays a service.
+ */
+function isLocationLandingOfferingSegment(segment: string, serviceAreaIdentities: string[]) {
+  const words = normalizedText(segment.replace(/[-_]+/g, " "));
+  if (serviceAreaIdentities.some((area) => area && (
+    new RegExp(`^${escapeRegExp(area)}\\s`, "i").test(words)
+    || new RegExp(`\\s(?:in\\s+)?${escapeRegExp(area)}(?:\\s+(?:${usStateCodePatternSource}))?$`, "i").test(words)
+  ))) return true;
+  return looksLikeLocationLandingName(words);
+}
+
+const unambiguousStateCodes = "al|ak|az|ar|ca|ct|fl|ga|ia|il|ks|ky|md|mi|mn|ms|mt|nc|nd|nh|nj|nm|nv|ny|ri|sc|sd|tn|tx|ut|vt|va|wa|wi|wv|wy|dc";
+const usStateNames = "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming";
+const serviceNoun = "control|services?|exterminators?|extermination|removal|inspections?|treatments?|management|company";
+const nonPlaceTargets = "homes?|houses?|attics?|walls?|kitchens?|hotels?|restaurants?|schools?|offices?|businesses|apartments?|crawl ?spaces?|yards?|gardens?|lawns?|basements?|garages?|warehouses?|the home|your home|winter|summer|spring|fall";
+
+/**
+ * Offering names that are really city landing pages: "Midland Mi Pest
+ * Control", "Pest Control Brooklyn Ny", "Termite Control Avon Park Florida",
+ * "Pest Control In Frostproof". A state after the place, or "<service> in
+ * <Place>", marks a location; "Rodent Control In Attics" stays a service.
+ */
+function looksLikeLocationLandingName(normalized: string) {
+  const state = `(?:${unambiguousStateCodes}|${usStateNames})`;
+  return new RegExp(`^[a-z]+(?:\\s[a-z]+){0,2}\\s${state}\\s(?:[a-z]+\\s){0,3}(?:${serviceNoun})$`).test(normalized)
+    || new RegExp(`\\b(?:${serviceNoun})\\s(?:in\\s|near\\s)?[a-z]+(?:\\s[a-z]+){0,2}\\s${state}$`).test(normalized)
+    || (new RegExp(`\\b(?:${serviceNoun})\\s(?:in|near)\\s[a-z]+(?:\\s[a-z]+){0,2}$`).test(normalized)
+      && !new RegExp(`\\s(?:in|near)\\s(?:${nonPlaceTargets})$`).test(normalized));
 }
 
 function isUtilityOfferingRouteSegment(value: string) {
@@ -913,7 +956,7 @@ function verifiedServiceAreas(crawl: CrawlAssessment, ingestion: WebsiteGenerati
           ...crawl.extractedFacts.services
         ])) continue;
       const identity = serviceAreaIdentity(label);
-      const matchingBlocks = page.sourceTextBlocks.filter((block) => normalizedText(block.displayText).includes(identity));
+      const matchingBlocks = page.sourceTextBlocks.filter((block) => textMentionsServiceArea(block.displayText, label));
       const listed = explicitList.find((entry) => serviceAreaIdentity(entry.label) === identity);
       const supporting = listed?.block ?? matchingBlocks.find((block) =>
         /\b(?:service areas?|areas? we serve|we (?:proudly )?serve|serving|services? in)\b/.test(normalizedText(block.displayText))
@@ -1025,6 +1068,7 @@ function isBroadServiceAreaLabel(value: string) {
 export function normalizeServiceAreaCandidate(value: string | undefined) {
   if (!value) return undefined;
   const stripped = value
+    .replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "")
     .replace(/^\s*(?:(?:serving|throughout|across|near|in)\s+(?:the\s+)?|(?:all|rest)\s+of\s+(?:the\s+)?|(?:entire|wider|broader)\s+)/i, "")
     .replace(/\s+region\s*$/i, "")
     .trim();
@@ -1035,6 +1079,20 @@ function serviceAreaIdentity(value: string) {
   return normalizedText(value)
     .replace(/\s+(?:al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc)$/, "")
     .trim();
+}
+
+/**
+ * "Bay County" is supported by "serving Bay, Saginaw and Midland counties":
+ * the shared plural type noun applies to each listed place.
+ */
+function textMentionsServiceArea(text: string, label: string) {
+  const normalized = normalizedText(text);
+  const identity = serviceAreaIdentity(label);
+  if (normalized.includes(identity)) return true;
+  const typed = identity.match(/^(.+)\s+(county|parish|borough)$/);
+  if (!typed) return false;
+  const plural = { county: "counties", parish: "parishes", borough: "boroughs" }[typed[2] as "county" | "parish" | "borough"];
+  return new RegExp(`\\b${escapeRegExp(typed[1]!)}\\b[^.;:]{0,120}\\b${plural}\\b`).test(normalized);
 }
 
 function serviceAreaSpecificity(value: string) {
@@ -1081,7 +1139,7 @@ function serviceAreaHasGeographicEvidence(
     if (!hasMatchingChildLocation) return false;
   }
   if (!context
-    || !context.includes(identity)
+    || !textMentionsServiceArea(context, label)
     || !/\b(?:service areas?|areas? we serve|we (?:proudly )?serve|serving|services? in|(?:install(?:s|ed|ing)?|provid(?:e|es|ed|ing)|offer(?:s|ed|ing)?|perform(?:s|ed|ing)?|work(?:s|ed|ing)?)\b.{0,180}\bin)\b/.test(context)) {
     return false;
   }
@@ -1226,15 +1284,22 @@ export function selectObservedFirstPartyTestimonials(
   };
   for (const page of pages) {
     if (!sameSourceHost(page.url, sourceHost) || !sourceFactPageEligible(page, sourceUrl)) continue;
-    if (page.purposeTags.includes("reviews")) {
-      const widgetBlocks = new Set(page.thirdPartyReviewBlockIds ?? []);
-      const blocks = page.sourceTextBlocks
-        .filter((block) => !widgetBlocks.has(block.id))
-        .sort((left, right) => left.order - right.order);
-      for (const block of blocks) {
+    const widgetBlocks = new Set(page.thirdPartyReviewBlockIds ?? []);
+    const pageBlocks = page.sourceTextBlocks
+      .filter((block) => !widgetBlocks.has(block.id) && block.displayText.replace(/[\s​-‍⁠﻿]/g, ""))
+      .sort((left, right) => left.order - right.order);
+    // A review page is all review content; elsewhere only a section the
+    // business itself labels "Testimonials"/"Reviews" (a heading or a tab
+    // label) is, e.g. a homepage testimonial strip or an About-page tab.
+    const reviewSections = page.purposeTags.includes("reviews")
+      ? [pageBlocks]
+      : labeledTestimonialSections(pageBlocks);
+    for (const blocks of reviewSections) {
+      for (const [index, block] of blocks.entries()) {
         const blockquote = /^blockquote(?:[#.:]|$)/.test(block.containerId.split(" > ").at(-1) ?? "");
         const visiblyQuoted = /(?:^|\s)[“"][^”"]{20,}[”"](?:\s|$)/u.test(block.displayText);
-        if (blockquote || visiblyQuoted) accept({ text: block.displayText, sourceUrl: block.sourceUrl, sourceBlockId: block.id });
+        const author = blocks[index + 1] ? reviewAttributionName(blocks[index + 1]!.displayText) : undefined;
+        if (blockquote || visiblyQuoted) accept({ text: block.displayText, sourceUrl: block.sourceUrl, sourceBlockId: block.id, ...(author ? { author } : {}) });
       }
       for (const card of attributedReviewCards(blocks)) accept(card);
     }
@@ -1243,6 +1308,33 @@ export function selectObservedFirstPartyTestimonials(
     }
   }
   return testimonials.slice(0, 8);
+}
+
+const testimonialSectionLabel = /^(?:(?:our|client|customer)\s+)?(?:testimonials?|reviews?)\s*:?$|^what\s+(?:our\s+)?(?:customers|clients|neighbors|homeowners)\s+(?:are\s+)?say(?:ing)?(?:\s+about\s+us)?\s*:?$/i;
+const reviewPlatformMarker = /\b(?:posted on (?:google|yelp|facebook)|based on \d[\d,]* reviews|powered by|verified by)\b/i;
+
+/**
+ * Blocks following a first-party "Testimonials" label, up to the next heading
+ * or other short section label. A review-platform widget marker ends the
+ * section: widget content is the platform's, not the business's.
+ */
+function labeledTestimonialSections(blocks: SourceTextBlock[]) {
+  const sections: SourceTextBlock[][] = [];
+  for (let index = 0; index < blocks.length; index += 1) {
+    if (!testimonialSectionLabel.test(blocks[index]!.displayText.trim())) continue;
+    const section: SourceTextBlock[] = [];
+    for (let next = index + 1; next < blocks.length && section.length < 40; next += 1) {
+      const block = blocks[next]!;
+      const text = block.displayText.trim();
+      if (reviewPlatformMarker.test(text)) break;
+      if (sourceBlockHeadingLevel(block) && !reviewAttributionName(text)) break;
+      if (testimonialSectionLabel.test(text)) break;
+      section.push(block);
+    }
+    if (section.length) sections.push(section);
+    index += section.length;
+  }
+  return sections;
 }
 
 function sameSourceHost(url: string, sourceHost: string) {
@@ -1266,7 +1358,9 @@ function attributedReviewCards(blocks: SourceTextBlock[]): ObservedTestimonial[]
     if (!author) continue;
     const attribution = blocks[index];
     const card = sharedContainerPath(attribution.containerId, blocks[index - 1].containerId);
-    if (!card || card.split(" > ").length < 2) continue;
+    // A single shared ancestor is a card only when it is a specific element
+    // (an id), not a generic page-level wrapper.
+    if (!card || (card.split(" > ").length < 2 && !/#/.test(card))) continue;
     const inCard = (block: SourceTextBlock) => block.containerId.startsWith(`${card} > `);
     if (blocks.some((block, other) => other !== index && attributions[other] && inCard(block))) continue;
     const quote: SourceTextBlock[] = [];
@@ -1492,22 +1586,112 @@ export function hasContradictoryFirstPartyLocationHours(
   crawl: CrawlAssessment,
   firstPartyUrls = new Set(crawl.pageSummaries.map((page) => page.url))
 ) {
-  const hoursByAddress = new Map<string, Set<string>>();
+  // Compare canonical per-day schedules, not display strings: "Mon-Fri 8am-5pm"
+  // and "Monday: 8:00 AM - 5:00 PM" are the same hours. Only a day that two
+  // pages give different canonical times (or open vs closed) is contradictory;
+  // a page that omits a day is incomplete, not contradictory.
+  const scheduleByAddress = new Map<string, Map<string, string>>();
   for (const page of crawl.pageSummaries) {
     if (!firstPartyUrls.has(page.url)) continue;
     const address = normalizedText(formatAddress(page.extractedFacts.address) ?? "");
     const hours = page.extractedFacts.hours;
     if (!address || !hours || !Object.keys(hours).length) continue;
-    const signature = stableJson(Object.fromEntries(
-      Object.entries(hours)
-        .map(([day, value]) => [normalizedText(day), normalizedText(value)] as const)
-        .sort(([left], [right]) => left.localeCompare(right))
-    ));
-    const values = hoursByAddress.get(address) ?? new Set<string>();
-    values.add(signature);
-    hoursByAddress.set(address, values);
+    const schedule = canonicalWeeklySchedule(hours);
+    if (!schedule) continue;
+    const known = scheduleByAddress.get(address) ?? new Map<string, string>();
+    for (const [day, value] of schedule) {
+      const existing = known.get(day);
+      if (existing !== undefined && existing !== value) return true;
+      known.set(day, value);
+    }
+    scheduleByAddress.set(address, known);
   }
-  return [...hoursByAddress.values()].some((values) => values.size > 1);
+  return false;
+}
+
+const canonicalWeekDays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+
+/**
+ * Expands extracted hour labels ("Monday-Friday", "Saturday") to single days
+ * and each value to sorted 24-hour ranges. Returns undefined when any label or
+ * value cannot be understood, so unknown formats never manufacture a conflict.
+ */
+export function canonicalWeeklySchedule(hours: Record<string, string>) {
+  const schedule = new Map<string, string>();
+  for (const [label, value] of Object.entries(hours)) {
+    const days = expandHoursDayLabel(label);
+    const canonical = canonicalHoursValue(value);
+    if (!days || !canonical) return undefined;
+    for (const day of days) {
+      const existing = schedule.get(day);
+      schedule.set(day, existing && existing !== canonical
+        ? [...new Set([...existing.split(","), ...canonical.split(",")])].sort().join(",")
+        : canonical);
+    }
+  }
+  return schedule;
+}
+
+function expandHoursDayLabel(label: string) {
+  const parts = label.toLowerCase().split(/\s*[-–—]\s*/).map((part) => part.trim());
+  const indexOf = (part: string | undefined) => part
+    ? canonicalWeekDays.findIndex((day) => day === part || (part.length >= 2 && day.startsWith(part)))
+    : -1;
+  const start = indexOf(parts[0]);
+  if (start < 0 || parts.length > 2) return undefined;
+  if (parts.length === 1) return [canonicalWeekDays[start]];
+  const end = indexOf(parts[1]);
+  if (end < 0) return undefined;
+  const days: string[] = [];
+  for (let offset = 0; offset < 7; offset += 1) {
+    const index = (start + offset) % 7;
+    days.push(canonicalWeekDays[index]);
+    if (index === end) break;
+  }
+  return days;
+}
+
+function canonicalHoursValue(value: string) {
+  const compact = value.toLowerCase().replace(/\s+/g, " ").trim();
+  if (/^(?:closed)$/.test(compact)) return "closed";
+  if (/^(?:open 24 hours?|24 hours?)$/.test(compact)) return "00:00-24:00";
+  if (/^by appointment$/.test(compact)) return "appointment";
+  const ranges = compact.split(/\s*[,;]\s*/).filter(Boolean).map((range) => {
+    const match = range.match(/^(.+?)\s*(?:-|–|—|to)\s*(.+)$/);
+    if (!match) return undefined;
+    const start = canonicalClockTime(match[1]!, match[2]!);
+    const end = canonicalClockTime(match[2]!);
+    return start && end ? `${start}-${end}` : undefined;
+  });
+  if (!ranges.length || ranges.some((range) => !range)) return undefined;
+  return [...new Set(ranges as string[])].sort().join(",");
+}
+
+/** Normalizes 8am, 8:00 AM, 8 a.m., and 08:00 to "08:00". An opening time
+ * without a meridiem borrows the closing time's ("8-5pm" is 8:00-17:00 only
+ * when that ordering is plausible). */
+function canonicalClockTime(value: string, pairedClosing?: string): string | undefined {
+  const match = value.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?$/);
+  if (!match) return undefined;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] ?? "0");
+  let meridiem: string | undefined = match[3]?.replace(/\./g, "");
+  if (!meridiem && pairedClosing) {
+    const closing = pairedClosing.trim().match(/(a\.?m\.?|p\.?m\.?)$/)?.[1]?.replace(/\./g, "");
+    // "8-5pm": an unlabeled opening hour greater than the closing hour is AM.
+    const closingHour = Number(pairedClosing.trim().match(/^(\d{1,2})/)?.[1] ?? NaN);
+    if (closing === "pm" && hour > closingHour && hour <= 12) meridiem = "am";
+    else meridiem = closing;
+  }
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return undefined;
+    if (meridiem === "am" && hour === 12) hour = 0;
+    if (meridiem === "pm" && hour !== 12) hour += 12;
+  } else if (!match[2]) {
+    return undefined;
+  }
+  if (hour > 24 || minute > 59) return undefined;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function isAccountLevelSocialProfile(value: string) {

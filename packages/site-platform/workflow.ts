@@ -1739,7 +1739,8 @@ export class SiteAuthoringWorkflow {
           routes: architecture.plan.routes.length,
           dispositions: architecture.plan.sourceDispositions.length,
           browserRoutes: createArchitectureReleasePlan(architecture.plan).browserRoutePaths.length,
-          validationComplete: result.validation.complete
+          validationComplete: result.validation.complete,
+          ...(result.normalizationFindings.length ? { normalizationFindings: result.normalizationFindings.slice(0, 20) } : {})
         }
       });
       run = await this.updateRun(run, {

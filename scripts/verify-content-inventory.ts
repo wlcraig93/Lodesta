@@ -4,6 +4,7 @@ import {
   contentInventoryPath,
   createArchitectureEvidenceFiles,
   createFirstPartyContentInventory,
+  maximumApprovedSourceIndexCharacters,
   type FirstPartyContentInventory
 } from "../packages/site-agent";
 import type { PublicFact, SiteArchitecturePlan, SourceSnapshotPage } from "../packages/site-contracts";
@@ -246,6 +247,33 @@ assert.match(inventoryFile.content, /"routePath": "\/"/);
 assert.equal(files[1]?.path, "src/approved-source-index.ts");
 const emptyFiles = createArchitectureEvidenceFiles([page("/", "Home", ["Welcome to the shop."])], plan, { retainedContentMode: "indexed-pull-preview-readable" });
 assert.ok(!emptyFiles.some((file) => file.path === contentInventoryPath), "no module when nothing was found");
+
+// Arceneaux regression: ~700 consolidated source pages must not produce a
+// source index over the 1,000,000-character workspace file limit. Excerpts are
+// bounded and every omitted mapped source is named.
+{
+  const blogPages = Array.from({ length: 700 }, (_, index) => page(`/blog/post-${index}`, `Pest tip ${index}`,
+    Array.from({ length: 30 }, (_line, line) => `Post ${index} explains local pest habit number ${line} in enough plain detail for homeowners to act on it.`),
+    Array.from({ length: 20 }, (_heading, heading) => `Post ${index} heading ${heading}`)));
+  const largePlan = {
+    ...plan,
+    routes: [
+      { path: "/", label: "Home", purpose: "Introduce the business.", pageType: "home", parentPath: null, navigation: "primary", sourcePaths: blogPages.slice(0, 350).map((entry) => entry.path) },
+      { path: "/pest-control", label: "Pest control", purpose: "Explain services.", pageType: "service", parentPath: null, navigation: "primary", sourcePaths: blogPages.slice(350).map((entry) => entry.path) }
+    ]
+  } as unknown as SiteArchitecturePlan;
+  const largeFiles = createArchitectureEvidenceFiles(blogPages, largePlan, { retainedContentMode: "indexed-pull-preview-readable" });
+  const largeIndex = largeFiles.find((file) => file.path === "src/approved-source-index.ts")!;
+  assert.ok(largeIndex.content.length <= maximumApprovedSourceIndexCharacters, `source index is ${largeIndex.content.length} characters`);
+  const parsed = JSON.parse(largeIndex.content.slice(largeIndex.content.indexOf("{"), largeIndex.content.lastIndexOf("} as const") + 1)) as {
+    routes: Array<{ sources: unknown[]; answer: { distinctions: unknown[]; omittedDistinctions?: { count: number; sourcePaths: string[] } } }>;
+  };
+  for (const route of parsed.routes) {
+    assert.equal(route.sources.length, 350, "every mapped source keeps its contentFiles pointer");
+    assert.ok(route.answer.omittedDistinctions, "bounded excerpts name their omissions");
+    assert.equal(route.answer.distinctions.length + route.answer.omittedDistinctions.count, 350);
+  }
+}
 
 if (process.env.CONTENT_INVENTORY_DEBUG) console.log(module);
 console.log("content inventory verification passed");

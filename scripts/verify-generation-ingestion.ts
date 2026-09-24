@@ -23,9 +23,11 @@ import {
   robotsAllows
 } from "../packages/business-data/robots-policy";
 import { PublicFetchUrlError } from "../lib/url-safety";
+import { isLikelyInjectedSpamSourcePage, isMalformedSourceLinkPath } from "../packages/business-data/source-page-classification";
 import {
   assertSourceSuitableForGeneration,
   createLooseWebsiteBootstrap,
+  hasContradictoryFirstPartyLocationHours,
   ingestWebsite,
   observedProof,
   retainedContactConsensus,
@@ -1002,6 +1004,146 @@ assert.throws(
   /multi-location directory/i,
   "A broad location directory silently became a single arbitrary branch project."
 );
+
+// Bob's Pest Control regression: a Squarespace placeholder site title ("bob")
+// in <title>, og:site_name, WebSite JSON-LD, and logo alt must yield to the
+// displayed name that extends it; unrelated headings never replace a name.
+{
+  const bobsHead = `<title>   bob</title><meta property="og:site_name" content="   bob"/><script type="application/ld+json">{"url":"https://www.bobspestcontrolep.com","name":"   bob","@context":"http://schema.org","@type":"WebSite"}</script>`;
+  const bobsBody = `<header><img class="header-logo" src="/BOBS-2.png" alt="   bob"></header><main><h1>Pest Control in El Paso</h1><h2>Pest Control</h2><p>With Bob’s Pest Control on your side, you won’t have to worry.</p></main><footer><h4>Bob’s Pest Control</h4></footer>`;
+  assert.equal(summarizeCrawlHtml(`<!doctype html><html><head>${bobsHead}</head><body>${bobsBody}</body></html>`, "https://www.bobspestcontrolep.com/").extractedFacts.name,
+    "Bob’s Pest Control");
+  const copyright = summarizeCrawlHtml(`<!doctype html><title>Haynes</title><main><h2>Termite Control</h2></main><footer>© 2026 Haynes Pest Control. All rights reserved.</footer>`, "https://www.haynespestcontrol.com/");
+  assert.equal(copyright.extractedFacts.name, "Haynes Pest Control");
+  const unrelated = summarizeCrawlHtml(`<!doctype html><title>Acme Roofing</title><main><h2>Acme Roofing Deals You Can Trust!</h2><h2>Roofing</h2></main>`, "https://acmeroofing.example/");
+  assert.equal(unrelated.extractedFacts.name, "Acme Roofing");
+}
+
+// Best Pest / Haynes / Central NYC regressions: a shared "counties in
+// Michigan" qualifier applies to every listed place, and city landing pages
+// are locations, not offerings.
+{
+  const countyAreas = summarizeCrawlHtml(`<!doctype html><title>Best Pest</title><main><h3>Your local, family owned pest control company proudly serving Bay, Saginaw and Midland counties in Michigan.</h3></main>`,
+    "https://www.bestpestanimalcontrol.net/").extractedFacts.serviceAreas;
+  assert.deepEqual(countyAreas, ["Bay County", "Saginaw County", "Midland County"]);
+  const locationOrigin = "https://location-landing.example";
+  const locationDocuments = new Map([
+    ["/", pageHtml("Location Landing Pest", ["/rodent-control", "/services/termite-control", "/midland-mi-pest-control", "/pest-control-brooklyn-ny", "/pest-control-in-frostproof", "/termite-control-avon-park-florida", "/rodent-control-in-attics"], "", "Proudly serving Bay, Saginaw and Midland counties in Michigan.")],
+    ["/rodent-control", pageHtml("Rodent Control")],
+    ["/services/termite-control", pageHtml("Termite Control")],
+    ["/midland-mi-pest-control", pageHtml("Midland, MI Pest Control")],
+    ["/pest-control-brooklyn-ny", pageHtml("Pest Control Brooklyn NY")],
+    ["/pest-control-in-frostproof", pageHtml("Pest Control in Frostproof")],
+    ["/termite-control-avon-park-florida", pageHtml("Termite Control Avon Park Florida")],
+    ["/rodent-control-in-attics", pageHtml("Rodent Control in Attics")]
+  ]);
+  const locationCrawl = await crawlWebsiteForGeneration({
+    url: `${locationOrigin}/`,
+    validateUrl: async (value) => value,
+    limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+    sleep: async () => undefined,
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = new URL(url).pathname;
+      if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+      if (path === "/sitemap.xml") return response("", 404, "text/plain");
+      const document = locationDocuments.get(path);
+      return document ? response(document, 200) : response("missing", 404, "text/plain");
+    }
+  });
+  const locationOfferings = new Set(selectSourceOfferingFacts(locationCrawl.crawl, locationCrawl.ingestion).map((offering) => offering.name));
+  for (const expected of ["Rodent Control", "Termite Control", "Rodent Control In Attics"]) {
+    assert.ok(locationOfferings.has(expected), `Service page ${expected} lost offering authority: ${[...locationOfferings].join(", ")}`);
+  }
+  for (const location of ["Midland Mi Pest Control", "Mi Pest Control", "Pest Control Brooklyn Ny", "Pest Control In Frostproof", "Termite Control Avon Park Florida"]) {
+    assert.ok(!locationOfferings.has(location), `City landing page ${location} became an offering.`);
+  }
+}
+
+// Best Pest / Haynes regressions: a first-party "Testimonials" section on a
+// non-review page (a Wix homepage strip with id-scoped cards, an About-page
+// tab label) yields verbatim attributed testimonials; a Google widget does not.
+{
+  const wixHome = summarizeCrawlHtml(`<!doctype html><title>Best Pest</title><main>
+    <div id="WRchTxt8"><h5>Testimonials</h5></div>
+    <div id="comp-card1"><p>Best Pest &amp; Animal Control have done an outstanding job! They came out and placed traps the same day.</p><p>​</p><p>Kerry Dean, Essexville</p></div>
+    <div id="comp-card2"><p>Very professional and not out to make a quick buck. I wish ALL companies were this honest.</p><p>​</p><p>Kendra Avery, Bay City</p></div>
+  </main>`, "https://www.bestpestanimalcontrol.net/");
+  assert.deepEqual(
+    selectObservedFirstPartyTestimonials([wixHome], "https://www.bestpestanimalcontrol.net/").map((item) => item.author),
+    ["Kerry Dean", "Kendra Avery"],
+    "Attributed testimonial cards in a labeled homepage section were missed."
+  );
+  const tabbedAbout = summarizeCrawlHtml(`<!doctype html><title>About</title><main>
+    <div><div>Overview</div><div>Testimonials</div></div>
+    <div><p>We are a third generation family business.</p></div>
+    <div><div>Testimonials</div>
+      <div><div>“I have used him in the past, have recommended him to several people and am using him now.”</div></div>
+      <div><div>— Aimee B.</div></div>
+      <div><div>“Great service n dependable great prices too. Recommend to all.”</div></div>
+      <div><div>— Nancy A.</div></div>
+    </div>
+    <div><div>Customer Reviews</div><div>Based on 166 reviews</div><div>Posted on Google</div><div>Brenda Schmidt</div><div>“Had Haynes out today for annual pest control service and as always very thorough.”</div></div>
+  </main>`, "https://haynespestcontrol.com/about");
+  const tabbed = selectObservedFirstPartyTestimonials([tabbedAbout], "https://haynespestcontrol.com/");
+  assert.deepEqual(tabbed.map((item) => item.author), ["Aimee B.", "Nancy A."]);
+  assert.ok(tabbed.every((item) => !/Had Haynes out today/.test(item.text)), "A Google review widget became first-party testimony.");
+  const unlabeled = summarizeCrawlHtml(`<!doctype html><title>Home</title><main><div id="hero"><p>“We have served this valley with care for three decades and counting.”</p><p>Jim Smith</p></div></main>`, "https://unlabeled.example/");
+  assert.deepEqual(selectObservedFirstPartyTestimonials([unlabeled], "https://unlabeled.example/"), [],
+    "Quoted copy outside a review page or labeled testimonial section became a testimonial.");
+}
+
+// Altura regression: broken-markup link artifacts are never crawl inventory,
+// and injected off-topic posts are recognized only when the homepage never
+// mentions their topic.
+assert.equal(isMalformedSourceLinkPath("/privacy-policy/%22tel:9256597405%22%3E925-659-7405%3C/a%3E%22"), true);
+assert.equal(isMalformedSourceLinkPath("/contact/mailto:office@example.com"), true);
+assert.equal(isMalformedSourceLinkPath("/residential/ants-spiders"), false);
+assert.equal(isMalformedSourceLinkPath("/hotel-pest-control"), false);
+assert.equal(isLikelyInjectedSpamSourcePage({ path: "/blog/tower-rush-1win-jeu-dadresse", title: "Tower Rush 1win" }, "Altura Pest Control serves Livermore."), true);
+assert.equal(isLikelyInjectedSpamSourcePage({ path: "/casino-pest-control", title: "Casino pest control" }, "We protect every casino on the Las Vegas strip."), false);
+assert.equal(isLikelyInjectedSpamSourcePage({ path: "/residential/bed-bugs", title: "Bed Bugs" }, "Pest control."), false);
+{
+  const malformedOrigin = "https://malformed-link.example";
+  const malformedCrawl = await crawlWebsiteForGeneration({
+    url: `${malformedOrigin}/`,
+    validateUrl: async (value) => value,
+    limits: { minimumStartSpacingMs: 0, transientRetries: 0 },
+    sleep: async () => undefined,
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const path = new URL(url).pathname;
+      if (path === "/robots.txt") return response("User-agent: *\nAllow: /", 200, "text/plain");
+      if (path === "/sitemap.xml") return response("", 404, "text/plain");
+      if (path === "/") return response(pageHtml("Home", ["/privacy-policy"]), 200);
+      if (path === "/privacy-policy") return response(`<!doctype html><title>Privacy</title><main><p>${"Privacy terms for customers. ".repeat(20)}</p><a href="&quot;tel:9256597405&quot;&gt;925-659-7405&lt;/a&gt;">925-659-7405</a></main>`, 200);
+      throw new Error(`unexpected_malformed_fixture_url:${url}`);
+    }
+  });
+  assert.ok(malformedCrawl.ingestion.pages.every((entry) => !/%22|tel:/i.test(entry.url)),
+    "An unquoted tel: href was crawled as a page path.");
+}
+
+// Foothills Pest regression: the same hours rendered in two display formats on
+// two first-party pages for one street address are not a contradiction.
+{
+  const hoursOrigin = "https://hours-format.example";
+  const addressLine = "<p>1200 Canyon Road, Boise, ID 83702</p>";
+  const hoursPage = (path: string, hoursHtml: string) =>
+    summarizeCrawlHtml(`<!doctype html><title>Hours fixture</title><main>${addressLine}${hoursHtml}</main>`, `${hoursOrigin}${path}`);
+  const compact = hoursPage("/", "<p>Mon-Fri 8am-5pm</p>");
+  const longForm = hoursPage("/contact", "<p>Monday: 8:00 AM - 5:00 PM</p><p>Tuesday: 8:00 AM - 5:00 PM</p><p>Friday: 8:00 AM - 5:00 PM</p><p>Saturday: Closed</p>");
+  const different = hoursPage("/about", "<p>Mon-Fri 9am-6pm</p>");
+  assert.ok(compact.extractedFacts.hours && longForm.extractedFacts.hours && different.extractedFacts.hours,
+    "The hours fixture did not extract visible hours.");
+  const hoursCrawl = (pages: typeof compact[]) => ({ ...activeCrawlShell(`${hoursOrigin}/`), pageSummaries: pages });
+  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([compact, longForm])), false,
+    "Equivalent hours in different display formats were rejected as contradictory.");
+  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([compact, different])), true,
+    "Genuinely different hours for the same address were not flagged.");
+  assert.equal(hasContradictoryFirstPartyLocationHours(hoursCrawl([longForm, hoursPage("/visit", "<p>Saturday: 9am-1pm</p>")])), true,
+    "Closed versus open on the same day was not flagged.");
+}
 
 const authorityOrigin = "https://authority-filter.example";
 const authorityFiltered = await crawlWebsiteForGeneration({

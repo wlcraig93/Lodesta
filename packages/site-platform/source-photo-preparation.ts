@@ -8,7 +8,7 @@ export const sourcePhotoWebpEffort = 4 as const;
 const maximumSourcePhotoPixels = 80_000_000;
 
 type SourcePhotoMimeType = "image/png" | "image/jpeg" | "image/webp";
-type SourcePhotoOperation = "auto_orient" | "resize_inside" | "encode_webp";
+type SourcePhotoOperation = "auto_orient" | "resize_inside" | "encode_webp" | "decoded_type" | "first_frame";
 
 export type PreparedSourcePhoto = {
   bytes: Buffer;
@@ -23,6 +23,7 @@ export type PreparedSourcePhoto = {
     recipeVersion: typeof sourcePhotoWebRecipeVersion;
     sourceContentHash: `sha256:${string}`;
     sourceMimeType: SourcePhotoMimeType;
+    declaredMimeType?: string;
     sourceWidth: number;
     sourceHeight: number;
     maxEdge: typeof sourcePhotoMaximumEdge;
@@ -33,9 +34,15 @@ export type PreparedSourcePhoto = {
   };
 };
 
+/**
+ * Prepares one retained source photo. The decoded format is trusted over the
+ * declared content type (a mislabeled JPEG is still a JPEG), and an animated
+ * image contributes its first frame. Both corrections are recorded in the
+ * preparation provenance and always produce a re-encoded single-frame WebP.
+ */
 export async function prepareSourcePhoto(input: {
   bytes: Buffer;
-  mimeType: SourcePhotoMimeType;
+  mimeType: string;
   sourceContentHash: `sha256:${string}`;
 }): Promise<PreparedSourcePhoto> {
   if (sha256(input.bytes) !== input.sourceContentHash) throw new Error("source_photo_content_hash_mismatch");
@@ -47,15 +54,17 @@ export async function prepareSourcePhoto(input: {
   }
   const decodedMimeType = decodedSourcePhotoMimeType(metadata.format);
   if (!decodedMimeType) throw new Error("source_photo_decode_format_unsupported");
-  if (decodedMimeType !== input.mimeType) throw new Error("source_photo_mime_mismatch");
-  if (!metadata.width || !metadata.height) throw new Error("source_photo_dimensions_missing");
-  if (metadata.width * metadata.height > maximumSourcePhotoPixels) throw new Error("source_photo_pixel_limit_exceeded");
-  if ((metadata.pages ?? 1) !== 1) throw new Error("source_photo_animation_unsupported");
+  const declaredTypeCorrected = decodedMimeType !== input.mimeType;
+  const animated = (metadata.pages ?? 1) > 1;
+  // For an animated image sharp reports the first frame's height via pageHeight.
+  const frameHeight = animated ? metadata.pageHeight ?? metadata.height : metadata.height;
+  if (!metadata.width || !frameHeight) throw new Error("source_photo_dimensions_missing");
+  if (metadata.width * frameHeight > maximumSourcePhotoPixels) throw new Error("source_photo_pixel_limit_exceeded");
 
   const orientation = metadata.orientation ?? 1;
   const swapsAxes = orientation >= 5 && orientation <= 8;
-  const sourceWidth = swapsAxes ? metadata.height : metadata.width;
-  const sourceHeight = swapsAxes ? metadata.width : metadata.height;
+  const sourceWidth = swapsAxes ? frameHeight : metadata.width;
+  const sourceHeight = swapsAxes ? metadata.width : frameHeight;
   const requiresOrientation = orientation !== 1;
   const requiresResize = Math.max(sourceWidth, sourceHeight) > sourcePhotoMaximumEdge;
   let candidate: { data: Buffer; info: { width: number; height: number } };
@@ -69,11 +78,12 @@ export async function prepareSourcePhoto(input: {
     throw new Error("source_photo_preparation_failed");
   }
 
-  const useCandidate = requiresOrientation || requiresResize || candidate.data.byteLength < input.bytes.byteLength;
+  const useCandidate = requiresOrientation || requiresResize || declaredTypeCorrected || animated
+    || candidate.data.byteLength < input.bytes.byteLength;
   if (!useCandidate) {
     return {
       bytes: input.bytes,
-      mimeType: input.mimeType,
+      mimeType: decodedMimeType,
       contentHash: input.sourceContentHash,
       width: sourceWidth,
       height: sourceHeight,
@@ -81,6 +91,8 @@ export async function prepareSourcePhoto(input: {
     };
   }
   const operations: SourcePhotoOperation[] = [];
+  if (declaredTypeCorrected) operations.push("decoded_type");
+  if (animated) operations.push("first_frame");
   if (requiresOrientation) operations.push("auto_orient");
   if (requiresResize) operations.push("resize_inside");
   operations.push("encode_webp");
@@ -96,7 +108,8 @@ export async function prepareSourcePhoto(input: {
       recipe: "source-photo-web",
       recipeVersion: sourcePhotoWebRecipeVersion,
       sourceContentHash: input.sourceContentHash,
-      sourceMimeType: input.mimeType,
+      sourceMimeType: decodedMimeType,
+      ...(declaredTypeCorrected ? { declaredMimeType: input.mimeType.slice(0, 120) } : {}),
       sourceWidth,
       sourceHeight,
       maxEdge: sourcePhotoMaximumEdge,

@@ -2228,6 +2228,7 @@ export class SiteAuthoringWorkflow {
       const newRevisions: AssetRevision[] = [];
       const newRefs: AssetRevisionRef[] = [];
       const contentHashes = new Set(effectiveBuildInput.business.assets.map((asset) => asset.contentHash));
+      const adoptionFailures: Array<{ resourceId: string; reason: string }> = [];
       for (const photo of curated.selected) {
         try {
           const adopted = await this.materializeSourcePhoto({
@@ -2252,8 +2253,25 @@ export class SiteAuthoringWorkflow {
           }
           contentHashes.add(adopted.ref.contentHash);
           curatedByAssetId.set(adopted.ref.assetId, photo);
-        } catch {
-          // A curated photo that fails an adoption check is simply not offered.
+        } catch (error) {
+          // A curated photo that fails an adoption check is not offered; the
+          // reason is recorded on the curation intermediate.
+          adoptionFailures.push({
+            resourceId: photo.resourceId,
+            reason: `adoption_failed:${error instanceof Error ? error.message : "unknown"}`.slice(0, 200)
+          });
+        }
+      }
+      if (adoptionFailures.length && run.assetCuration) {
+        const recorded = new Set(run.assetCuration.skipped.map((entry) => `${entry.resourceId}:${entry.reason}`));
+        const additions = adoptionFailures.filter((entry) => !recorded.has(`${entry.resourceId}:${entry.reason}`));
+        if (additions.length) {
+          run = await this.updateRun(run, {
+            assetCuration: siteAgentAssetCurationSchema.parse({
+              ...run.assetCuration,
+              skipped: [...run.assetCuration.skipped, ...additions].slice(0, 400)
+            })
+          });
         }
       }
       if (newRevisions.length) {

@@ -38,17 +38,30 @@ assert.equal(unchangedSmallPhoto.changed, false, "An efficient small source phot
 assert.equal(unchangedSmallPhoto.bytes, efficientSmallPhoto);
 assert.equal(unchangedSmallPhoto.contentHash, sha256(efficientSmallPhoto));
 assert.equal(unchangedSmallPhoto.preparation, undefined);
-await assert.rejects(() => prepareSourcePhoto({
+// The decoded format wins over a wrong declared type, and the correction is recorded.
+const mislabeledPhoto = await prepareSourcePhoto({
   bytes: efficientSmallPhoto, mimeType: "image/png", sourceContentHash: sha256(efficientSmallPhoto)
-}), /source_photo_mime_mismatch/);
+});
+assert.equal(mislabeledPhoto.changed, true);
+assert.equal(mislabeledPhoto.mimeType, "image/webp");
+assert.equal(mislabeledPhoto.preparation?.sourceMimeType, "image/jpeg");
+assert.equal(mislabeledPhoto.preparation?.declaredMimeType, "image/png");
+assert.deepEqual(mislabeledPhoto.preparation?.operations, ["decoded_type", "encode_webp"]);
 
 const animatedWebpFrames = await Promise.all(["#8b4134", "#304b62"].map(background =>
   sharp({ create: { width: 16, height: 16, channels: 3, background } }).png().toBuffer()));
 const animatedWebp = await sharp(animatedWebpFrames, { join: { animated: true } })
   .webp({ loop: 0, delay: [100, 100] }).toBuffer();
-await assert.rejects(() => prepareSourcePhoto({
+// An animated image contributes its first frame as a single-frame WebP.
+const firstFrame = await prepareSourcePhoto({
   bytes: animatedWebp, mimeType: "image/webp", sourceContentHash: sha256(animatedWebp)
-}), /source_photo_animation_unsupported/);
+});
+assert.equal(firstFrame.changed, true);
+assert.deepEqual([firstFrame.width, firstFrame.height], [16, 16], "The first frame's dimensions were not used.");
+assert.deepEqual(firstFrame.preparation?.operations, ["first_frame", "encode_webp"]);
+assert.equal((await sharp(firstFrame.bytes).metadata()).pages ?? 1, 1, "The prepared photo is still animated.");
+const firstFramePixel = await sharp(firstFrame.bytes).raw().toBuffer();
+assert(firstFramePixel[0]! > firstFramePixel[2]!, "The prepared photo is not the first frame.");
 const unsupportedTiff = await sharp({ create: { width: 16, height: 16, channels: 3, background: "#315a46" } })
   .tiff().toBuffer();
 await assert.rejects(() => prepareSourcePhoto({

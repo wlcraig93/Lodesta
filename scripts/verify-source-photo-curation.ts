@@ -23,6 +23,7 @@ import {
   curationInputHash,
   dedupeCurationCandidates,
   selectCuratedPhotos,
+  curationSkipReasons,
   sourcePhotoCurationProducer,
   type PhotoCurationCandidate,
   type PhotoCurationLabel,
@@ -160,6 +161,57 @@ async function candidate(id: string, options: Partial<PhotoCurationCandidate> & 
   assert.deepEqual(new Set(selected.slice(0, 6).map((photo) => photo.subject)), new Set(["finished_work", "vehicle", "crew_people", "premises"]),
     "After the hero leads, one round-robin cycle must cover every usable subject.");
   assert.equal(selected.find((photo) => photo.candidate.resourceId === "vehicle_2")?.alt, "Alt vehicle_2");
+}
+
+// 2b. A failed labeling batch never silently loses photos: unlabeled
+// candidates compete on ranking evidence, and every skip records a reason.
+{
+  const candidates = await Promise.all([
+    candidate("labeled_good", { seed: 81 }),
+    candidate("labeled_poor", { seed: 82 }),
+    candidate("labeled_overlay", { seed: 83 }),
+    candidate("unlabeled_home", { seed: 84, pageRole: "home" }),
+    candidate("unlabeled_other", { seed: 85, pageRole: "other" }),
+    candidate("too_small", { seed: 86, width: 300, height: 200 })
+  ]);
+  const labels = new Map<string, PhotoCurationLabel>([
+    ["labeled_good", { subject: "finished_work", quality: "good", heroCapable: false, peoplePresent: false, overlay: "none", stockLike: false, alt: "Good" }],
+    ["labeled_poor", { subject: "finished_work", quality: "poor", heroCapable: false, peoplePresent: false, overlay: "none", stockLike: false, alt: "Poor" }],
+    ["labeled_overlay", { subject: "finished_work", quality: "good", heroCapable: false, peoplePresent: false, overlay: "dominant", stockLike: false, alt: "Flyer" }]
+  ]);
+  const selected = selectCuratedPhotos({ candidates, labels, fallbackAlt: "Fallback", limit: 2 });
+  const ids = selected.map((photo) => photo.candidate.resourceId);
+  assert(ids.includes("labeled_good"));
+  assert(ids.includes("unlabeled_home"), "An unlabeled photo from a failed batch was dropped instead of ranked.");
+  const unlabeled = selected.find((photo) => photo.candidate.resourceId === "unlabeled_home")!;
+  assert.equal(unlabeled.subject, "unlabeled");
+  assert.equal(unlabeled.alt, "Fallback");
+  const skipped = new Map(curationSkipReasons({ candidates, labels, selected }).map((entry) => [entry.resourceId, entry.reason]));
+  assert.deepEqual(Object.fromEntries(skipped), {
+    labeled_poor: "quality_poor",
+    labeled_overlay: "overlay_dominant",
+    unlabeled_other: "selection_limit",
+    too_small: "below_minimum_edge"
+  }, "Every photo left out of curation must record why.");
+
+  // Through the whole step: one of two batches fails.
+  let batch = 0;
+  const halfFailing: PhotoLabeler = {
+    modelId: "gpt-6-luna",
+    async label({ images }) {
+      batch += 1;
+      if (batch === 1) throw Object.assign(new Error("photo_labeling_incomplete"), { usage: usage(0.0005) });
+      return { labels: images.map((image) => ({ id: image.id, subject: "finished_work" as const, quality: "good" as const,
+        heroCapable: false, peoplePresent: false, overlay: "none" as const, stockLike: false, alt: `Alt ${image.id}` })), usage: usage(0.0005) };
+    }
+  };
+  const many = await Promise.all(Array.from({ length: 14 }, (_value, index) => candidate(`batch_${String(index).padStart(2, "0")}`, { seed: 200 + index })));
+  const partial = await curateSourcePhotos({ candidates: many, labeler: halfFailing, publicBuildInputId: "input_fixture", businessName: "Pristine Detailing" });
+  assert.equal(partial.curation.labeler, "vision");
+  assert.equal(partial.selected.length, many.length - partial.curation.flatArtwork.length - partial.curation.duplicates.length,
+    "Photos from a failed labeling batch were lost.");
+  assert(partial.selected.some((photo) => photo.subject === "unlabeled"));
+  siteAgentAssetCurationSchema.parse(partial.curation);
 }
 
 // 3. Fallback, provenance and reuse through the whole curation step.
@@ -351,8 +403,15 @@ try {
       failures.push(`${photo.resourceId}:${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  assert.deepEqual(failures, ["resource_mislabeled:source_photo_mime_mismatch"],
-    "Curated photos must pass the same MIME/decoding checks as adopt_source_asset.");
+  assert.deepEqual(failures, [],
+    "A mislabeled curated photo is adopted from its decoded format, exactly as adopt_source_asset does.");
+  const mislabeled = adopted.find((entry) => entry.revision?.provenance.origin === "source_website"
+    && entry.revision.provenance.sourceResourceId === "resource_mislabeled");
+  assert(mislabeled?.revision?.provenance.origin === "source_website"
+    && mislabeled.revision.provenance.preparation?.recipe === "source-photo-web"
+    && mislabeled.revision.provenance.preparation.declaredMimeType === "image/png",
+    "The declared type of a mislabeled photo must be recorded in its preparation provenance.");
+  adopted.splice(adopted.indexOf(mislabeled), 1);
   assert.equal(adopted.length, 3);
   for (const { ref, revision } of adopted) {
     assert(revision, "A new curated photo must produce a provisional revision.");

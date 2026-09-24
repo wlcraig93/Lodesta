@@ -519,16 +519,19 @@ try {
     assert.equal(mirrored.sourceId, mirroredWebsiteSource.id, "A mirrored resource must advertise the active logical source ID.");
     assert.equal(secondary.sourceId, secondarySnapshot.id, "The matching second catalog source must be retained in the result.");
     assert.equal(sourceAssets.some((asset) => asset.resourceId === outsidePhoto.id), false);
-    const blobsBeforeMismatch = await store.listPage();
+    // A mislabeled photo (declared PNG, stored JPEG) is adopted from its
+    // decoded format; the declared type is recorded in preparation provenance.
     const mismatchedAdoption = await runtime.execute({ callId: "adopt_mismatched_source_photo", name: "adopt_source_asset", arguments: {
       sourceId: mismatched.sourceId, resourceId: mismatched.resourceId, sourcePageId: mismatched.sourcePageId,
       kind: "photo", alt: "Mismatched fixture service photo"
     } });
-    assert.equal(mismatchedAdoption.diagnosticOutput.error, "source_photo_mime_mismatch");
-    assert.equal((await repository.getAgentRun(inspectionRun.id))?.provisionalMedia?.revisions?.length ?? 0, 0,
-      "MIME-mismatched source photo persisted a provisional revision.");
-    assert.deepEqual(await store.listPage(), blobsBeforeMismatch,
-      "MIME-mismatched source photo persisted an asset derivative.");
+    assert.equal(mismatchedAdoption.diagnosticOutput.ok, true, "A mislabeled source photo was rejected instead of trusting its decoded format.");
+    const mismatchedRevision = (await repository.getAgentRun(inspectionRun.id))?.provisionalMedia?.revisions
+      ?.find((revision) => revision.provenance.origin === "source_website" && revision.provenance.sourceResourceId === mismatchedPhoto.id);
+    assert(mismatchedRevision?.provenance.origin === "source_website" && mismatchedRevision.provenance.preparation?.recipe === "source-photo-web");
+    assert.equal(mismatchedRevision.provenance.preparation.sourceMimeType, "image/jpeg");
+    assert.equal(mismatchedRevision.provenance.preparation.declaredMimeType, "image/png");
+    assert(mismatchedRevision.provenance.preparation.operations.includes("decoded_type"));
     const adoptedRefs: SitePublicBuildInput["business"]["assets"] = [];
     for (const asset of [mirrored, secondary]) {
       const adopted = await runtime.execute({ callId: `adopt_${asset.resourceId}`, name: "adopt_source_asset", arguments: {
@@ -550,7 +553,7 @@ try {
       "Source-photo preparation changed the retained source resource bytes.");
     const retainedInspectionRun = await repository.getAgentRun(inspectionRun.id);
     const preparedRevisions = retainedInspectionRun?.provisionalMedia?.revisions ?? [];
-    assert.equal(preparedRevisions.length, 2,
+    assert.equal(preparedRevisions.length, 3,
       "Prepared derivatives must retain distinct source-bound revisions across source identities.");
     assert(preparedRevisions.every(revision => revision.provenance.origin === "source_website"
       && revision.provenance.preparation?.recipe === "source-photo-web"));

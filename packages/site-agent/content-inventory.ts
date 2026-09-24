@@ -1,3 +1,4 @@
+import { reviewAttributionName, reviewAttributionPageTopicWords } from "@/lib/review-attribution";
 import type { SitePublicBuildInput, SourceSnapshotPage } from "@/packages/site-contracts";
 import { classifySourcePagePath, isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
 import { containsGatedBusinessClaim } from "./claim-gates";
@@ -281,11 +282,12 @@ function extractTestimonials(pages: InventoryPage[], isChrome: (line: string) =>
   };
   for (const entry of pages) {
     const proofPage = isProofPage(entry);
+    const topicWords = reviewAttributionPageTopicWords({ title: entry.page.title, path: entry.path });
     // Inline cards collapsed into one line: "quote" - Name "quote" - Name
     for (const line of entry.lines) {
       for (const match of line.matchAll(inlineQuotationPattern)) {
         const attribution = match[2]?.trim().replace(/[,;]+$/, "");
-        if (!attribution || !reviewAttribution(attribution.split(",")[0]!.trim())) continue;
+        if (!attribution || !reviewAttribution(attribution.split(",")[0]!.trim(), topicWords)) continue;
         accept({ quote: match[1]!, attribution, sourcePath: entry.path }, !proofPage);
       }
     }
@@ -294,14 +296,14 @@ function extractTestimonials(pages: InventoryPage[], isChrome: (line: string) =>
     // ("Ted L.", "DK") or the quote must be in a customer's first person.
     for (let index = 1; index < entry.lines.length; index += 1) {
       const attribution = entry.lines[index]!;
-      const name = reviewAttribution(attribution);
+      const name = reviewAttribution(attribution, topicWords);
       if (!name || isChrome(attribution)) continue;
       const card = entry.headings.has(normalizeLine(attribution));
       if (!proofPage && !card) continue;
       const quote: string[] = [];
       for (let previous = index - 1; previous >= 0 && quote.length < (proofPage ? 4 : 1); previous -= 1) {
         const line = entry.lines[previous]!;
-        if (reviewAttribution(line) || line.length < 30 || /\?$/.test(line) || isChrome(line)) break;
+        if (reviewAttribution(line, topicWords) || line.length < 30 || /\?$/.test(line) || isChrome(line)) break;
         if (entry.headings.has(normalizeLine(line))) break;
         quote.unshift(line);
       }
@@ -336,15 +338,10 @@ function reviewerShapedName(value: string) {
 
 const inlineQuotationPattern = /[“"]([^“”"]{30,1500}?)[”"]\s*[-–—~]\s*((?:(?:Dr|Mr|Mrs|Ms)\.?\s+)?[A-Z][a-z'’]*\.?(?:\s+(?:[A-Z][a-z'’]*\.?|&|and))*(?:,\s*[A-Z][^“”",]{0,28})*)/g;
 
-function reviewAttribution(value: string) {
+/** The attribution line (with any role suffix) when it names a reviewer. */
+function reviewAttribution(value: string, pageTopicWords: ReadonlySet<string>) {
   const text = value.replace(/^[\s\-–—~]+/, "").replace(/\s+/g, " ").trim();
-  if (text.length < 2 || text.length > 60) return undefined;
-  const name = text.split(/\s*[,|–—]\s*|\s+-\s+/, 1)[0] ?? "";
-  if (!/^(?:(?:Dr|Mr|Mrs|Ms)\.?\s+)?[A-Z][a-zA-Z'’-]*\.?(?:\s+(?:[A-Z][a-zA-Z'’-]*\.?|&|and)){0,3}$/.test(name)) return undefined;
-  if (name.split(/\s+/).length === 1 && !/^[-–—~]/.test(value.trim()) && name.length > 12) return undefined;
-  if (/^(?:testimonials?|reviews?|read more|more|home|contact(?: us)?|about(?: us)?|call(?: now)?|submit|send|learn more|leave a review|write a review|customer reviews?|our reviews?|happy customers?|services?|faq|search|menu|close|next|previous|back)$/i.test(name)) return undefined;
-  if (/\b(?:services?|removal|repair|installation|trimming|pruning|control|company|llc|inc|team|pump|well|electric|roofing|detailing|tree|google|yelp|facebook|reviews?|testimonials?|estimates?|contact|cookie|policy|package|gallery|projects?|portfolio|austin|texas|tx)\b/i.test(name)) return undefined;
-  return text;
+  return reviewAttributionName(value, pageTopicWords) ? text : undefined;
 }
 
 function sameQuotation(factValue: string, quote: string) {

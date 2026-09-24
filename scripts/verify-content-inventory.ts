@@ -8,6 +8,7 @@ import {
   type FirstPartyContentInventory
 } from "../packages/site-agent";
 import type { PublicFact, SiteArchitecturePlan, SourceSnapshotPage } from "../packages/site-contracts";
+import { reviewAttributionName, reviewAttributionPageTopicWords } from "../lib/review-attribution";
 
 // Site chrome repeated on every page must never read as content.
 const chrome = ["Home", "Services", "Reviews", "Paint Protection Film", "A screen protector for your car's paint", "Call 555-201-3344"];
@@ -286,6 +287,21 @@ assert.ok(!emptyFiles.some((file) => file.path === contentInventoryPath), "no mo
 
 if (process.env.CONTENT_INVENTORY_DEBUG) console.log(module);
 console.log("content inventory verification passed");
+
+// Review attribution is vertical-neutral: names that share a trade, city or
+// state word are real reviewers; only the page's own topic words and
+// generic entity/interface labels are rejected.
+{
+  const reviewsTopic = reviewAttributionPageTopicWords({ title: "Reviews", path: "/reviews" });
+  for (const reviewer of ["Austin T.", "Tree Wellington", "Carol Pump", "Dallas Roofing-Smith"]) {
+    assert.ok(reviewAttributionName(reviewer, reviewsTopic), `${reviewer} was rejected by a vertical or geographic word list.`);
+  }
+  const serviceTopic = reviewAttributionPageTopicWords({ title: "Tree Removal", path: "/services/tree-removal" });
+  assert.equal(reviewAttributionName("Tree Removal", serviceTopic), undefined, "A page's own service title was read as a reviewer.");
+  for (const label of ["Acme Services", "Smith Company", "Read More", "Google"]) {
+    assert.equal(reviewAttributionName(label, reviewsTopic), undefined, `${label} was read as a reviewer.`);
+  }
+}
 
 function page(path: string, title: string, lines: string[], headings: string[] = [title]): SourceSnapshotPage {
   const extractedText = [...chrome, ...lines, ...chrome].join("\n");

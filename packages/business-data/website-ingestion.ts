@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { explicitServiceAreaListEvidence, type CrawlAssessment, type CrawlPageSummary, type ExtractedBusinessFacts } from "@/lib/crawler";
 import { assertPublicFetchUrl } from "@/lib/url-safety";
+import { reviewAttributionName, reviewAttributionPageTopicWords } from "@/lib/review-attribution";
 import type { SourceTextBlock } from "@/lib/source-text-blocks";
 import {
   assetRevisionSchema,
@@ -1292,17 +1293,18 @@ export function selectObservedFirstPartyTestimonials(
     // A review page is all review content; elsewhere only a section the
     // business itself labels "Testimonials"/"Reviews" (a heading or a tab
     // label) is, e.g. a homepage testimonial strip or an About-page tab.
+    const topicWords = reviewAttributionPageTopicWords({ title: page.title, path: new URL(page.url).pathname });
     const reviewSections = page.purposeTags.includes("reviews")
       ? [pageBlocks]
-      : labeledTestimonialSections(pageBlocks);
+      : labeledTestimonialSections(pageBlocks, topicWords);
     for (const blocks of reviewSections) {
       for (const [index, block] of blocks.entries()) {
         const blockquote = /^blockquote(?:[#.:]|$)/.test(block.containerId.split(" > ").at(-1) ?? "");
         const visiblyQuoted = /(?:^|\s)[“"][^”"]{20,}[”"](?:\s|$)/u.test(block.displayText);
-        const author = blocks[index + 1] ? reviewAttributionName(blocks[index + 1]!.displayText) : undefined;
+        const author = blocks[index + 1] ? reviewAttributionName(blocks[index + 1]!.displayText, topicWords) : undefined;
         if (blockquote || visiblyQuoted) accept({ text: block.displayText, sourceUrl: block.sourceUrl, sourceBlockId: block.id, ...(author ? { author } : {}) });
       }
-      for (const card of attributedReviewCards(blocks)) accept(card);
+      for (const card of attributedReviewCards(blocks, topicWords)) accept(card);
     }
     for (const review of page.extractedFacts?.structuredReviews ?? []) {
       accept({ text: review.text, sourceUrl: page.url, ...(review.author ? { author: review.author } : {}) });
@@ -1324,7 +1326,7 @@ const reviewPlatformMarker = /\b(?:posted on (?:google|yelp|facebook)|based on \
  * or other short section label. A review-platform widget marker ends the
  * section: widget content is the platform's, not the business's.
  */
-function labeledTestimonialSections(blocks: SourceTextBlock[]) {
+function labeledTestimonialSections(blocks: SourceTextBlock[], topicWords: ReadonlySet<string>) {
   const sections: SourceTextBlock[][] = [];
   for (let index = 0; index < blocks.length; index += 1) {
     if (!testimonialSectionLabel.test(blocks[index]!.displayText.trim())) continue;
@@ -1333,7 +1335,7 @@ function labeledTestimonialSections(blocks: SourceTextBlock[]) {
       const block = blocks[next]!;
       const text = block.displayText.trim();
       if (reviewPlatformMarker.test(text)) break;
-      if (sourceBlockHeadingLevel(block) && !reviewAttributionName(text)) break;
+      if (sourceBlockHeadingLevel(block) && !reviewAttributionName(text, topicWords)) break;
       if (testimonialSectionLabel.test(text)) break;
       section.push(block);
     }
@@ -1356,8 +1358,8 @@ function sameSourceHost(url: string, sourceHost: string) {
  * attribution inside the same card container, where that container holds no
  * other attribution.
  */
-function attributedReviewCards(blocks: SourceTextBlock[]): ObservedTestimonial[] {
-  const attributions = blocks.map((block) => reviewAttributionName(block.displayText));
+function attributedReviewCards(blocks: SourceTextBlock[], topicWords: ReadonlySet<string>): ObservedTestimonial[] {
+  const attributions = blocks.map((block) => reviewAttributionName(block.displayText, topicWords));
   const cards: ObservedTestimonial[] = [];
   for (let index = 1; index < blocks.length; index += 1) {
     const author = attributions[index];
@@ -1395,16 +1397,6 @@ function sharedContainerPath(left: string, right: string) {
     shared.push(leftSegments[index]);
   }
   return shared.join(" > ");
-}
-
-function reviewAttributionName(value: string) {
-  const text = value.replace(/^[\s\-–—~]+/, "").replace(/\s+/g, " ").trim();
-  if (text.length < 2 || text.length > 60) return undefined;
-  const name = text.split(/\s*[,|–—]\s*|\s+-\s+/, 1)[0] ?? "";
-  if (!/^(?:(?:Dr|Mr|Mrs|Ms)\.?\s+)?[A-Z][a-zA-Z'’-]*\.?(?:\s+(?:[A-Z][a-zA-Z'’-]*\.?|&|and)){0,3}$/.test(name)) return undefined;
-  if (/^(?:testimonials?|reviews?|read more|more|home|contact(?: us)?|about(?: us)?|call(?: now)?|submit|send|learn more|leave a review|write a review|customer reviews?|our reviews?|happy customers?)$/i.test(name)) return undefined;
-  if (/\b(?:services?|removal|repair|installation|trimming|pruning|control|company|llc|inc|team|pump|well|electric|roofing|detailing|tree|google|yelp|facebook|reviews?|testimonials?)\b/i.test(name)) return undefined;
-  return name;
 }
 
 type ObservedCredential = {

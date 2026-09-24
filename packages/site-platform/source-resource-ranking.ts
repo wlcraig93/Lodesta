@@ -197,7 +197,7 @@ function sourceAssetCandidate(resource: SourceSnapshotResource, page: SourceSnap
       reasons.push("operations-oriented filename lacks homepage or identity-page support");
     }
   }
-  if (/\b(?:service|pest|termite|rodent|roach|ant|mosquito|spider|wildlife|exterminator)\b/.test(signal)) {
+  if (/\b(?:service|services)\b/.test(signal)) {
     score += 45;
     if (likelyKind === "other") likelyKind = "photo";
     reasons.push("filename suggests service-relevant photography");

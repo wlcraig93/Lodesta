@@ -363,4 +363,15 @@ assert.equal(sourcePhotoPageRole("/gallery"), "portfolio");
 assert.doesNotMatch(workflowSource, /replace\(\/\\\/\+\$\/, ""\) \|\| ""/,
   "Source-page paths must normalize the homepage to \"/\", not an empty string.");
 
+// Ranking is vertical-neutral: no trade vocabulary earns a filename bonus.
+{
+  const [pestPhoto] = rankSourceAssetCandidates({ pages: [home], resources: [
+    resource("pest_named", "https://fixture.example/images/termite-inspection.jpg", home.finalUrl!, "image/jpeg", 80_000)
+  ] });
+  const [neutralPhoto] = rankSourceAssetCandidates({ pages: [home], resources: [
+    resource("neutral_named", "https://fixture.example/images/deckboard-staining.jpg", home.finalUrl!, "image/jpeg", 80_000)
+  ] });
+  assert.equal(pestPhoto?.relevanceScore, neutralPhoto?.relevanceScore, "A trade-specific filename word changed an image's rank.");
+}
+
 console.log("Source asset ranking verification passed.");

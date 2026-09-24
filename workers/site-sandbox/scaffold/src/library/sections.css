@@ -129,9 +129,10 @@ a.lib-service:hover h3 { text-decoration: underline; text-underline-offset: 0.2e
 .lib-person-media img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--site-image-radius, 0); }
 .lib-person figcaption { margin-top: 0.75rem; display: grid; }
 .lib-person figcaption span { color: var(--site-color-muted); }
-.lib-steps { list-style: none; counter-reset: lib-step; margin: 0; padding: 0; display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
-.lib-steps li { counter-increment: lib-step; padding-top: 1rem; border-top: 2px solid var(--site-color-accent); }
-.lib-steps li::before { content: counter(lib-step); font-family: var(--site-font-display); font-weight: 700; color: var(--site-color-accent); }
+/* Step numbers come from each item's value attribute, not a named CSS counter, so site styles that restyle the list cannot reset them. */
+.lib-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); }
+.lib-steps li { padding-top: 1rem; border-top: 2px solid var(--site-color-accent); }
+.lib-steps li::before { content: attr(value); font-family: var(--site-font-display); font-weight: 700; color: var(--site-color-accent); }
 .lib-steps h3 { margin: 0.5rem 0; }
 .lib-steps p { margin: 0; color: var(--site-color-muted); }
 .lib-faq { border-top: 1px solid var(--site-color-border); max-width: 52rem; }

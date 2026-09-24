@@ -352,7 +352,7 @@ export function Steps({ items }: { items: Array<{ title: ReactNode; body?: React
   return (
     <ol className="lib-steps">
       {items.map((item, index) => (
-        <li key={index}>
+        <li key={index} value={index + 1}>
           <h3>{item.title}</h3>
           {item.body ? <p>{item.body}</p> : null}
         </li>

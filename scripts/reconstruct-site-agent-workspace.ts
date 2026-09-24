@@ -162,7 +162,8 @@ if (throughSequence === undefined && run.candidateVersionId) {
     )).flat();
     const authoringProfile = liveAuthoringProfile(run.authoringProfileId, run.kind);
     for (const file of createArchitectureEvidenceFiles(sourcePages, run.architecture.plan, {
-      retainedContentMode: retainedContentModeForAuthoringProfile(authoringProfile)
+      retainedContentMode: retainedContentModeForAuthoringProfile(authoringProfile),
+      publicFacts: buildInput.publicFacts
     })) {
       files.set(file.path, file.content);
     }

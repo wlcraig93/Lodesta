@@ -315,7 +315,7 @@ export const businessProofSchema = z.object({
   id: identifier,
   kind: z.enum(["testimonial", "credential", "warranty", "award", "offer", "insurance_support", "longevity", "ownership"]),
   status: z.enum(["observed", "confirmed", "rejected", "inactive"]),
-  publicText: z.string().min(1).max(600),
+  publicText: z.string().min(1).max(2000),
   verbatim: z.boolean(),
   sourceFactIds: z.array(identifier).min(1),
   expiresAt: isoTimestamp.optional(),

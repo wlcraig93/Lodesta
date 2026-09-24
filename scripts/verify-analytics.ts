@@ -29,7 +29,7 @@ assert(renderToStaticMarkup(createElement(trendModule.exports.AnalyticsTrend, { 
 const multiplePoints = renderToStaticMarkup(createElement(trendModule.exports.AnalyticsTrend, { points: [...onePoint, { bucket: "2026-09-08", pageViews: 2, customerActions: 0 }] }));
 assert(multiplePoints.includes("L ") && !multiplePoints.includes("<circle "), "Multi-interval line rendering changed unexpectedly.");
 
-assert.equal(classifyAnalyticsTraffic("LodestaWebsiteCrawler/1.0"), "lodesta_internal");
+assert.equal(classifyAnalyticsTraffic("LodestaBot/1.0 (+https://lodesta.com/bot)"), "lodesta_internal");
 assert.equal(classifyAnalyticsTraffic("Googlebot/2.1"), "known_bot");
 assert.equal(classifyAnalyticsTraffic("Mozilla/5.0 Safari/605.1.15"), "human");
 assert.equal(classifyAnalyticsChannel({ referrerHost: "google.com" }), "organic_search");

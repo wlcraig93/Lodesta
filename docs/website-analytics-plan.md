@@ -309,13 +309,16 @@ Lodesta internal exclusion uses defense in depth:
 
 1. every Lodesta crawler, website assessment, render inspection, retained-site
    verification, and other public-site browser context uses the canonical
-   `LodestaWebsiteCrawler` user agent or a successor documented product token;
+   `LodestaBot` user agent (`LodestaBot/1.0 (+https://lodesta.com/bot)`) or a
+   successor documented product token;
 2. internal browser contexts attach a signed Lodesta internal-traffic header to
    same-origin requests;
 3. internal Playwright request guards abort the analytics endpoint where analytics is
    irrelevant to the task;
-4. the trusted runtime avoids emission when it detects the canonical Lodesta product
-   token; and
+4. the trusted runtime avoids emission when it detects a Lodesta internal product
+   token (the retained `site-runtime-v4` bytes predate `LodestaBot` and recognize the
+   earlier `LodestaWebsiteCrawler` token, so `LodestaBot` visits rely on the signed
+   header and server-side classification until a new runtime patch is released); and
 5. ingestion excludes a request when any trusted server-side internal signal applies.
 
 Known search, AI, training, and preview bot user agents are classified through one

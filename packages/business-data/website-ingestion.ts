@@ -1275,7 +1275,7 @@ export function selectObservedFirstPartyTestimonials(
   const testimonials: ObservedTestimonial[] = [];
   const accept = (candidate: ObservedTestimonial) => {
     const text = candidate.text.replace(/\s+/g, " ").trim();
-    if (canonicalWordCount(text) < 6 || text.length < 30 || text.length > 600) return;
+    if (canonicalWordCount(text) < 6 || text.length < 30 || text.length > maxObservedTestimonialCharacters) return;
     if (isPlaceholderOrTemplateCopy(text)) return;
     const identity = normalizedText(text);
     if (seen.has(identity)) return;
@@ -1307,8 +1307,13 @@ export function selectObservedFirstPartyTestimonials(
       accept({ text: review.text, sourceUrl: page.url, ...(review.author ? { author: review.author } : {}) });
     }
   }
-  return testimonials.slice(0, 8);
+  return testimonials.slice(0, maxObservedTestimonials);
 }
+
+// Verbatim, attributed first-party testimonials are kept whatever claims their
+// words mention; businessProofSchema.publicText bounds a testimonial at 2000.
+const maxObservedTestimonialCharacters = 2000;
+const maxObservedTestimonials = 24;
 
 const testimonialSectionLabel = /^(?:(?:our|client|customer)\s+)?(?:testimonials?|reviews?)\s*:?$|^what\s+(?:our\s+)?(?:customers|clients|neighbors|homeowners)\s+(?:are\s+)?say(?:ing)?(?:\s+about\s+us)?\s*:?$/i;
 const reviewPlatformMarker = /\b(?:posted on (?:google|yelp|facebook)|based on \d[\d,]* reviews|powered by|verified by)\b/i;

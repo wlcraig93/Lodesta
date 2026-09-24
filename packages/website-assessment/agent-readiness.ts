@@ -13,7 +13,7 @@ import {
 } from "./contracts";
 
 const cloudflareMethodologyUrl = "https://blog.cloudflare.com/agent-readiness/";
-const lodestaMethodologyUrl = "https://lodesta.com/crawler/";
+const lodestaMethodologyUrl = "https://lodesta.com/bot/";
 
 export type AgentReadinessCheckDefinition = {
   id: string;

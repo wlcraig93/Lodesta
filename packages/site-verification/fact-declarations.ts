@@ -56,7 +56,10 @@ export class FactBindingValidator {
       return observation ? [observation.rating] : [];
     });
     const facts = new Map(input.buildInput.publicFacts.map((fact) => [fact.id, fact]));
-    const quotationSources = firstPartyQuotationSources(input.buildInput, input.sourceSnapshots ?? [], input.sourcePages ?? []);
+    const quotationSources: QuotationSources = {
+      lines: firstPartyQuotationSources(input.buildInput, input.sourceSnapshots ?? [], input.sourcePages ?? []),
+      testimonials: confirmedTestimonialQuotations(input.buildInput)
+    };
     const routes = input.routes.map((route) => visibleRoute(route, input.buildInput, facts, findings, quotationSources));
     const bindings = routes.flatMap((route) => route.bindings);
     const legalSourceTextByPath = richestLegalSourceTextByPath(input.sourcePages ?? []);
@@ -106,7 +109,7 @@ function visibleRoute(
   buildInput: SitePublicBuildInput,
   facts: Map<string, PublicFact>,
   findings: ArtifactGateFinding[],
-  quotationSources: string[][]
+  quotationSources: QuotationSources
 ): VisibleRoute {
   const document = parseDocument(route.html, { decodeEntities: true });
   const state = {
@@ -138,7 +141,7 @@ function visibleRoute(
       const start = state.text.length;
       visit(node.children);
       const end = state.text.length;
-      if (node.name === "blockquote" && sourceBackedQuotation(node, quotationSources)) {
+      if ((node.name === "blockquote" || node.name === "figure") && sourceBackedQuotation(node, quotationSources)) {
         state.sourceQuotationSpans.push({ start, end });
       }
       if (isBusinessName) state.businessNameMarkerTexts.push(state.text.slice(start, end).trim());
@@ -261,10 +264,19 @@ function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildI
   });
 }
 
+type QuotationSources = {
+  lines: string[][];
+  testimonials: Array<{ text: string; author?: string }>;
+};
+
 /** A customer's retained quotation is evidence of what that customer said,
- * not a new promise by the business. Only a complete first-party source block
- * immediately followed by the same attribution qualifies. A blockquote tag,
- * a matching phrase, or a quotation elsewhere never authorizes new claims.
+ * not a new promise by the business, whatever words it contains ("emergency",
+ * "safe", "guarantee", "licensed", a price). Qualifying sources are a complete
+ * first-party source passage (one line or up to four consecutive lines)
+ * immediately followed by the same attribution, a first-party line of the form
+ * "quote" - attribution, or a confirmed verbatim testimonial proof. A
+ * blockquote tag, a matching phrase, or a quotation elsewhere never authorizes
+ * new claims.
  */
 function firstPartyQuotationSources(buildInput: SitePublicBuildInput, snapshots: SourceSnapshot[], pages: SourceSnapshotPage[]) {
   const hosts = new Map(snapshots.flatMap((snapshot) => {
@@ -276,24 +288,78 @@ function firstPartyQuotationSources(buildInput: SitePublicBuildInput, snapshots:
     .map((page) => page.extractedText.split(/\n+/).map((line) => line.trim()).filter(Boolean));
 }
 
-function sourceBackedQuotation(element: Element, sources: string[][]) {
-  const citations = DomUtils.findAll((node) => node.name === "cite", element.children);
-  if (citations.length !== 1) return false;
-  const citation = citations[0]!;
-  const attribution = DomUtils.textContent(citation).trim();
-  if (!attribution) return false;
+/** Confirmed verbatim first-party testimonials, with the observed author when intake recorded one. */
+function confirmedTestimonialQuotations(buildInput: SitePublicBuildInput) {
+  const facts = new Map(buildInput.publicFacts.map((fact) => [fact.id, fact]));
+  return buildInput.business.proof.flatMap((proof) => {
+    if (proof.kind !== "testimonial" || proof.status !== "confirmed" || !proof.verbatim) return [];
+    const labels = proof.sourceFactIds.map((id) => facts.get(id)).filter((fact) => fact?.kind === "proof").map((fact) => fact!.label);
+    if (!labels.length) return [];
+    const author = labels.map((label) => label.match(/^Observed testimonial from (.+)$/)?.[1]?.trim()).find(Boolean);
+    return [{ text: proof.publicText, ...(author ? { author } : {}) }];
+  });
+}
+
+/** A blockquote with one cite, or a figure with one blockquote and one figcaption. */
+function renderedQuotation(element: Element) {
+  const blockquotes = element.name === "figure"
+    ? DomUtils.findAll((node) => node.name === "blockquote", element.children)
+    : [element];
+  if (blockquotes.length !== 1) return undefined;
+  const blockquote = blockquotes[0]!;
+  const citations = DomUtils.findAll((node) => node.name === "cite", blockquote.children);
+  let attributionNode: Element | undefined;
+  if (element.name === "figure") {
+    const captions = DomUtils.findAll((node) => node.name === "figcaption", element.children);
+    if (captions.length !== 1 || citations.length) return undefined;
+    attributionNode = captions[0];
+  } else {
+    if (citations.length !== 1) return undefined;
+    attributionNode = citations[0];
+  }
+  const attribution = attributionNode ? DomUtils.textContent(attributionNode).replace(/\s+/g, " ").trim() : "";
+  if (!attribution || !attributionNode) return undefined;
+  // A figcaption often pairs the name with context ("Jane D." + "Austin"); the
+  // name alone, or the whole caption, may be the retained attribution.
+  const attributions = [attribution, ...attributionNode.children.flatMap((child) => child.type === "tag"
+    ? [DomUtils.textContent(child).replace(/\s+/g, " ").trim()]
+    : [])].filter(Boolean);
   const quoteText = (nodes: AnyNode[]): string => nodes.map((node): string => {
-    if (node === citation) return "";
+    if (node === attributionNode) return "";
     if (node.type === "text") return node.data;
     return node.type === "tag" ? quoteText(node.children) : "";
   }).join(" ");
-  const quotation = quoteText(element.children).trim();
-  if (!quotation) return false;
+  const quotation = quoteText(blockquote.children).trim();
+  return quotation ? { quotation, attributions } : undefined;
+}
+
+function sourceBackedQuotation(element: Element, sources: QuotationSources) {
+  const rendered = renderedQuotation(element);
+  if (!rendered) return false;
   // Preserve complete wording and semantic punctuation (currency, percentages,
   // qualifiers). Only quote typography, whitespace, and initial periods vary.
-  return sources.some((lines) => lines.some((line, index) => normalizedQuotation(line) === normalizedQuotation(quotation)
-    && Boolean(lines[index + 1])
-    && normalizedQuotation(lines[index + 1]!.replaceAll(".", "")) === normalizedQuotation(attribution.replaceAll(".", ""))));
+  const quotation = normalizedQuotation(rendered.quotation);
+  const sameAttribution = (value: string) => rendered.attributions.some((attribution) =>
+    normalizedAttribution(attribution) === normalizedAttribution(value));
+  const passage = sources.lines.some((lines) => lines.some((_, index) => {
+    for (let length = 1; length <= 4 && index + length < lines.length; length += 1) {
+      if (normalizedQuotation(lines.slice(index, index + length).join(" ")) !== quotation) continue;
+      return sameAttribution(lines[index + length]!);
+    }
+    return false;
+  }));
+  if (passage) return true;
+  const inline = sources.lines.some((lines) => lines.some((line) => {
+    const match = normalizedQuotation(line).match(/^"([^"]+)"\s*[-~]\s*(.+)$/);
+    return Boolean(match && normalizedQuotation(match[1]!) === quotation && sameAttribution(match[2]!));
+  }));
+  if (inline) return true;
+  return sources.testimonials.some((testimonial) => normalizedQuotation(testimonial.text) === quotation
+    && (!testimonial.author || sameAttribution(testimonial.author)));
+}
+
+function normalizedAttribution(value: string) {
+  return normalizedQuotation(value.replaceAll(".", "")).replace(/^[-~]\s*/, "");
 }
 
 function normalizedQuotation(value: string) {

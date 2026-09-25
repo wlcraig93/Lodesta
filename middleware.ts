@@ -153,8 +153,15 @@ function routedRequestHeaders(request: NextRequest) {
   return headers;
 }
 
+// Customer hostnames expose only what a published site calls: form
+// submission, analytics, public assets and the trusted runtime.
 function isPublicRuntimeSkippedPath(pathname: string) {
-  return pathname.startsWith("/api/") || pathname.startsWith("/_next/") || pathname.startsWith("/_lodesta/") || pathname === "/favicon.ico";
+  return pathname === "/api/forms/submit"
+    || pathname === "/api/analytics"
+    || (pathname.startsWith("/api/assets/") && !pathname.startsWith("/api/assets/owner"))
+    || pathname.startsWith("/_next/")
+    || pathname.startsWith("/_lodesta/")
+    || pathname === "/favicon.ico";
 }
 
 function notFound() {
@@ -168,8 +175,15 @@ function withCachePolicy(response: NextResponse, pathname: string, customDomain:
     headers["Cloudflare-CDN-Cache-Control"] = "no-store";
     headers["X-Lodesta-Forwarded-Host-Cache"] = "no-store";
   }
-  for (const [name, value] of Object.entries(headers)) {
+  for (const [name, value] of Object.entries({ ...headers, ...baselineSecurityHeaders })) {
     response.headers.set(name, value);
   }
   return response;
 }
+
+// HSTS omits includeSubDomains: a customer's other subdomains are not ours.
+const baselineSecurityHeaders = {
+  "Strict-Transport-Security": "max-age=31536000",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+  "Cross-Origin-Opener-Policy": "same-origin"
+};

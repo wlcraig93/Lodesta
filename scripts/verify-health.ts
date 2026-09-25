@@ -13,6 +13,23 @@ const internalHostHealth = await middleware(new NextRequest("http://10.0.0.12/ap
   headers: { host: "10.0.0.12" }
 }));
 assert.equal(internalHostHealth.status, 200);
+assert.equal(internalHostHealth.headers.get("strict-transport-security"), "max-age=31536000");
+assert.match(internalHostHealth.headers.get("permissions-policy") ?? "", /camera=\(\)/);
+assert.equal(internalHostHealth.headers.get("cross-origin-opener-policy"), "same-origin");
+
+// Customer hostnames never reach owner, admin or operator APIs, even for a
+// verified domain; the public form, analytics and asset endpoints still pass.
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async () => Response.json({ resolved: true, slug: "bakery", siteId: "site_1", domainStatus: "active" })) as typeof fetch;
+for (const path of ["/api/forms/submit", "/api/analytics"]) {
+  const publicApi = await middleware(new NextRequest(`https://bakery.example${path}`, { method: "POST", headers: { host: "bakery.example" } }));
+  assert.notEqual(publicApi.status, 404, `${path} must stay reachable on a verified customer hostname.`);
+}
+for (const path of ["/api/admin/runs", "/api/operator/runtime", "/api/sites/site_1", "/api/assets/owner", "/api/outbound/prospects"]) {
+  const customerHostApi = await middleware(new NextRequest(`https://bakery.example${path}`, { headers: { host: "bakery.example" } }));
+  assert.equal(customerHostApi.status, 404, `${path} was reachable on a customer hostname.`);
+}
+globalThis.fetch = realFetch;
 
 const previousReleaseSha = process.env.LODESTA_RELEASE_GIT_SHA;
 const previousAdminToken = process.env.LODESTA_ADMIN_TOKEN;

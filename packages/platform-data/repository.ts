@@ -237,8 +237,12 @@ export interface SitePlatformRepository {
     businessStates: BusinessState[];
   }>;
   getSitesByIds(siteIds: string[]): Promise<PlatformSiteRecord[]>;
-  /** Claims an unowned, undisposed project for an account; never moves an owned one. */
-  assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
+  /**
+   * Gives an undisposed project to the claimant when it is unowned or still
+   * owned by `releasingOwnerUserId` (the operator who created the claim link).
+   * Any other owned project is never moved.
+   */
+  assignClaimedSiteOwner(siteId: string, ownerUserId: string, releasingOwnerUserId?: string): Promise<PlatformSiteRecord | undefined>;
   disposeOwnedSite(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
   updateReportingTimezone(siteId: string, timezone: string): Promise<PlatformSiteRecord | undefined>;
   setCurrentPublicBuildInput(siteId: string, inputId: string): Promise<void>;
@@ -847,11 +851,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return { sites, businessStates };
   }
   async getSitesByIds(siteIds: string[]) { const state = await this.read(); return [...new Set(siteIds)].flatMap((id) => state.sites[id] ? [clone(state.sites[id]) as PlatformSiteRecord] : []); }
-  async assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string) {
+  async assignClaimedSiteOwner(siteId: string, ownerUserId: string, releasingOwnerUserId?: string) {
     let result: PlatformSiteRecord | undefined;
     await this.write((store) => {
       const site = store.sites[siteId];
-      if (!site || site.ownerUserId || site.status === "paused") return;
+      if (!site || site.status === "paused" || (site.ownerUserId && site.ownerUserId !== releasingOwnerUserId)) return;
       site.ownerUserId = ownerUserId;
       site.updatedAt = new Date().toISOString();
       result = clone(site) as PlatformSiteRecord;
@@ -2373,12 +2377,13 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const rows = await requireData<Record<string, unknown>[]>(this.client.from("sites").select("*").in("id", ids), "Load sites by ID");
     return rows.map(siteFromRow);
   }
-  async assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string) {
+  async assignClaimedSiteOwner(siteId: string, ownerUserId: string, releasingOwnerUserId?: string) {
+    // Hosted claims go through consume_adoption_invitation; this path serves the local repository contract.
     const row = await requireData<Record<string, unknown> | null>(
       this.client.from("sites")
         .update({ owner_user_id: ownerUserId, updated_at: new Date().toISOString() })
         .eq("id", siteId)
-        .is("owner_user_id", null)
+        .or(releasingOwnerUserId ? `owner_user_id.is.null,owner_user_id.eq.${releasingOwnerUserId}` : "owner_user_id.is.null")
         .neq("status", "paused")
         .select("*")
         .maybeSingle(),

@@ -26,13 +26,14 @@ export default async function ClaimSitePage({
   const { state, invitation } = await platformOperationsRepository.inspectClaimLink(sha256(token));
   const site = invitation ? await sitePlatformRepository.getSite(invitation.siteId) : undefined;
   if (state === "used" && site && auth.user?.id && site.ownerUserId === auth.user.id) redirect(`/workspace/${site.slug}`);
-  const claimable = state === "valid" && site && !site.ownerUserId && site.status !== "paused";
+  const claimable = state === "valid" && site && site.status !== "paused"
+    && (!site.ownerUserId || site.ownerUserId === invitation?.createdByUserId);
   if (!claimable) {
     const message = state === "expired"
       ? "This claim link has expired. Ask the person who sent it for a new one."
       : state === "revoked"
         ? "This claim link was replaced or cancelled. Ask the person who sent it for a new one."
-        : state === "used" || (site && site.ownerUserId)
+        : state === "used" || (site && site.ownerUserId && site.ownerUserId !== invitation?.createdByUserId)
           ? "This website has already been claimed by another account."
           : state === "valid"
             ? "This website is no longer available to claim."

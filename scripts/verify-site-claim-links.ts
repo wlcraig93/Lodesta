@@ -10,7 +10,7 @@ import type { PlatformSiteRecord } from "../packages/site-contracts";
 // them: once, before expiry, unless revoked or replaced, never for an owned or
 // disposed project. The atomic SQL path is exercised by the migration test.
 const directory = await mkdtemp(join(tmpdir(), "lodesta-claim-links-"));
-const original = { getSite: sitePlatformRepository.getSite, assign: sitePlatformRepository.assignSiteOwnerIfUnowned };
+const original = { getSite: sitePlatformRepository.getSite, assign: sitePlatformRepository.assignClaimedSiteOwner };
 try {
   const alice = "00000000-0000-4000-8000-00000000000a";
   const bob = "00000000-0000-4000-8000-00000000000b";
@@ -20,9 +20,9 @@ try {
     site_disposed: { id: "site_disposed", status: "paused" }
   };
   sitePlatformRepository.getSite = async (id) => sites[id] as PlatformSiteRecord | undefined;
-  sitePlatformRepository.assignSiteOwnerIfUnowned = async (id, owner) => {
+  sitePlatformRepository.assignClaimedSiteOwner = async (id: string, owner: string, releasing?: string) => {
     const site = sites[id];
-    if (!site || site.ownerUserId || site.status === "paused") return undefined;
+    if (!site || site.status === "paused" || (site.ownerUserId && site.ownerUserId !== releasing)) return undefined;
     site.ownerUserId = owner;
     return site as PlatformSiteRecord;
   };
@@ -54,9 +54,20 @@ try {
   assert.equal(await operations.consumeAdoptionInvitation({ tokenHash: "revoke-me", ownerUserId: bob }), null);
   assert.equal(sites.site_fresh.ownerUserId, undefined);
 
+  // A prospect site built under the operator's account is handed to the claimant.
+  const operator = "00000000-0000-4000-8000-00000000000c";
+  sites.site_operator_built = { id: "site_operator_built", status: "draft", ownerUserId: operator };
+  await assert.rejects(operations.createSiteClaimLink({ siteId: "site_operator_built", tokenHash: "no-actor", expiresAt: later }), /site_not_claimable/,
+    "Without a signed-in operator, an owned project is not claimable.");
+  await assert.rejects(operations.createSiteClaimLink({ siteId: "site_owned", tokenHash: "other-owner", expiresAt: later, actorId: operator }), /site_not_claimable/,
+    "An operator cannot create a link for a project someone else owns.");
+  await operations.createSiteClaimLink({ siteId: "site_operator_built", tokenHash: "operator-link", expiresAt: later, actorId: operator });
+  assert.equal((await operations.consumeAdoptionInvitation({ tokenHash: "operator-link", ownerUserId: bob }))?.consumedByUserId, bob);
+  assert.equal(sites.site_operator_built.ownerUserId, bob, "The claimant now owns the operator-built site.");
+
   console.log(JSON.stringify({ ok: true, singleUse: "pass", replaced: "revoked", expiry: "pass", revocation: "pass", ownedOrDisposed: "not-claimable" }));
 } finally {
   sitePlatformRepository.getSite = original.getSite;
-  sitePlatformRepository.assignSiteOwnerIfUnowned = original.assign;
+  sitePlatformRepository.assignClaimedSiteOwner = original.assign;
   await rm(directory, { recursive: true, force: true });
 }

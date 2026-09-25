@@ -78,7 +78,8 @@ import type {
 
 export interface PlatformOperationsRepository {
   /** Creates a claim link for an unowned project and revokes its earlier open links. */
-  createSiteClaimLink(input: { siteId: string; tokenHash: string; expiresAt: string }): Promise<AdoptionInvitation>;
+  /** actorId is the signed-in operator; a project they own can be handed to the claimant. */
+  createSiteClaimLink(input: { siteId: string; tokenHash: string; expiresAt: string; actorId?: string }): Promise<AdoptionInvitation>;
   revokeSiteClaimLinks(siteId: string): Promise<number>;
   inspectClaimLink(tokenHash: string): Promise<{ state: ClaimLinkState; invitation?: AdoptionInvitation }>;
   consumeAdoptionInvitation(input: { tokenHash: string; ownerUserId: string }): Promise<AdoptionInvitation | null>;
@@ -197,17 +198,18 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
   constructor(private readonly path = process.env.LODESTA_PLATFORM_OPERATIONS_LOCAL_PATH?.trim()
     || resolve(process.cwd(), ".data", "site-platform", "operations.json")) {}
 
-  async createSiteClaimLink(input: { siteId: string; tokenHash: string; expiresAt: string }) {
+  async createSiteClaimLink(input: { siteId: string; tokenHash: string; expiresAt: string; actorId?: string }) {
     const site = await sitePlatformRepository.getSite(input.siteId);
     if (!site) throw new Error("site_not_found");
-    if (site.ownerUserId || site.status === "paused") throw new Error("site_not_claimable");
+    if (site.status === "paused" || (site.ownerUserId && site.ownerUserId !== input.actorId)) throw new Error("site_not_claimable");
     const now = new Date().toISOString();
     const invitation: AdoptionInvitation = {
       id: `invitation_${crypto.randomUUID().replaceAll("-", "")}`,
       siteId: input.siteId,
       tokenHash: input.tokenHash,
       expiresAt: input.expiresAt,
-      createdAt: now
+      createdAt: now,
+      ...(input.actorId ? { createdByUserId: input.actorId } : {})
     };
     await this.write((store) => {
       if (store.adoptionInvitations.some((item) => item.tokenHash === input.tokenHash)) throw new Error("Adoption token already exists.");
@@ -240,7 +242,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     await this.write(async (store) => {
       const invitation = store.adoptionInvitations.find((item) => item.tokenHash === input.tokenHash);
       if (claimLinkState(invitation) !== "valid" || !invitation) return;
-      const site = await sitePlatformRepository.assignSiteOwnerIfUnowned(invitation.siteId, input.ownerUserId);
+      const site = await sitePlatformRepository.assignClaimedSiteOwner(invitation.siteId, input.ownerUserId, invitation.createdByUserId);
       if (!site || site.ownerUserId !== input.ownerUserId) return;
       invitation.consumedAt = new Date().toISOString();
       invitation.consumedByUserId = input.ownerUserId;
@@ -764,7 +766,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
   }
 }
 
-type AdoptionInvitationRow = { id: string; site_id: string; token_hash: string; expires_at: string; created_at: string; consumed_at: string | null; consumed_by_user_id: string | null; revoked_at: string | null };
+type AdoptionInvitationRow = { id: string; site_id: string; token_hash: string; expires_at: string; created_at: string; consumed_at: string | null; consumed_by_user_id: string | null; revoked_at: string | null; created_by_user_id: string | null };
 type PreviewGrantRow = {
   id: string;
   site_id: string;
@@ -895,11 +897,12 @@ type WebsiteAssessmentJobRow = { id: string; assessment_id: string; prospect_rep
 class SupabasePlatformOperationsRepository implements PlatformOperationsRepository {
   private get client() { return getSupabaseAdminClient(); }
 
-  async createSiteClaimLink(input: { siteId: string; tokenHash: string; expiresAt: string }) {
+  async createSiteClaimLink(input: { siteId: string; tokenHash: string; expiresAt: string; actorId?: string }) {
     const row = await data<AdoptionInvitationRow>(this.client.rpc("create_site_claim_link", {
       target_site_id: input.siteId,
       target_token_hash: input.tokenHash,
-      target_expires_at: input.expiresAt
+      target_expires_at: input.expiresAt,
+      actor_id: input.actorId ?? null
     }).single(), "Create site claim link");
     return adoptionInvitationFromRow(row);
   }
@@ -1257,7 +1260,7 @@ export const platformOperationsRepository: PlatformOperationsRepository = config
   ? new LocalPlatformOperationsRepository()
   : new SupabasePlatformOperationsRepository();
 
-function adoptionInvitationFromRow(row: AdoptionInvitationRow): AdoptionInvitation { return { id: row.id, siteId: row.site_id, tokenHash: row.token_hash, expiresAt: row.expires_at, createdAt: row.created_at, consumedAt: row.consumed_at ?? undefined, consumedByUserId: row.consumed_by_user_id ?? undefined, revokedAt: row.revoked_at ?? undefined }; }
+function adoptionInvitationFromRow(row: AdoptionInvitationRow): AdoptionInvitation { return { id: row.id, siteId: row.site_id, tokenHash: row.token_hash, expiresAt: row.expires_at, createdAt: row.created_at, consumedAt: row.consumed_at ?? undefined, consumedByUserId: row.consumed_by_user_id ?? undefined, revokedAt: row.revoked_at ?? undefined, createdByUserId: row.created_by_user_id ?? undefined }; }
 
 function claimLinkState(invitation: AdoptionInvitation | undefined): ClaimLinkState {
   if (!invitation) return "unknown";

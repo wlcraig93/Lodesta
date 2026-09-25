@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { appOriginFromRequest } from "@/lib/app-origin";
 import { requireAdmin } from "@/lib/security";
+import { getCurrentUser } from "@/lib/supabase/server";
 import { sha256 } from "@/packages/business-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 
@@ -17,12 +18,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ sit
     const invitation = await platformOperationsRepository.createSiteClaimLink({
       siteId,
       tokenHash: sha256(token),
-      expiresAt: new Date(Date.now() + claimLinkLifetimeMs).toISOString()
+      expiresAt: new Date(Date.now() + claimLinkLifetimeMs).toISOString(),
+      // A signed-in operator can hand over a prospect project their own account built.
+      actorId: (await getCurrentUser()).user?.id
     });
     return NextResponse.json({ url: `${appOriginFromRequest(request)}/adopt/${token}`, expiresAt: invitation.expiresAt });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message.includes("site_not_claimable")) return NextResponse.json({ error: "Only an unowned project can get a claim link." }, { status: 409 });
+    if (message.includes("site_not_claimable")) return NextResponse.json({ error: "Only a project you own, or an unowned one, can get a claim link." }, { status: 409 });
     if (message.includes("site_not_found")) return NextResponse.json({ error: "Site not found." }, { status: 404 });
     throw error;
   }

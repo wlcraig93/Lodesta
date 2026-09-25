@@ -7,6 +7,8 @@ export type AdoptionInvitation = {
   consumedAt?: string;
   consumedByUserId?: string;
   revokedAt?: string;
+  /** The operator who created the link; the project may still be owned by them until it is claimed. */
+  createdByUserId?: string;
 };
 
 export type ClaimLinkState = "valid" | "expired" | "used" | "revoked" | "unknown";

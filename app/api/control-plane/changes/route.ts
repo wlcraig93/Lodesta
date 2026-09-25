@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownerFacingError } from "@/lib/owner-errors";
 import { z } from "zod";
 import { controlPlaneChangePayloadSchema } from "@/packages/site-contracts";
 import { controlPlaneService } from "@/packages/control-plane";
@@ -38,6 +39,6 @@ export async function POST(request: Request) {
     const result = await controlPlaneService.submit({ ...parsed.data, requestedBy: actor.actorId });
     return applyRateLimitHeaders(NextResponse.json({ ok: true, ...result }, { status: result.applied ? 202 : 202 }), limit);
   } catch (error) {
-    return applyRateLimitHeaders(NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 }), limit);
+    return applyRateLimitHeaders(NextResponse.json(ownerFacingError(error, "control_plane_change", "We couldn't save those details. Try again in a minute."), { status: 409 }), limit);
   }
 }

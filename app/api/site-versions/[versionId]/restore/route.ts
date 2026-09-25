@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownerFacingError } from "@/lib/owner-errors";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { requireSiteOwner } from "@/lib/security";
@@ -14,6 +15,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ ver
     const run = await siteAuthoringWorkflow.restoreVersion(versionId, actor.actorId);
     return NextResponse.json({ run }, { status: 202 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 });
+    return NextResponse.json(ownerFacingError(error, "restore_version"), { status: 409 });
   }
 }

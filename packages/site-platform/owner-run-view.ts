@@ -139,27 +139,28 @@ function ownerRunProgress(run: SiteAgentRun): OwnerRunProgress {
   }
   if (run.status === "failed" || run.stage === "failed") {
     const savedCheckpoint = Boolean(run.resumeCheckpointId);
+    // Plain language: what happened, whether the live site changed, and what to do next.
     const specific = ({
-      authoring_stalled: `The build stopped after the same release check failed ${run.guardrails?.maxConsecutiveIdenticalFailures ?? 3} times without a source change. Change the request or source before trying again; retrying the unchanged request will not help.`,
+      authoring_stalled: "Lodesta got stuck on the same problem and stopped. Your live website hasn't changed. Try rewording the request; repeating it unchanged won't help.",
       cost_limit_exhausted: savedCheckpoint
-        ? "The build reached its safety cost limit after Lodesta saved the latest workspace. You can retry without starting the website over."
-        : "The build reached its safety cost limit before it completed. Try a narrower request.",
-      cost_telemetry_unavailable: "The selected model route stopped reporting reliable cost data, so Lodesta ended the build safely. Wait for Lodesta to repair the model route before retrying.",
+        ? "This took more work than expected, so Lodesta paused and saved its progress. Your live website hasn't changed. Try again to pick up where it left off."
+        : "This took more work than expected, so Lodesta stopped. Your live website hasn't changed. Try a smaller change.",
+      cost_telemetry_unavailable: "Lodesta hit a problem on its side and stopped safely. Your live website hasn't changed. We're fixing it; please try again later.",
       browser_verification_unavailable: savedCheckpoint
-        ? "Lodesta saved the completed workspace but could not finish browser verification. Retry to resume from the saved workspace."
-        : "Lodesta could not complete browser verification. You can try this request again; the current website was not changed.",
+        ? "Lodesta finished the work but couldn't run its final checks. Your live website hasn't changed. Try again to pick up where it left off."
+        : "Lodesta couldn't run its final checks. Your live website hasn't changed. Try again.",
       deadline_exhausted: savedCheckpoint
-        ? "The build reached its overall time limit after Lodesta saved the latest workspace. Retry to resume from that workspace."
-        : "The build reached its overall time limit before a durable workspace was available. Try the request again.",
-      model_tool_schema_invalid: "Lodesta’s authoring tools are temporarily incompatible with the selected model. Your website was not changed. Wait for Lodesta to repair the model route before starting a new request.",
-      source_preparation_failed: "Lodesta could not finish collecting the source website. No model authoring was started, and this source-preparation step can be tried again.",
-      platform_version_mismatch: "Lodesta’s authoring platform changed while this work was paused. Your website was not changed. Wait for the update to finish, then start a new request instead of retrying this run."
+        ? "This took too long, so Lodesta paused and saved its progress. Your live website hasn't changed. Try again to pick up where it left off."
+        : "This took too long and was stopped. Your live website hasn't changed. Try again.",
+      model_tool_schema_invalid: "Lodesta hit a problem on its side. Your live website hasn't changed. We're fixing it; please try again later.",
+      source_preparation_failed: "Lodesta couldn't read your current website. Nothing was changed. Try again.",
+      platform_version_mismatch: "Lodesta was updated while this was paused. Your live website hasn't changed. Ask for the change again in the chat."
     } as const)[run.failureCode as "authoring_stalled" | "cost_limit_exhausted" | "cost_telemetry_unavailable" | "browser_verification_unavailable" | "deadline_exhausted" | "model_tool_schema_invalid" | "source_preparation_failed" | "platform_version_mismatch"];
     return {
-      label: "Website needs attention",
+      label: run.kind === "initial_build" ? "Website build didn't finish" : "Website change didn't finish",
       detail: specific ?? (retryableByOwner
-        ? "The work stopped before it finished. You can try this request again."
-        : "Lodesta is reviewing an internal problem. You do not need to keep retrying.")
+        ? "This stopped before it finished. Your live website hasn't changed. You can try again."
+        : "Lodesta hit a problem on its side. Your live website hasn't changed. We'll look into it, so there's no need to keep retrying.")
     };
   }
   return ({

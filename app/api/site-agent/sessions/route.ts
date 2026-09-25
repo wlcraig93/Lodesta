@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownerFacingError } from "@/lib/owner-errors";
 import { z } from "zod";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { ownerSiteAgentRun } from "@/packages/site-platform/owner-run-view";
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
     await siteAuthoringWorkflow.getOrCreateSession({ siteId: parsed.data.siteId, principal: { kind: "owner", id: actor.actorId } });
     return NextResponse.json(await workspacePayload(parsed.data.siteId, actor.actorId));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 422 });
+    return NextResponse.json(ownerFacingError(error, "open_session"), { status: 422 });
   }
 }
 

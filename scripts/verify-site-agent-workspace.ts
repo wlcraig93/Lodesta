@@ -169,7 +169,8 @@ for (const label of [
   "Reviewing your website",
   "Your answer is needed",
   "Private draft ready",
-  "Website needs attention"
+  "Website change didn't finish",
+  "Website build didn't finish"
 ]) {
   assert(ownerRunView.includes(label), `Owner run projection is missing ${label}`);
 }

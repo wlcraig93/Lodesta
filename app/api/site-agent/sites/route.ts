@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownerFacingError } from "@/lib/owner-errors";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/supabase/server";
 import { siteAuthoringKernel } from "@/packages/site-authoring";
@@ -50,7 +51,9 @@ export async function POST(request: Request) {
     return NextResponse.json({
       error: code === "invalid_url"
         ? "Enter a valid public website URL."
-        : error instanceof Error ? error.message : String(error),
+        : code === "idempotency_key_conflict"
+          ? "This website is already being set up. Refresh the page to see it."
+          : ownerFacingError(error, "create_site", "We couldn't start your website. Check the address and try again.").error,
       code
     }, { status });
   }

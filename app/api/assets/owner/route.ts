@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownerFacingError } from "@/lib/owner-errors";
 import { z } from "zod";
 import { requireAdminOrSiteOwner } from "@/lib/security";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
@@ -94,7 +95,7 @@ export async function POST(request: Request) {
       await controlPlaneService.submit({ siteId: parsed.data.siteId, payload, requestedBy: uploadedBy });
     }
   } catch (error) {
-    return applyRateLimitHeaders(NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 }), limit);
+    return applyRateLimitHeaders(NextResponse.json(ownerFacingError(error, "owner_asset_upload", "We couldn't save that photo. Try again in a minute."), { status: 409 }), limit);
   }
   const updated = await sitePlatformRepository.getBusinessState(state.businessId);
   const assets = updated?.assets ?? [];

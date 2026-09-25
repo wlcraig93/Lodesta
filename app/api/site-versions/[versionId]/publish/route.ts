@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownerFacingError } from "@/lib/owner-errors";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { siteAuthoringWorkflow } from "@/packages/site-platform/workflow";
 import { requireSiteOwner } from "@/lib/security";
@@ -28,7 +29,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ver
             ? "Business details or site preferences changed after this version."
             : storageUnavailable
               ? "Candidate storage could not be verified right now. Nothing was published; try again shortly."
-              : message,
+              : ownerFacingError(error, "publish").error,
         code: candidateChanged
           ? "candidate_changed"
           : ownerAuthorityChanged

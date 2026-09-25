@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownerFacingError } from "@/lib/owner-errors";
 import { z } from "zod";
 import { siteElementSelectionSchema } from "@/packages/site-contracts";
 import { sitePlatformRepository } from "@/packages/platform-data";
@@ -23,6 +24,6 @@ export async function POST(request: Request) {
   try {
     return NextResponse.json(await siteAuthoringWorkflow.discuss({ ...parsed.data, ownerId: actor.actorId }));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 422 });
+    return NextResponse.json(ownerFacingError(error, "discuss"), { status: 422 });
   }
 }

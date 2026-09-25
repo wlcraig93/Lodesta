@@ -42,7 +42,7 @@ const succeededHistoryRun = {
 const failedHistoryRun = {
   id: "run_failed_history", status: "failed", kind: "edit", stage: "failed",
   startedAt: "2026-09-09T10:00:00.000Z", completedAt: "2026-09-09T10:02:00.000Z",
-  progress: { label: "Website needs attention", detail: "The work stopped before it finished." }
+  progress: { label: "Website change didn't finish", detail: "This stopped before it finished. Your live website hasn't changed. You can try again." }
 } as any;
 const runningEditRun = {
   id: "run_stop_fixture", status: "running", kind: "edit", stage: "authoring",

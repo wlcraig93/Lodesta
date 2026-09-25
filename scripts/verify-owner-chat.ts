@@ -40,7 +40,7 @@ const failed = ownerActivitySnapshot(runFixture({ status: "failed" }), [
   eventFixture({ id: "build-failed", sequence: 1, kind: "build", name: "build_preview", status: "failed" })
 ]);
 assert.equal(failed.completed[0]?.status, "failed");
-assert.equal(failed.run.progress.label, "Website needs attention");
+assert.equal(failed.run.progress.label, "Website change didn't finish");
 assert(!JSON.stringify(failed).includes("synthetic internal failure"));
 
 const fortyToolEvents: SiteAgentRunEvent[] = [];

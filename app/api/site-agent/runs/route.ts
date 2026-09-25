@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownerFacingError } from "@/lib/owner-errors";
 import { z } from "zod";
 import { siteElementSelectionSchema } from "@/packages/site-contracts";
 import { sitePlatformRepository } from "@/packages/platform-data";
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ run: ownerSiteAgentRun(run) }, { status: 202 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 });
+    return NextResponse.json(ownerFacingError(error, "start_edit"), { status: 409 });
   }
 }
 
@@ -69,6 +70,6 @@ export async function DELETE(request: Request) {
     });
     return NextResponse.json({ run: ownerSiteAgentRun(run) });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 });
+    return NextResponse.json(ownerFacingError(error, "cancel_run"), { status: 409 });
   }
 }

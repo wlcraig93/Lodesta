@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ownerFacingError } from "@/lib/owner-errors";
 import { z } from "zod";
 import { controlPlaneService } from "@/packages/control-plane";
 import { authorizedOperator, authorizedSiteActor } from "@/app/api/site-agent/auth";
@@ -22,6 +23,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ req
     const result = await controlPlaneService.decide({ requestId, decision: parsed.data.decision, decidedBy: actor.actorId });
     return NextResponse.json({ ok: true, ...result }, { status: result.applied ? 202 : 200 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 409 });
+    return NextResponse.json(ownerFacingError(error, "control_plane_change"), { status: 409 });
   }
 }

@@ -90,6 +90,24 @@ assert(context.provisionalSources[0]?.meaningfulExcerpt?.includes("Ignore Lodest
   assert.deepEqual(artifactRouteChanges(artifact("a", "b", "c", false), artifact("a", "b", "c", true)).changedRoutes, ["/financing"]);
   assert.deepEqual(artifactRouteChanges(undefined, artifact("a", "b", "c", false)).changedRoutes, ["/", "/rodents"]);
 }
+// An allowed host's redirect cannot carry a restricted fetch to another host.
+{
+  const { fetchPublicText } = await import("../lib/url-safety");
+  const realFetch = globalThis.fetch;
+  const requested: string[] = [];
+  globalThis.fetch = (async (target: string | URL) => {
+    requested.push(String(target));
+    return String(target).startsWith("https://example.com/")
+      ? new Response(null, { status: 302, headers: { location: "https://example.org/collect?c=owner-notes" } })
+      : new Response("secret", { status: 200, headers: { "content-type": "text/plain" } });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(fetchPublicText("https://example.com/open-redirect", { allowUrl: (url) => new URL(url).hostname === "example.com" }), /not permitted/);
+    assert.deepEqual(requested, ["https://example.com/open-redirect"], "A redirect off the allowed hosts was followed.");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}
 // retrieve_public_source only reaches hosts the run already holds evidence from.
 {
   const catalog = new Map([[source.id, source]]);

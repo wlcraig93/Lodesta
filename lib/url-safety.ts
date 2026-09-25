@@ -12,7 +12,8 @@ export type PublicFetchUrlValidation =
         | "hostname_missing"
         | "private_hostname"
         | "private_address"
-        | "dns_unavailable";
+        | "dns_unavailable"
+        | "host_not_permitted";
       error: string;
     };
 
@@ -85,11 +86,18 @@ export async function fetchPublicText(
     signal?: AbortSignal;
     maxBytes?: number;
     maxRedirects?: number;
+    /** Checked for the first URL and every redirect, so a redirect cannot leave the allowed hosts. */
+    allowUrl?: (url: string) => boolean;
   } = {}
 ) {
   const maxBytes = Math.max(1, Math.min(options.maxBytes ?? 1_000_000, 2_000_000));
   const maxRedirects = Math.max(0, Math.min(options.maxRedirects ?? 5, 8));
-  let current = await assertPublicFetchUrl(value);
+  const allowed = async (url: string) => {
+    const safe = await assertPublicFetchUrl(url);
+    if (options.allowUrl && !options.allowUrl(safe)) throw new PublicFetchUrlError("host_not_permitted", "URL host is not permitted for this fetch.");
+    return safe;
+  };
+  let current = await allowed(value);
   for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
     const response = await fetch(current, {
       method: "GET",
@@ -105,7 +113,7 @@ export async function fetchPublicText(
       if (!location || redirects === maxRedirects) {
         throw new Error(location ? "public_source_redirect_limit" : "public_source_redirect_missing");
       }
-      current = await assertPublicFetchUrl(new URL(location, current).href);
+      current = await allowed(new URL(location, current).href);
       continue;
     }
     if (!response.ok) throw new Error(`public_source_http_${response.status}`);

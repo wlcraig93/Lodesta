@@ -5731,7 +5731,11 @@ export class SiteAuthoringWorkflow {
         const fetched = await fetchPublicText(requestedUrl, {
           signal: input.signal,
           maxBytes: 1_000_000,
-          maxRedirects: 5
+          maxRedirects: 5,
+          // retrieve_public_source may only reach hosts the run already holds evidence from, at every redirect.
+          ...(input.call.name === "retrieve_public_source"
+            ? { allowUrl: (url: string) => retainedSourceHost(url, input.sourceCatalog, input.getBuildInput()) }
+            : {})
         });
         const payload = {
           status: "available",

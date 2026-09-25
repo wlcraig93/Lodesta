@@ -44,6 +44,8 @@ export interface SiteCapabilityRepository {
   listInquiries(siteId?: string): Promise<Inquiry[]>;
   getInquiry(siteId: string, inquiryId: string): Promise<Inquiry | null>;
   listInquiryEvents(inquiryId: string): Promise<InquiryEvent[]>;
+  /** Visitor form submissions since `since`, newest first, across sites. */
+  listRecentFormSubmissions(since: string, limit: number): Promise<InquiryEvent[]>;
   updateInquiryStatus(input: { siteId: string; inquiryId: string; status: InquiryStatus }): Promise<Inquiry | null>;
   recordAnalyticsEvent(event: AnalyticsEvent): Promise<{ event: AnalyticsEvent; duplicate: boolean }>;
   recordAnalyticsCollection(siteId: string, reason: AnalyticsCollectionReason, at?: string): Promise<void>;
@@ -122,6 +124,13 @@ class LocalSiteCapabilityRepository implements SiteCapabilityRepository {
 
   async listInquiryEvents(inquiryId: string) {
     return (await this.read()).inquiryEvents.filter((event) => event.inquiryId === inquiryId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async listRecentFormSubmissions(since: string, limit: number) {
+    return (await this.read()).inquiryEvents
+      .filter((event) => event.type === "form_submission" && event.createdAt >= since)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
   }
 
   async updateInquiryStatus(input: { siteId: string; inquiryId: string; status: InquiryStatus }) {
@@ -252,6 +261,12 @@ class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
 
   async listInquiryEvents(inquiryId: string) {
     const rows = await requireData<InquiryEventRow[]>(this.client.from("inquiry_events").select("*").eq("inquiry_id", inquiryId).order("created_at", { ascending: false }), "List inquiry events");
+    return rows.map(rowToInquiryEvent);
+  }
+
+  async listRecentFormSubmissions(since: string, limit: number) {
+    const rows = await requireData<InquiryEventRow[]>(this.client.from("inquiry_events").select("*")
+      .eq("type", "form_submission").gte("created_at", since).order("created_at", { ascending: false }).limit(limit), "List recent form submissions");
     return rows.map(rowToInquiryEvent);
   }
 

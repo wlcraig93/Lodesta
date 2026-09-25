@@ -13,7 +13,7 @@ const retryDelaysMs = [60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000];
 export type OwnerNotificationDependencies = {
   notifications: OwnerNotificationRepository;
   platform: Pick<SitePlatformRepository, "getSite" | "getAgentRun">;
-  capabilities: Pick<SiteCapabilityRepository, "getInquiry" | "listInquiryEvents">;
+  capabilities: Pick<SiteCapabilityRepository, "getInquiry" | "listInquiryEvents" | "listRecentFormSubmissions">;
   domains: Pick<PlatformOperationsRepository, "getDomainById">;
   /** The confirmed sign-in email of an account, or undefined when it has none. */
   accountEmail(userId: string): Promise<string | undefined>;
@@ -28,24 +28,31 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
      * Records a lead notification. Never throws: the inquiry is already saved,
      * and a notification problem must not change what the visitor sees.
      */
-    async enqueueLead(input: { siteId: string; inquiryId: string; eventId: string; submissionKind?: "owner_test" | "synthetic" }) {
+    async enqueueLead(input: { siteId: string; inquiryId: string; eventId: string; submissionKind?: "owner_test" | "synthetic" }, now = new Date()) {
       try {
-        await deps.notifications.enqueue({
-          siteId: input.siteId,
-          kind: "lead",
-          // The inquiry event is the subject, so a repeat inquiry from the same person notifies again.
-          subjectId: `${input.inquiryId}/${input.eventId}`,
-          dedupeKey: `lead:${input.eventId}`,
-          audience: input.submissionKind === "synthetic" ? "operator" : "owner",
-          test: Boolean(input.submissionKind)
-        });
+        await recordLead(input, now);
       } catch (error) {
+        // reconcileLeads records it on the worker's next pass.
         console.error(JSON.stringify({ event: "owner_notification_enqueue_failed", kind: "lead", siteId: input.siteId, inquiryId: input.inquiryId, error: String(error) }));
       }
     },
 
+    /**
+     * Records a lead notification for every recent visitor submission that has
+     * none, so a failed enqueue after a saved inquiry is never final.
+     */
+    async reconcileLeads(since: Date, now = new Date()) {
+      let recorded = 0;
+      for (const event of await deps.capabilities.listRecentFormSubmissions(since.toISOString(), 500)) {
+        const kind = event.metadata?.submissionKind;
+        const submissionKind = kind === "owner_test" || kind === "synthetic" ? kind : undefined;
+        if (await recordLead({ siteId: event.siteId, inquiryId: event.inquiryId, eventId: event.id, submissionKind }, now)) recorded += 1;
+      }
+      return recorded;
+    },
+
     /** Records the notification a run's current state calls for, once per state. */
-    async enqueueRun(run: SiteAgentRun) {
+    async enqueueRun(run: SiteAgentRun, now = new Date()) {
       const kind = run.status === "needs_input" ? "run_needs_input"
         : run.status === "failed" ? "run_failed"
         : run.status === "succeeded" && run.candidateVersionId ? "run_ready"
@@ -60,7 +67,7 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
           dedupeKey: `operator:${kind}:${run.id}:${run.executionNumber}`,
           audience: "operator",
           test: false
-        });
+        }, now);
       }
       return deps.notifications.enqueue({
         siteId: run.siteId,
@@ -69,11 +76,11 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
         dedupeKey: `${kind}:${run.id}:${run.executionNumber}`,
         audience: "owner",
         test: false
-      });
+      }, now);
     },
 
     /** Records one notice each time a live domain starts needing attention. */
-    async enqueueDomainAttention(domain: { id: string; siteId: string; attentionRequiredAt?: string }) {
+    async enqueueDomainAttention(domain: { id: string; siteId: string; attentionRequiredAt?: string }, now = new Date()) {
       return deps.notifications.enqueue({
         siteId: domain.siteId,
         kind: "domain_attention",
@@ -81,7 +88,7 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
         dedupeKey: `domain_attention:${domain.id}:${domain.attentionRequiredAt ?? "unknown"}`,
         audience: "owner",
         test: false
-      });
+      }, now);
     },
 
     async deliverDue(input: { workerId: string; limit?: number; now?: Date }) {
@@ -93,6 +100,18 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
       return outcomes;
     }
   };
+
+  function recordLead(input: { siteId: string; inquiryId: string; eventId: string; submissionKind?: "owner_test" | "synthetic" }, now: Date) {
+    return deps.notifications.enqueue({
+      siteId: input.siteId,
+      kind: "lead",
+      // The inquiry event is the subject, so a repeat inquiry from the same person notifies again.
+      subjectId: `${input.inquiryId}/${input.eventId}`,
+      dedupeKey: `lead:${input.eventId}`,
+      audience: input.submissionKind === "synthetic" ? "operator" : "owner",
+      test: Boolean(input.submissionKind)
+    }, now);
+  }
 
   async function deliver(notification: OwnerNotification, now: Date): Promise<"sent" | "suppressed" | "retry" | "failed"> {
     try {

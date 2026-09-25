@@ -202,6 +202,7 @@ const notificationStub = `
 const scenario = process.env.SCRATCH_SCENARIO;
 export const ownerNotificationService = {
   async enqueueRun() { return false; },
+  async reconcileLeads() { return 0; },
   async deliverDue() {
     if (scenario !== "notify-failure") return [];
     process.stdout.write("NOTIFY_ATTEMPT\\n");

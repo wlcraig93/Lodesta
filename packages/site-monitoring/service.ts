@@ -53,7 +53,7 @@ export function createSiteMonitor(deps: SiteMonitorDependencies) {
     const problems: string[] = [];
     let status: number | undefined;
     try {
-      const response = await deps.fetch(url, { headers: { "x-lodesta-internal-traffic": internalTrafficHeaderValue(now.getTime()) }, redirect: "manual", signal: AbortSignal.timeout(15_000) });
+      const response = await deps.fetch(url, { headers: { "x-lodesta-internal-traffic": internalTrafficHeaderValue(now.getTime()), ...pilotAccessHeaders() }, redirect: "manual", signal: AbortSignal.timeout(15_000) });
       status = response.status;
       const html = await response.text();
       if (site.status === "offline") {
@@ -66,7 +66,7 @@ export function createSiteMonitor(deps: SiteMonitorDependencies) {
         const runtimePath = html.match(/<script[^>]+src="([^"]*\/_lodesta\/runtime\/[^"]+)"/)?.[1];
         if (!runtimePath) problems.push("page has no trusted runtime script");
         else {
-          const runtime = await deps.fetch(new URL(runtimePath, url), { signal: AbortSignal.timeout(15_000) });
+          const runtime = await deps.fetch(new URL(runtimePath, url), { headers: pilotAccessHeaders(), signal: AbortSignal.timeout(15_000) });
           if (runtime.status !== 200) problems.push(`runtime script answered ${runtime.status}`);
         }
       }
@@ -98,7 +98,7 @@ export function createSiteMonitor(deps: SiteMonitorDependencies) {
         const payload = Object.fromEntries(form.fields.map((field) => [field.id, syntheticValue(field.type)]));
         const response = await deps.fetch(new URL("/api/forms/submit", url), {
           method: "POST",
-          headers: { "content-type": "application/json", "x-lodesta-internal-traffic": internalTrafficHeaderValue() },
+          headers: { "content-type": "application/json", "x-lodesta-internal-traffic": internalTrafficHeaderValue(), ...pilotAccessHeaders() },
           body: JSON.stringify({ siteId: site.id, formId: form.id, pageId: "/", formRenderedAt: Date.now() - 5_000, payload }),
           signal: AbortSignal.timeout(15_000)
         });
@@ -126,6 +126,12 @@ export function createSiteMonitor(deps: SiteMonitorDependencies) {
       test: false
     }, now);
   }
+}
+
+/** Access-restricted pilot sites accept the team credential; elsewhere it is ignored. */
+function pilotAccessHeaders(): Record<string, string> {
+  const credential = process.env.LODESTA_PILOT_ACCESS_CREDENTIAL?.trim();
+  return credential ? { authorization: `Basic ${Buffer.from(credential).toString("base64")}` } : {};
 }
 
 function syntheticValue(type: string) {

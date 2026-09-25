@@ -44,6 +44,8 @@ export async function middleware(request: NextRequest) {
   const directHostname = normalizeHostname(request.headers.get("host") ?? "");
   const hostname = requestHostname(request.headers);
   const platformHost = !hostname || isPlatformHost(hostname);
+  const accessDenied = pilotAccessDenied(request, hostname, platformHost, pathname);
+  if (accessDenied) return accessDenied;
   const hasForwardedHostSignal = Boolean(request.headers.get("x-forwarded-host") || request.headers.get("forwarded"));
   const forwardedHostRouted =
     request.nextUrl.searchParams.get(forwardedHostRewriteParam) === "1" ||
@@ -100,6 +102,41 @@ export async function middleware(request: NextRequest) {
     true,
     forwardedHostRouted
   );
+}
+
+/**
+ * Internal pilot sites are access-restricted, not merely unlisted: listed
+ * hostnames and /sites/ slugs require the team credential (HTTP Basic).
+ * Monitoring sends the same credential. Unset variables restrict nothing.
+ */
+function pilotAccessDenied(request: NextRequest, hostname: string, platformHost: boolean, pathname: string) {
+  const credential = process.env.LODESTA_PILOT_ACCESS_CREDENTIAL?.trim();
+  if (!credential) return undefined;
+  const hosts = listSetting(process.env.LODESTA_PILOT_RESTRICTED_HOSTS);
+  const slugs = listSetting(process.env.LODESTA_PILOT_RESTRICTED_SLUGS);
+  const slug = pathname.match(/^\/sites\/([^/]+)/)?.[1];
+  const restricted = platformHost
+    ? Boolean(slug && slugs.includes(decodeURIComponent(slug)))
+    : hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+  if (!restricted) return undefined;
+  const supplied = request.headers.get("authorization")?.match(/^Basic\s+(.+)$/i)?.[1];
+  if (supplied && constantTimeEqual(supplied, btoa(credential))) return undefined;
+  return new NextResponse("Sign in to view this pilot site.", {
+    status: 401,
+    headers: { "www-authenticate": 'Basic realm="Lodesta pilot", charset="UTF-8"', "cache-control": "no-store", "x-robots-tag": "noindex" }
+  });
+}
+
+function listSetting(value: string | undefined) {
+  return (value ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
+}
+
+function constantTimeEqual(left: string, right: string) {
+  let difference = left.length ^ right.length;
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    difference |= (left.charCodeAt(index) || 0) ^ (right.charCodeAt(index) || 0);
+  }
+  return difference === 0;
 }
 
 export const config = {

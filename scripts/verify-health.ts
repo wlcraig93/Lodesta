@@ -17,6 +17,28 @@ assert.equal(internalHostHealth.headers.get("strict-transport-security"), "max-a
 assert.match(internalHostHealth.headers.get("permissions-policy") ?? "", /camera=\(\)/);
 assert.equal(internalHostHealth.headers.get("cross-origin-opener-policy"), "same-origin");
 
+// Pilot sites are access-restricted: listed hosts and slugs need the team credential.
+{
+  process.env.LODESTA_PILOT_ACCESS_CREDENTIAL = "team:pilot-secret";
+  process.env.LODESTA_PILOT_RESTRICTED_HOSTS = "lodesta-pilot.example";
+  process.env.LODESTA_PILOT_RESTRICTED_SLUGS = "crawford-pest";
+  const basic = `Basic ${Buffer.from("team:pilot-secret").toString("base64")}`;
+  const denied = await middleware(new NextRequest("https://crawford.lodesta-pilot.example/", { headers: { host: "crawford.lodesta-pilot.example" } }));
+  assert.equal(denied.status, 401);
+  assert.match(denied.headers.get("www-authenticate") ?? "", /^Basic/);
+  const wrong = await middleware(new NextRequest("https://crawford.lodesta-pilot.example/", { headers: { host: "crawford.lodesta-pilot.example", authorization: `Basic ${Buffer.from("team:wrong").toString("base64")}` } }));
+  assert.equal(wrong.status, 401);
+  const slugDenied = await middleware(new NextRequest("http://localhost/sites/crawford-pest", { headers: { host: "localhost" } }));
+  assert.equal(slugDenied.status, 401);
+  const slugAllowed = await middleware(new NextRequest("http://localhost/sites/crawford-pest", { headers: { host: "localhost", authorization: basic } }));
+  assert.notEqual(slugAllowed.status, 401);
+  const otherSite = await middleware(new NextRequest("http://localhost/sites/other-business", { headers: { host: "localhost" } }));
+  assert.notEqual(otherSite.status, 401, "Only listed pilot sites are restricted.");
+  delete process.env.LODESTA_PILOT_ACCESS_CREDENTIAL;
+  delete process.env.LODESTA_PILOT_RESTRICTED_HOSTS;
+  delete process.env.LODESTA_PILOT_RESTRICTED_SLUGS;
+}
+
 // Customer hostnames never reach owner, admin or operator APIs, even for a
 // verified domain; the public form, analytics and asset endpoints still pass.
 const realFetch = globalThis.fetch;

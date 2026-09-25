@@ -25,11 +25,14 @@ try {
   const monitor = createSiteMonitor({
     checks,
     alerts,
-    inquiries: { listRecentFormSubmissions: async () => syntheticSaved ? [{ siteId: "site_live", metadata: { submissionKind: "synthetic" } }] as never : [] },
+    // The inbox holds exactly what was posted, so a probe passes only if its own submission is found.
+    inquiries: { listRecentFormSubmissions: async () => syntheticSaved
+      ? syntheticPosts.map((post) => ({ siteId: "site_live", metadata: { submissionKind: "synthetic" }, payload: JSON.parse(post.body).payload })) as never
+      : [] },
     platform: {
       listSites: async () => sites as PlatformSiteRecord[],
       getSiteVersion: async (id) => ({ id, publicBuildInputId: `input_${id}`, formDefinitionIds: ["form_1"] }) as never,
-      getPublicBuildInput: async () => ({ forms: [{ id: "form_1", fields: [{ id: "name", type: "text" }, { id: "phone", type: "tel" }] }] }) as never
+      getPublicBuildInput: async () => ({ forms: [{ id: "form_1", fields: [{ id: "name", type: "text", required: true }, { id: "phone", type: "phone", required: true }, { id: "consent", type: "checkbox", required: true }] }] }) as never
     },
     domains: { listDomains: async () => [{ siteId: "site_live", hostname: "www.crawford.example", status: "active" }] as never },
     fetch: (async (input: string | URL, init?: RequestInit) => {
@@ -58,6 +61,12 @@ try {
     "A live site, its form, and an offline site answering 503 are all healthy; drafts are not probed.");
   assert(requested.includes("https://www.crawford.example/"), "A site with a live domain is probed at its domain.");
   assert.deepEqual(syntheticPosts.map((post) => post.internal), [true], "The synthetic inquiry is labelled as Lodesta's own traffic.");
+  // The synthetic values pass the real form validator, including a required checkbox.
+  {
+    const { validateFormSubmission } = await import("../lib/form-validation");
+    const form = { fields: [{ id: "name", label: "Name", type: "text", required: true }, { id: "phone", label: "Phone", type: "phone", required: true }, { id: "consent", label: "Consent", type: "checkbox", required: true }] } as never;
+    assert.equal(validateFormSubmission(form, JSON.parse(syntheticPosts[0]!.body).payload).ok, true, "The synthetic inquiry fails the real form validator.");
+  }
   assert.equal((await monitor.runDueChecks(at(3))).length, 0, "Checks are not repeated before they are due.");
 
   healthy = false;

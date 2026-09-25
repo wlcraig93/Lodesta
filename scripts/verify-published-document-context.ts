@@ -212,9 +212,13 @@ try {
         appOrigin: () => appOrigin,
         syntheticFormSiteId: () => input.siteId
       });
-      const checks = await monitor.runDueChecks(new Date());
-      assert.deepEqual(checks.map((check) => `${check.kind}:${check.ok}`), ["site:true", "form:true"],
-        `Monitoring failed against the real routes: ${JSON.stringify(await createLocalSiteMonitorRepository(join(monitorDirectory, "checks.json")).recent(input.siteId, "form", 1))}`);
+      // Three scheduled cycles against retained state: every fresh probe must
+      // pass even though the inbox deduplicates identical visitor submissions.
+      for (const offsetMinutes of [0, 16, 32]) {
+        const checks = await monitor.runDueChecks(new Date(Date.now() + offsetMinutes * 60_000));
+        assert.deepEqual(checks.map((check) => `${check.kind}:${check.ok}`), ["site:true", "form:true"],
+          `Monitoring cycle +${offsetMinutes}m failed against the real routes: ${JSON.stringify(await createLocalSiteMonitorRepository(join(monitorDirectory, "checks.json")).recent(input.siteId, "form", 1))}`);
+      }
       await rm(monitorDirectory, { recursive: true, force: true });
     } finally {
       repository.getPublishedFormDefinition = originalGetPublishedForm;

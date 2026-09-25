@@ -98,7 +98,10 @@ export function createSiteMonitor(deps: SiteMonitorDependencies) {
       else if (!input.forms.every((form) => version.formDefinitionIds.includes(form.id))) problems.push("a site form is not part of the published version");
       if (!problems.length && site.id === deps.syntheticFormSiteId() && input?.forms[0]) {
         const form = input.forms[0];
-        const payload = Object.fromEntries(form.fields.map((field) => [field.id, syntheticValue(field)]));
+        // Each probe is a distinct submission, so inbox deduplication of
+        // identical visitor retries never hides a fresh check.
+        const probeId = `lodesta-monitor-${crypto.randomUUID()}`;
+        const payload = Object.fromEntries(form.fields.map((field) => [field.id, syntheticValue(field, probeId)]));
         const submittedAt = new Date();
         // Same request a visitor's browser sends: slashed endpoint, page referrer, runtime render stamp.
         const response = await deps.fetch(new URL("/api/forms/submit/", url), {
@@ -113,7 +116,10 @@ export function createSiteMonitor(deps: SiteMonitorDependencies) {
         } else {
           // A success response is not enough: the inquiry must be in the inbox.
           const saved = await deps.inquiries.listRecentFormSubmissions(new Date(submittedAt.getTime() - 60_000).toISOString(), 50);
-          if (!saved.some((event) => event.siteId === site.id && event.metadata?.submissionKind === "synthetic")) problems.push("synthetic inquiry was accepted but not saved to the inbox");
+          const persisted = saved.some((event) => event.siteId === site.id
+            && event.metadata?.submissionKind === "synthetic"
+            && Object.values(event.payload ?? {}).some((value) => String(value).includes(probeId)));
+          if (!persisted) problems.push("synthetic inquiry was accepted but not saved to the inbox");
         }
       }
     } catch (error) {
@@ -145,13 +151,17 @@ function pilotAccessHeaders(): Record<string, string> {
   return credential ? { authorization: `Basic ${Buffer.from(credential).toString("base64")}` } : {};
 }
 
-/** A value each field type accepts, so the synthetic inquiry validates like a real one. */
-function syntheticValue(field: { type: string; options?: string[] }) {
-  if (field.type === "email") return "monitor@lodesta.example";
+/**
+ * A value each field type accepts, so the synthetic inquiry validates like a
+ * real one. Free-text and email values carry the probe's unique identity.
+ */
+function syntheticValue(field: { type: string; options?: string[] }, probeId: string) {
+  if (field.type === "email") return `monitor+${probeId}@lodesta.example`;
   if (field.type === "phone") return "(512) 555-0100";
-  if (field.type === "select" || field.type === "radio") return field.options?.[0] ?? "Lodesta synthetic monitoring check";
-  if (field.type === "checkbox") return field.options?.length ? [field.options[0]] : "true";
-  return "Lodesta synthetic monitoring check";
+  if (field.type === "select" || field.type === "radio") return field.options?.[0] ?? probeId;
+  // A checked box submits its value, or "on" like a browser.
+  if (field.type === "checkbox") return field.options?.[0] ?? "on";
+  return `Lodesta synthetic monitoring check ${probeId}`;
 }
 
 function certificateExpiry(hostname: string) {

@@ -15,14 +15,16 @@ async function main() {
       mkdir(join(fixture, "scripts"), { recursive: true }),
       mkdir(join(fixture, "packages/site-platform"), { recursive: true }),
       mkdir(join(fixture, "packages/platform-data"), { recursive: true }),
-      mkdir(join(fixture, "packages/website-assessment"), { recursive: true })
+      mkdir(join(fixture, "packages/website-assessment"), { recursive: true }),
+      mkdir(join(fixture, "packages/owner-notifications"), { recursive: true })
     ]);
     await copyFile("workers/runner.ts", join(fixture, "workers/runner.ts"));
     await Promise.all([
       writeFile(join(fixture, "scripts/load-env.ts"), "// test fixture\n"),
       writeFile(join(fixture, "packages/platform-data/index.ts"), repositoryStub),
       writeFile(join(fixture, "packages/site-platform/workflow.ts"), workflowStub),
-      writeFile(join(fixture, "packages/website-assessment/jobs.ts"), assessmentStub)
+      writeFile(join(fixture, "packages/website-assessment/jobs.ts"), assessmentStub),
+      writeFile(join(fixture, "packages/owner-notifications/index.ts"), notificationStub)
     ]);
 
     const late = await run("late");
@@ -87,6 +89,13 @@ async function main() {
     assert.doesNotMatch(activeShutdown.stdout, /ASSESSMENT/);
     assertOutcomes(activeShutdown.stdout, ["A"]);
 
+    // A notification outage is logged and never stops run processing.
+    const notifyFailure = await run("notify-failure");
+    assert.equal(notifyFailure.code, 0, notifyFailure.stderr);
+    assert.match(notifyFailure.stdout, /NOTIFY_ATTEMPT/);
+    assert.match(notifyFailure.stderr, /owner_notification_tick_failure/);
+    assertOutcomes(notifyFailure.stdout, ["A"]);
+
     const pendingClaim = await run("pending-claim-shutdown");
     assert.equal(pendingClaim.code, 0, pendingClaim.stderr);
     assert.match(pendingClaim.stdout, /SIGTERM_PENDING_CLAIM[\s\S]*CLAIM_AFTER_SIGNAL[\s\S]*START:A[\s\S]*"id":"A","status":"succeeded"/);
@@ -134,7 +143,7 @@ let bReady = false;
 let bClaimed = false;
 const started = Date.now();
 setTimeout(() => { bReady = true; }, 10);
-export const sitePlatformRepository = { async claimNextAgentRun() {
+export const sitePlatformRepository = { async listAgentRunsForOwnerNotification() { return []; }, async claimNextAgentRun() {
   claims += 1;
   process.stdout.write(\`CLAIM:\${claims}:\${Date.now() - started}\\n\`);
   if (scenario === "pending-claim-shutdown") {
@@ -185,6 +194,19 @@ export const siteAuthoringWorkflow = { async executeRunAndFinalize(id) {
     return { id, status: "succeeded" };
   } finally { active -= 1; }
 } };
+`;
+
+const notificationStub = `
+const scenario = process.env.SCRATCH_SCENARIO;
+export const ownerNotificationService = {
+  async enqueueRun() { return false; },
+  async deliverDue() {
+    if (scenario !== "notify-failure") return [];
+    process.stdout.write("NOTIFY_ATTEMPT\\n");
+    setTimeout(() => process.emit("SIGTERM"), 600);
+    throw new Error("email provider unreachable");
+  }
+};
 `;
 
 const assessmentStub = `

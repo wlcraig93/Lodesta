@@ -197,6 +197,7 @@ import {
   type PhotoLabeler
 } from "./source-photo-curation";
 import { canonicalSourceLogoAssetId, canonicalSourceLogoRevisionId, materializeCanonicalSourceLogo, materializeSourceLogo } from "./source-logo-materialization";
+import { artifactRouteChanges } from "./route-changes";
 
 export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
 
@@ -1298,7 +1299,7 @@ export class SiteAuthoringWorkflow {
         outputRevisionId: outcome.revision.id,
         candidateVersionId: candidate.version.id,
         focusRoute: outcome.focusRoute,
-        changedRoutes: outcome.changedRoutes,
+        ...(await this.routeChangesFromParent(run.siteId, outcome.revision.parentRevisionId, outcome.artifact)),
         completedAt
       });
       const completedSession = siteAgentSessionSchema.parse({
@@ -3199,6 +3200,15 @@ export class SiteAuthoringWorkflow {
       redirects: managerResult.completion.redirects,
       retiredSourcePaths: managerResult.completion.retiredSourcePaths
     };
+  }
+
+  /** Pages this candidate changed relative to the revision it was built from. */
+  private async routeChangesFromParent(siteId: string, parentRevisionId: string | undefined, artifact: SiteBuildArtifact) {
+    const parentVersion = parentRevisionId
+      ? (await this.repository.listSiteVersions(siteId)).find((version) => version.workspaceRevisionId === parentRevisionId)
+      : undefined;
+    const parentArtifact = parentVersion ? await this.repository.getBuildArtifact(parentVersion.artifactId) : undefined;
+    return artifactRouteChanges(parentArtifact, artifact);
   }
 
   private async executeDeterministicRebase(input: {

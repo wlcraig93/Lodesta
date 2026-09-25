@@ -1280,6 +1280,8 @@ export const siteAgentRunSchema = z.object({
   candidateVersionId: identifier.optional(),
   focusRoute: z.string().startsWith("/").max(300).optional(),
   changedRoutes: z.array(z.string().startsWith("/").max(300)).optional(),
+  /** The site stylesheet changed, so every page may look different. */
+  sharedStylesChanged: z.boolean().optional(),
   apiProvider: siteAgentApiProviderSchema,
   modelId: z.string().min(1).max(120),
   // Reader-only provenance may contain a retired experiment label. Live execution accepts only the canonical profile.

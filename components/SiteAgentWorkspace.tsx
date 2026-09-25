@@ -1460,6 +1460,7 @@ function RunActivityCard({
               detailed
               onRetryActivity={onRetryActivity}
             />
+            <RunChangedPages run={run} />
             <RunFailureAction run={run} busy={busy} onRetry={onRetryRun} />
           </div>
         </details>
@@ -1491,8 +1492,21 @@ function RunActivityCard({
           </div>
         </details>
       ) : null}
+      <RunChangedPages run={run} />
       <RunFailureAction run={run} busy={busy} onRetry={onRetryRun} />
     </article>
+  );
+}
+
+/** What a finished edit changed, from the retained artifacts, so the owner knows where to look. */
+function RunChangedPages({ run }: { run: OwnerSiteAgentRun }) {
+  if (!run.changedRoutes) return null;
+  const pages = run.changedRoutes.map((path) => path === "/" ? "Home" : path);
+  return (
+    <p className="site-agent-activity-changes">
+      {pages.length ? <>Changed {pages.length === 1 ? "page" : "pages"}: {pages.join(", ")}.</> : <>No page content changed.</>}
+      {run.sharedStylesChanged ? <> Site-wide styles changed too, so check every page.</> : null}
+    </p>
   );
 }
 

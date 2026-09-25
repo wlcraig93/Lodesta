@@ -3997,6 +3997,11 @@ textarea {
   color: var(--product-color-text-muted);
 }
 
+.site-agent-activity-changes {
+  margin: 0;
+  color: var(--product-color-text-muted);
+}
+
 .site-agent-activity-details > summary {
   width: max-content;
   color: var(--product-color-primary);

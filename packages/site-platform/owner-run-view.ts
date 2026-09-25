@@ -10,6 +10,7 @@ type OwnerRunProgress = {
 export type OwnerSiteAgentRun = Pick<
   SiteAgentRun,
   "id" | "kind" | "status" | "stage" | "startedAt" | "completedAt" | "fastPreviewPath" | "inputQuestion" | "retryableByOwner"
+  | "changedRoutes" | "sharedStylesChanged"
 > & {
   progress: OwnerRunProgress;
 };
@@ -58,6 +59,8 @@ export function ownerSiteAgentRun(run: SiteAgentRun): OwnerSiteAgentRun {
     fastPreviewPath: run.fastPreviewPath,
     inputQuestion: run.inputQuestion,
     retryableByOwner: ownerCanRetrySiteAgentRun(run),
+    ...(run.status === "succeeded" && run.kind !== "initial_build" && run.changedRoutes ? { changedRoutes: run.changedRoutes } : {}),
+    ...(run.status === "succeeded" && run.sharedStylesChanged ? { sharedStylesChanged: true } : {}),
     progress: ownerRunProgress(run)
   };
 }

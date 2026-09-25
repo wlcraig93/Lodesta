@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sitePlatformRepository } from "../packages/platform-data";
-import { LocalPlatformOperationsRepository } from "../packages/platform-operations";
+import { LocalPlatformOperationsRepository, type PlatformOperationsRepository } from "../packages/platform-operations";
 import type { PlatformSiteRecord } from "../packages/site-contracts";
 
 // Claim links hand an unowned prospect project to the account that redeems
@@ -26,7 +26,7 @@ try {
     site.ownerUserId = owner;
     return site as PlatformSiteRecord;
   };
-  const operations = new LocalPlatformOperationsRepository(join(directory, "operations.json"));
+  const operations: PlatformOperationsRepository = new LocalPlatformOperationsRepository(join(directory, "operations.json"));
   const later = new Date(Date.now() + 86_400_000).toISOString();
 
   await operations.createSiteClaimLink({ siteId: "site_prospect", tokenHash: "first", expiresAt: later });

@@ -2566,6 +2566,21 @@ console.log(JSON.stringify({ ok: true, focusedInspection: "below-fold-native-png
     "Ordinary generated content was reported as a contact detail.");
 }
 
+// Forms carry the LeadForm spam trap; verification submits them like a
+// visitor, leaving the hidden trap empty instead of timing out on it.
+{
+  const trap = `<input type="text" name="companyWebsite" hidden tabindex="-1" aria-hidden="true">`;
+  const trapped = {
+    ...prepared,
+    routes: prepared.routes.map((route) => ({ ...route, html: route.html.replace(/(<form[^>]*>)/, `$1${trap}`) })),
+    files: prepared.files.map((file) => file.contentType.startsWith("text/html") ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace(/(<form[^>]*>)/, `$1${trap}`)) } : file)
+  };
+  assert(trapped.routes.some((route) => route.html.includes('name="companyWebsite"')), "The spam-trap fixture was not applied to a form.");
+  const trappedBrowser = await runArtifactBrowserGate({ prepared: trapped, buildInput, blobStore: new MemoryBlobStore(), capturePrefix: "verification/site-authoring-render-spam-trap" });
+  assert(!trappedBrowser.findings.some((finding) => finding.id === "capability.form_submit"),
+    `A form with the spam trap failed submission verification: ${JSON.stringify(trappedBrowser.findings.filter((finding) => finding.id === "capability.form_submit"))}`);
+}
+
 const axeSabotage = `<script>window.axe=undefined;Object.defineProperty(window,"axe",{value:undefined,writable:false,configurable:false});</script>`;
 const axeUnavailablePrepared = {
   ...prepared,

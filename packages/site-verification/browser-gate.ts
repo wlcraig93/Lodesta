@@ -4162,7 +4162,8 @@ async function verifyLeadFormSubmissions(page: Page, route: string) {
     const form = forms.nth(index);
     const formId = await form.getAttribute("data-lodesta-form-id") ?? `form_${index + 1}`;
     try {
-      for (const field of await form.locator("input:not([type=hidden]):not([type=submit]), textarea").all()) {
+      // Fill only what a visitor can: the hidden spam trap must stay empty.
+      for (const field of await form.locator("input:not([type=hidden]):not([type=submit]):not([hidden]), textarea:not([hidden])").all()) {
         const type = (await field.getAttribute("type") ?? "text").toLowerCase();
         if (type === "checkbox") await field.check();
         else if (type === "radio") {

@@ -3202,6 +3202,28 @@ export class SiteAuthoringWorkflow {
     };
   }
 
+  /** Phones and emails the owner replaced since the version this run edits. */
+  private async supersededContacts(run: SiteAgentRun, buildInput: SitePublicBuildInput) {
+    if (run.kind === "initial_build") return undefined;
+    const parentRevisionId = run.exactParentRevisionId ?? (await this.repository.getSite(run.siteId))?.currentWorkspaceRevisionId;
+    const parentRevision = parentRevisionId ? await this.repository.getWorkspaceRevision(parentRevisionId) : undefined;
+    if (!parentRevision || parentRevision.publicBuildInputId === buildInput.id) return undefined;
+    const parentInput = await this.repository.getPublicBuildInput(parentRevision.publicBuildInputId);
+    if (!parentInput) return undefined;
+    const contacts = (input: SitePublicBuildInput) => ({
+      phones: new Set([input.business.contacts.phone, ...input.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => String(fact.value))]
+        .filter((value): value is string => Boolean(value)).map((value) => value.replace(/\D/g, "").slice(-10))),
+      emails: new Set([input.business.contacts.email, ...input.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value))]
+        .filter((value): value is string => Boolean(value)).map((value) => value.trim().toLowerCase()))
+    });
+    const before = contacts(parentInput);
+    const after = contacts(buildInput);
+    return {
+      phones: [...before.phones].filter((phone) => !after.phones.has(phone)),
+      emails: [...before.emails].filter((email) => !after.emails.has(email))
+    };
+  }
+
   /** Pages this candidate changed relative to the revision it was built from. */
   private async routeChangesFromParent(siteId: string, parentRevisionId: string | undefined, artifact: SiteBuildArtifact) {
     const parentVersion = parentRevisionId
@@ -3450,7 +3472,8 @@ export class SiteAuthoringWorkflow {
       buildInput: input.buildInput,
       runtimeSeriesId,
       sourceSnapshots: input.sourceSnapshots,
-      sourcePages: input.sourcePages
+      sourcePages: input.sourcePages,
+      supersededContacts: await this.supersededContacts(input.run, input.buildInput)
     });
     input.signal?.throwIfAborted();
     // Inspection classifies exactly like release: only technical release
@@ -3559,7 +3582,8 @@ export class SiteAuthoringWorkflow {
       buildInput: input.buildInput,
       runtimeSeriesId,
       sourceSnapshots: input.sourceSnapshots,
-      sourcePages: input.sourcePages
+      sourcePages: input.sourcePages,
+      supersededContacts: await this.supersededContacts(input.run, input.buildInput)
     });
     const hardChecksMs = Date.now() - hardChecksStartedAt;
     const browserStartedAt = Date.now();
@@ -3744,7 +3768,8 @@ export class SiteAuthoringWorkflow {
         buildInput: input.buildInput,
         runtimeSeriesId,
         sourceSnapshots,
-        sourcePages: input.sourcePages
+        sourcePages: input.sourcePages,
+        supersededContacts: await this.supersededContacts(input.run, input.buildInput)
       });
       const hardChecksMs = Date.now() - hardChecksStartedAt;
       const runtime = await this.ensureRuntime(runtimeSeriesId);

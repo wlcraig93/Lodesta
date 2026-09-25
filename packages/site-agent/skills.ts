@@ -31,12 +31,14 @@ const initialBuildKnowledge = [
 
 const editKnowledge = [
   "Preserve every existing workspace source file unconditionally and change only what the owner requested. Treat the supplied route and selected element as the primary scope, read only the files needed, preserve unrelated design, content, navigation, forms, and working behavior, and never restore an initial-build default merely because Lodesta would start a blank site differently.",
-  "Prefer line-targeted edits. Inspect only when a concrete visual uncertainty could materially affect the requested result; use the supplied selection outline when relevant. After a successful targeted edit, call finish directly rather than polishing unrelated areas. If the requested edit touches navigation or forms, preserve required destinations, schema-owned fields, managed submission, and the owner's chosen presentation.",
-  "Add is cumulative: preserve existing visible text, including similar text, unless the owner explicitly requests replacement or removal."
+  "Prefer line-targeted edits. Inspect only when a concrete visual uncertainty could materially affect the requested result; use the supplied selection outline when relevant. After a targeted edit to one page's own markup, finish without polishing unrelated areas. After changing shared CSS, the header, or the site shell, inspect the pages that use them before finishing, because those changes reach every page. If the requested edit touches navigation or forms, preserve required destinations, schema-owned fields, managed submission, and the owner's chosen presentation.",
+  "Add is cumulative: preserve existing visible text, including similar text, unless the owner explicitly requests replacement or removal.",
+  "When the owner changes a phone number or email, update every use: visible text, call and email links, titles, descriptions and labels. Legal documents keep their verbatim text; if a check reports an old contact detail preserved there, leave it and tell the owner in your finish message which page still shows it."
 ] as const;
 
 const rebaseKnowledge = [
   "Reconcile deterministic control-plane changes into the current website while preserving every existing workspace source file and the site's presentation. Update only the exact owner-authoritative facts, forms, assets, links, or destinations that changed. Preserve routes, composition, copy, and styling unless the new authority makes a specific existing value invalid. Never apply blank-build design defaults or reinterpret a rebase as a redesign.",
+  "When a phone number or email changed, update every use: visible text, call and email links, titles, descriptions and labels. Legal documents keep their verbatim text; if a check reports an old contact detail preserved there, leave it and tell the owner in your finish message which page still shows it.",
   "Keep every nonempty required destination reachable and every configured managed-form field represented exactly once. Inspect only when the authority change creates a concrete visual uncertainty; otherwise finish after the deterministic reconciliation succeeds without unrelated churn."
 ] as const;
 

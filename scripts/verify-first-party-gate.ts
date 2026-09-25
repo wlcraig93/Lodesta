@@ -194,4 +194,45 @@ assert.equal(isTechnicalReleaseBlocker({ id: "route.slug_mismatch", severity: "e
   assert.ok(legalBlocker(reformatted, "/privacy-policy"), "A legal page moved off its exact source path passed.");
 }
 
+// A contact value the owner replaced is no longer first-party support: every
+// operational use blocks, while a legal page's verbatim copy is only reported.
+{
+  const superseded = { phones: ["(512) 555-0177"], emails: ["parts@northstar.example"] };
+  const prepareAfterChange = (routes: Array<{ path: string; bodyHtml: string; title?: string; description?: string }>) => prepareSiteArtifact({
+    authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+      kind: "agent-authored-artifact",
+      compilerManifest: expectedSiteSandboxManifest,
+      siteName: input.business.name,
+      sharedCss: "body{font:16px Arial,sans-serif}",
+      routes: routes.map((route) => ({ title: input.business.name, description: "Collision repair in Austin.", ...route }))
+    })),
+    buildInput: input,
+    runtimeSeriesId: "site-runtime-v4",
+    sourceSnapshots: [snapshot],
+    sourcePages,
+    supersededContacts: superseded
+  }).findings.map(withReleaseSeverity);
+  assert.ok(!blockerIds("<main><h1>Repairs</h1><p>Fax: (512) 555-0177 · Parts desk: parts@northstar.example</p></main>").includes("fact.superseded_contact"),
+    "Without an owner change the first-party contact line stays supported.");
+  for (const bodyHtml of [
+    "<main><h1>Repairs</h1><p>Fax: (512) 555-0177</p></main>",
+    "<main><h1>Repairs</h1><p>Call 512.555.0177 anytime.</p></main>",
+    "<main><h1>Repairs</h1><p>Email parts@northstar.example for parts.</p></main>"
+  ]) {
+    const findings = prepareAfterChange([{ path: "/", bodyHtml }]);
+    assert.ok(findings.some((finding) => finding.id === "fact.superseded_contact" && isTechnicalReleaseBlocker(finding)), `A replaced contact detail passed: ${bodyHtml}`);
+  }
+  const titled = prepareAfterChange([{ path: "/", bodyHtml: "<main><h1>Repairs</h1></main>", description: "Call (512) 555-0177 for repairs." }]);
+  assert.ok(titled.some((finding) => finding.id === "fact.superseded_contact"), "A replaced phone in the page description passed.");
+  const legal = prepareAfterChange([
+    { path: "/", bodyHtml: "<main><h1>Repairs</h1><p>Repairs for Austin drivers.</p></main>" },
+    { path: "/privacy", title: "Privacy Policy", bodyHtml: "<main><h1>Privacy Policy</h1><p>Questions? Call (512) 555-0177.</p></main>" }
+  ]);
+  const preserved = legal.find((finding) => finding.id === "advisory.superseded_contact_preserved");
+  assert.ok(preserved && !isTechnicalReleaseBlocker(preserved) && preserved.route === "/privacy", "Legal text with an old contact must be reported, not blocked.");
+  assert.ok(!legal.some((finding) => finding.id === "fact.superseded_contact"));
+  const unrelated = prepareAfterChange([{ path: "/", bodyHtml: "<main><h1>Repairs</h1><p>Serving 78701 and 78704 since 2004; license 5125550.</p></main>" }]);
+  assert.ok(!unrelated.some((finding) => finding.id === "fact.superseded_contact"), "Unrelated numbers were read as the replaced phone.");
+}
+
 console.log("First-party gate verification passed.");

@@ -61,8 +61,11 @@ export function prepareSiteArtifact(input: {
   runtimeSeriesId: string;
   sourceSnapshots?: SourceSnapshot[];
   sourcePages?: SourceSnapshotPage[];
+  /** Contact values the owner replaced since the parent version; never allowed again. */
+  supersededContacts?: SupersededContacts;
 }) {
   const authored = agentAuthoredArtifactSchema.parse(input.authoredArtifact);
+  const superseded = normalizedSupersededContacts(input.supersededContacts);
   const routes = new Set(authored.routes.map((route) => normalizeRoutePath(route.path)));
   const allowedFormIds = new Set(input.buildInput.forms.map((form) => form.id));
   // Links, phone numbers and email addresses the business itself shows on its
@@ -77,11 +80,11 @@ export function prepareSiteArtifact(input: {
   const allowedPhoneNumbers = new Set([
     ...input.buildInput.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => comparablePhone(String(fact.value))),
     ...firstPartySupport.corePagePhones().map(comparablePhone)
-  ]);
+  ].filter((phone) => !superseded.phones.has(phone)));
   const allowedEmailAddresses = new Set([
     ...input.buildInput.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value).trim().toLowerCase()),
     ...firstPartySupport.corePageEmails()
-  ]);
+  ].filter((email) => !superseded.emails.has(email)));
   const cssResult = sanitizeAgentCss(authored.sharedCss, input.buildInput.business.assets);
   const finalCss = `${platformFontStyles}\n${platformCapabilityStylesFor(input.runtimeSeriesId)}\n${cssResult.css}`;
   const findings: ArtifactGateFinding[] = [...cssResult.findings];
@@ -117,6 +120,7 @@ export function prepareSiteArtifact(input: {
     sourcePages: input.sourcePages
   });
   findings.push(...factBindings.findings);
+  findings.push(...supersededContactFindings(sanitized, superseded));
   const sourcePaths = (input.sourcePages ?? []).map((page) => page.path);
   const informationArchitecture = buildInformationArchitectureAdvisory({
     routes: sanitized.map((route) => ({
@@ -965,5 +969,46 @@ function dedupeFindings(findings: ArtifactGateFinding[]) {
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
+  });
+}
+
+export type SupersededContacts = { phones: string[]; emails: string[] };
+
+function normalizedSupersededContacts(value: SupersededContacts | undefined) {
+  return {
+    phones: new Set((value?.phones ?? []).map(comparablePhone).filter((phone) => phone.length === 10)),
+    emails: new Set((value?.emails ?? []).map((email) => email.trim().toLowerCase()).filter(Boolean))
+  };
+}
+
+/**
+ * After an owner replaces a phone or email, every operational use must carry
+ * the new value. Legal documents keep their verbatim text, so an old value
+ * there is reported for the owner instead of blocking.
+ */
+function supersededContactFindings(
+  routes: Array<{ path: string; bodyHtml: string; title: string; description: string }>,
+  superseded: ReturnType<typeof normalizedSupersededContacts>
+): ArtifactGateFinding[] {
+  if (!superseded.phones.size && !superseded.emails.size) return [];
+  return routes.flatMap((route) => {
+    const text = `${route.title}\n${route.description}\n${route.bodyHtml}`;
+    const digits = text.replace(/&#8209;|[\u2010-\u2015\u2212]/g, "-").replace(/[^\d]+/g, " ");
+    const lower = text.toLowerCase();
+    const stale = [
+      ...[...superseded.phones].filter((phone) => new RegExp(`(?:^|\\D)1?\\s*${phone.slice(0, 3)}\\s*${phone.slice(3, 6)}\\s*${phone.slice(6)}(?:\\D|$)`).test(digits)),
+      ...[...superseded.emails].filter((email) => lower.includes(email))
+    ];
+    if (!stale.length) return [];
+    const legal = isLegalSourcePagePath(route.path);
+    return [gateFinding(
+      legal ? "advisory.superseded_contact_preserved" : "fact.superseded_contact",
+      "claim",
+      legal
+        ? `The legal page keeps the old contact detail ${stale.join(", ")} verbatim. Leave the legal text as it is and tell the owner this page still shows it.`
+        : `This page still shows the replaced contact detail ${stale.join(", ")}. Every phone, email, link, title, description and label must use the owner's current contact details.`,
+      route.path,
+      legal ? "warning" : "error"
+    )];
   });
 }

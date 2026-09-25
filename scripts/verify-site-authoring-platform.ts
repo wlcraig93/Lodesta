@@ -1982,7 +1982,11 @@ assert(researchedContext.ownerAuthority.ownerConfirmedFacts.every((fact) => fact
 assert.equal(researchedContext.ownerAuthority.ownerOperationalRevision, input.ownerOperationalRevision);
 assert.equal(researchedContext.ownerAuthority.ownerIntentRevision, input.ownerIntentRevision);
 assert.equal(researchedContext.provisionalSources.length, 3);
-assert(JSON.stringify(researchedContext.provisionalSources).includes("directory.example"), "Raw provisional research was not made available to the authoring agent.");
+// Research stays listed for the author to read through source tools, but its
+// raw text is never replayed into the initial context.
+const researchSource = researchedContext.provisionalSources.find((source) => source.id === researchSnapshot.id);
+assert(researchSource && researchSource.sourceType === "web_research", "Provisional research was not listed for the authoring agent.");
+assert.equal(researchSource.meaningfulExcerpt, undefined, "Raw research text was replayed into the initial context.");
 assert.deepEqual(researchedContext.provisionalObservations.googleAggregateRating, {
   rating: 4.8,
   displayText: "4.8 stars on Google",

@@ -55,10 +55,32 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             workers/site-sandbox/scaffold/package-lock.json
+      # Package lifecycle scripts never see production secrets.
       - run: npm ci
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_SERVICE_ROLE_KEY: ""
+          CLOUDFLARE_API_TOKEN: ""
+          RAILWAY_TOKEN: ""
+          LODESTA_ADMIN_TOKEN: ""
+          LODESTA_MAINTENANCE_LEASE_OWNER: ""
       - run: npm run install:browsers
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_SERVICE_ROLE_KEY: ""
+          CLOUDFLARE_API_TOKEN: ""
+          RAILWAY_TOKEN: ""
+          LODESTA_ADMIN_TOKEN: ""
+          LODESTA_MAINTENANCE_LEASE_OWNER: ""
       - run: npm ci --prefix workers/site-sandbox/scaffold --ignore-scripts --no-audit --no-fund
       - run: npm install --global @railway/cli@5.28.1
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_SERVICE_ROLE_KEY: ""
+          CLOUDFLARE_API_TOKEN: ""
+          RAILWAY_TOKEN: ""
+          LODESTA_ADMIN_TOKEN: ""
+          LODESTA_MAINTENANCE_LEASE_OWNER: ""
 
       - name: Verify Cloudflare deployment authority
         run: |

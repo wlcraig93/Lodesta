@@ -49,16 +49,31 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: control/package-lock.json
+      # Package lifecycle scripts never see production secrets.
       - run: npm ci
         working-directory: control
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_SERVICE_ROLE_KEY: ""
+          CLOUDFLARE_API_TOKEN: ""
+          RAILWAY_TOKEN: ""
+          LODESTA_ADMIN_TOKEN: ""
+          LODESTA_MAINTENANCE_LEASE_OWNER: ""
       - run: npm install --global @railway/cli@5.28.1
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_SERVICE_ROLE_KEY: ""
+          CLOUDFLARE_API_TOKEN: ""
+          RAILWAY_TOKEN: ""
+          LODESTA_ADMIN_TOKEN: ""
+          LODESTA_MAINTENANCE_LEASE_OWNER: ""
 
       - name: Validate rollback targets and authority
         working-directory: control
         run: |
           set -Eeuo pipefail
-          [[ "${{ inputs.release_sha }}" =~ ^[a-f0-9]{40}$ ]]
-          test "$(git -C ../target rev-parse HEAD)" = "${{ inputs.release_sha }}"
+          [[ "$LODESTA_RELEASE_GIT_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git -C ../target rev-parse HEAD)" = "$LODESTA_RELEASE_GIT_SHA"
           test -f ../target/railway.worker.toml
           mkdir -p "$EVIDENCE_DIR"
           NODE_ENV=production npm run verify:execution-authority
@@ -96,14 +111,14 @@ jobs:
           for pair in "$RAILWAY_WEB_SERVICE_ID:web" "$RAILWAY_WORKER_SERVICE_ID:site-authoring-worker"; do
             service="${pair%%:*}"
             role="${pair#*:}"
-            railway variable set "LODESTA_RELEASE_GIT_SHA=${{ inputs.release_sha }}" "LODESTA_EXECUTION_ROLE=$role" "LODESTA_REPOSITORY=supabase" --skip-deploys \
+            railway variable set "LODESTA_RELEASE_GIT_SHA=$LODESTA_RELEASE_GIT_SHA" "LODESTA_EXECUTION_ROLE=$role" "LODESTA_REPOSITORY=supabase" --skip-deploys \
               --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" --service "$service" > /dev/null
           done
           railway up ../target --path-as-root --detach --json --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_WEB_SERVICE_ID" --message "Approved web rollback to ${{ inputs.release_sha }}" \
+            --service "$RAILWAY_WEB_SERVICE_ID" --message "Approved web rollback to $LODESTA_RELEASE_GIT_SHA" \
             > "$EVIDENCE_DIR/railway-web-submit.json"
           railway up ../target --path-as-root --detach --json --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_WORKER_SERVICE_ID" --message "Approved worker rollback to ${{ inputs.release_sha }}" \
+            --service "$RAILWAY_WORKER_SERVICE_ID" --message "Approved worker rollback to $LODESTA_RELEASE_GIT_SHA" \
             > "$EVIDENCE_DIR/railway-worker-submit.json"
           # Keep rollback symmetrical with release: poll both retained
           # controllers within one bound and retry transient Railway API errors.
@@ -178,7 +193,7 @@ jobs:
             fi
             if [ -f "$EVIDENCE_DIR/railway-worker-startup.jsonl" ] \
               && grep -q 'worker_started' "$EVIDENCE_DIR/railway-worker-startup.jsonl" \
-              && grep -q "${{ inputs.release_sha }}" "$EVIDENCE_DIR/railway-worker-startup.jsonl"; then
+              && grep -q "$LODESTA_RELEASE_GIT_SHA" "$EVIDENCE_DIR/railway-worker-startup.jsonl"; then
               break
             fi
             [ "$attempt" -eq 30 ] && exit 1

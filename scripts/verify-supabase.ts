@@ -76,7 +76,8 @@ assert.deepEqual(
     "202609210001_retire_cloudflare_sandbox_control.sql",
     "202609220001_gpt6_luna_site_authoring.sql",
     "202609250001_owner_notifications.sql",
-    "202609250002_site_offline.sql"
+    "202609250002_site_offline.sql",
+    "202609250003_site_claim_links.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );

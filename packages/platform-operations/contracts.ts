@@ -6,7 +6,10 @@ export type AdoptionInvitation = {
   createdAt: string;
   consumedAt?: string;
   consumedByUserId?: string;
+  revokedAt?: string;
 };
+
+export type ClaimLinkState = "valid" | "expired" | "used" | "revoked" | "unknown";
 
 export type DomainRecord = {
   id: string;

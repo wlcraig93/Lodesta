@@ -237,6 +237,7 @@ export interface SitePlatformRepository {
     businessStates: BusinessState[];
   }>;
   getSitesByIds(siteIds: string[]): Promise<PlatformSiteRecord[]>;
+  /** Claims an unowned, undisposed project for an account; never moves an owned one. */
   assignSiteOwnerIfUnowned(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
   disposeOwnedSite(siteId: string, ownerUserId: string): Promise<PlatformSiteRecord | undefined>;
   updateReportingTimezone(siteId: string, timezone: string): Promise<PlatformSiteRecord | undefined>;
@@ -850,7 +851,7 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     let result: PlatformSiteRecord | undefined;
     await this.write((store) => {
       const site = store.sites[siteId];
-      if (!site || (site.ownerUserId && site.ownerUserId !== ownerUserId)) return;
+      if (!site || site.ownerUserId || site.status === "paused") return;
       site.ownerUserId = ownerUserId;
       site.updatedAt = new Date().toISOString();
       result = clone(site) as PlatformSiteRecord;
@@ -2377,7 +2378,8 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
       this.client.from("sites")
         .update({ owner_user_id: ownerUserId, updated_at: new Date().toISOString() })
         .eq("id", siteId)
-        .or(`owner_user_id.is.null,owner_user_id.eq.${ownerUserId}`)
+        .is("owner_user_id", null)
+        .neq("status", "paused")
         .select("*")
         .maybeSingle(),
       "Assign site owner"

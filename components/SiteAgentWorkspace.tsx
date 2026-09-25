@@ -20,6 +20,7 @@ import type { SiteAgentMessage } from "@/packages/platform-data";
 import { deriveOwnerSiteLifecycle } from "@/lib/owner-site-lifecycle";
 import { useProductTooltip } from "@/components/ProductTooltip";
 import { ProductEmptyState, ProductSelect } from "@/components/ProductUI";
+import { publishSummary, type PublishSummary } from "@/lib/publish-summary";
 import { ConfirmDialog } from "@/components/ProductDialog";
 import { WebsiteBuildCanvas } from "@/components/WebsiteBuildCanvas";
 import { WebsiteWorkspaceFrame, type MobilePane } from "@/components/WebsiteWorkspaceFrame";
@@ -1376,9 +1377,12 @@ export function SiteAgentWorkspace({
       <ConfirmDialog
         open={Boolean(publishTarget)}
         title={`Publish version ${publishTarget?.number ?? ""}?`}
-        description={publishTarget?.replacesLiveWebsite
-          ? "This replaces the current live website with this reviewed draft."
-          : "This makes this reviewed draft public."}
+        description={publishTarget && workspace.input ? <PublishSummaryContent
+          summary={publishSummary(workspace.input)}
+          intro={publishTarget?.replacesLiveWebsite
+            ? "This replaces your current live website with this reviewed draft."
+            : "This makes this reviewed draft public."}
+        /> : "This makes this reviewed draft public."}
         confirmLabel="Publish website"
         confirmPendingLabel="Publishing…"
         pending={busy}
@@ -1495,6 +1499,20 @@ function RunActivityCard({
       <RunChangedPages run={run} />
       <RunFailureAction run={run} busy={busy} onRetry={onRetryRun} />
     </article>
+  );
+}
+
+/** The details and customer actions the site goes live with. Owners check these; nothing here blocks publishing. */
+function PublishSummaryContent({ summary, intro }: { summary: PublishSummary; intro: string }) {
+  return (
+    <div className="site-agent-publish-summary">
+      <p>{intro}</p>
+      <dl>
+        {summary.details.map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}
+      </dl>
+      {summary.actions.length ? <><p className="site-agent-publish-summary-heading">Visitors can</p><ul>{summary.actions.map((action) => <li key={action}>{action}</li>)}</ul></> : null}
+      <p className="site-agent-publish-summary-note">If anything is wrong, cancel and ask for the change in the chat.</p>
+    </div>
   );
 }
 

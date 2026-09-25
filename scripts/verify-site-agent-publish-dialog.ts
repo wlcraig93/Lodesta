@@ -336,7 +336,7 @@ try {
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(".site-agent-publish-desktop").waitFor({ state: "visible" });
   await page.locator(".site-agent-publish-desktop").click();
-  await assertDialog(page, "This replaces the current live website with this reviewed draft.");
+  await assertDialog(page, "This replaces your current live website with this reviewed draft.");
   await capture(page, resolve(screenshots, "publish-confirm-replacement-light-desktop.png"));
   await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
 
@@ -708,6 +708,8 @@ async function assertDialog(page: Page, description: string) {
   assert.equal(await dialog.count(), 1);
   assert.equal(await dialog.getByRole("heading", { name: "Publish version 7?" }).count(), 1);
   assert.equal(await dialog.getByText(description, { exact: true }).count(), 1);
+  // The owner sees what the site goes live with before confirming.
+  assert.equal(await dialog.getByText("If anything is wrong, cancel and ask for the change in the chat.", { exact: true }).count(), 1);
 }
 
 async function assertStopDialog(page: Page) {

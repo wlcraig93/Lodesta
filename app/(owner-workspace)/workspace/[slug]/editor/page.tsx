@@ -13,8 +13,9 @@ export default async function WorkspaceWebsitePage({ params }: { params: Promise
   if (!input) notFound();
   const versions = await sitePlatformRepository.listSiteVersions(context.site.id);
   const candidate = versions.find((version) => version.status === "candidate");
-  const coverage = candidate
+  // Source coverage is an operator diagnostic, not owner UI.
+  const coverage = candidate && context.canAccessAdmin
     ? await sitePlatformRepository.getSiteVersionSourceCoverage(candidate.id)
     : undefined;
-  return <><SiteAgentWorkspace initialSite={context.site} initialInput={input} initialVersions={versions} isAdmin={context.canAccessAdmin} />{coverage ? <SourceCoveragePanel report={coverage} /> : null}</>;
+  return <><SiteAgentWorkspace initialSite={context.site} initialInput={input} initialVersions={versions} isAdmin={context.canAccessAdmin} />{coverage && context.canAccessAdmin ? <SourceCoveragePanel report={coverage} /> : null}</>;
 }

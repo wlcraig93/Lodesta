@@ -48,6 +48,19 @@ else process.env.LODESTA_RELEASE_GIT_SHA = previousReleaseSha;
 if (previousAdminToken === undefined) delete process.env.LODESTA_ADMIN_TOKEN;
 else process.env.LODESTA_ADMIN_TOKEN = previousAdminToken;
 
+// A shared limit (perClient: false) cannot be escaped by spoofing client
+// addresses; a per-client limit tracks each address separately.
+{
+  const { rateLimit, rateLimitKey } = await import("../lib/rate-limit");
+  const from = (ip: string) => new Request("https://bakery.example/api/forms/submit", { headers: { "x-forwarded-for": ip } });
+  const shared = { bucket: "verify_shared", limit: 2, windowMs: 60_000, keyParts: ["site_1"], perClient: false };
+  assert.equal(rateLimitKey(from("1.1.1.1"), shared), rateLimitKey(from("2.2.2.2"), shared));
+  assert.notEqual(rateLimitKey(from("1.1.1.1"), { ...shared, perClient: true }), rateLimitKey(from("2.2.2.2"), { ...shared, perClient: true }));
+  assert.equal(rateLimit(from("3.3.3.3"), shared).ok, true);
+  assert.equal(rateLimit(from("4.4.4.4"), shared).ok, true);
+  assert.equal(rateLimit(from("5.5.5.5"), shared).ok, false);
+}
+
 process.stdout.write(`${JSON.stringify({
   ok: true,
   checks: ["shallow-liveness", "internal-host", "release-identity"]

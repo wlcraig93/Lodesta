@@ -152,6 +152,8 @@ export function LeadForm({ id, className, children }: { id: string; className?: 
     data-lodesta-form-destination={form.destination}
     data-lodesta-success-message={form.successMessage}
   >
+    {/* Spam trap: hidden from people and assistive technology; the server drops filled submissions. */}
+    <input type="text" name="companyWebsite" hidden tabIndex={-1} autoComplete="off" aria-hidden="true" />
     <LeadFormContext.Provider value={form}>
       {children ?? <>
         {form.fields.map((field) => <LeadField key={field.id} id={field.id} />)}

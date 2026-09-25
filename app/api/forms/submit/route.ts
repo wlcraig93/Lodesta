@@ -28,11 +28,14 @@ export async function POST(request: Request) {
   if (!siteId || !formId) {
     return applyRateLimitHeaders(NextResponse.json({ error: "Missing siteId or formId" }, { status: 400 }), limit);
   }
+  // Per-site ceiling across all clients: spoofed client addresses cannot flood one inbox.
+  const siteLimit = rateLimit(request, { bucket: "form_submit_site", limit: 60, windowMs: 60 * 60_000, keyParts: [siteId], perClient: false });
+  if (!siteLimit.ok) return siteLimit.response;
   if (parsedSubmission.pageId.startsWith("/preview/")) {
     return applyRateLimitHeaders(NextResponse.json({ accepted: false, status: "preview_disabled", reason: "Preview forms do not accept submissions." }, { status: 403 }), limit);
   }
 
-  const serving = await resolveAnalyticsServingContext(request, siteId, parsedSubmission.versionId, { requireAnalytics: false });
+  const serving = await resolveAnalyticsServingContext(request, siteId, parsedSubmission.versionId, { requireAnalytics: false, purpose: "form" });
   if (!serving.ok) {
     return applyRateLimitHeaders(
       NextResponse.json({
@@ -52,7 +55,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const tooFast = renderedAt > 0 && Date.now() - renderedAt < 800;
+  // The trusted runtime always stamps the render time; a post without one did not come from the page.
+  const tooFast = !(renderedAt > 0) || Date.now() - renderedAt < 800;
   if (honeypot || tooFast) {
     return applyRateLimitHeaders(NextResponse.json({ accepted: true, status: "ignored" }), limit);
   }
@@ -86,7 +90,8 @@ export async function POST(request: Request) {
     deviceCategory: parsedSubmission.deviceCategory,
     elapsedMs: parsedSubmission.elapsedMs
   });
-  const analyticsEvent = analyticsClientContext && serving.buildInput.intent.enabledCapabilities.includes("analytics")
+  // Owner tests and Lodesta's synthetic checks are kept and labelled, never counted as traffic.
+  const analyticsEvent = !serving.submissionKind && analyticsClientContext && serving.buildInput.intent.enabledCapabilities.includes("analytics")
     ? canonicalAnalyticsEvent(serving, analyticsClientContext, "form_submit", { formId }, submittedAt)
     : undefined;
   const inquiryResult = await siteCapabilityRepository.createInquiryFromForm({
@@ -94,14 +99,14 @@ export async function POST(request: Request) {
     form,
     pageId: parsedSubmission.pageId || "unknown",
     payload: validation.payload,
-    metadata: parsedSubmission.metadata,
+    metadata: serving.submissionKind ? { ...parsedSubmission.metadata, submissionKind: serving.submissionKind } : parsedSubmission.metadata,
     sourceUrl: sanitizeAttributionUrl(parsedSubmission.sourceUrl || request.headers.get("referer") || undefined),
     userAgent: request.headers.get("user-agent") ?? undefined,
     ipHash: ipHashForRequest(request, { siteId, at: submittedAt }),
     analyticsEvent
   });
 
-  return applyRateLimitHeaders(NextResponse.json({ accepted: true, status: "received" }), limit);
+  return applyRateLimitHeaders(NextResponse.json({ accepted: true, status: "received", ...(serving.submissionKind ? { submissionKind: serving.submissionKind } : {}) }), limit);
 }
 
 type ParsedSubmission =
@@ -132,8 +137,11 @@ async function parseSubmissionRequest(request: Request): Promise<ParsedSubmissio
     if (!isRecord(body)) return { ok: false, error: "Invalid JSON form submission" };
 
     const payload = isRecord(body.payload)
-      ? body.payload
+      ? { ...body.payload }
       : Object.fromEntries(Object.entries(body).filter(([key]) => !systemFormFields.has(key)));
+    // The trap field renders inside the form, so the runtime sends it with the fields.
+    const honeypot = stringValue(body.companyWebsite) || stringValue(payload.companyWebsite);
+    delete payload.companyWebsite;
 
     return {
       ok: true,
@@ -146,7 +154,7 @@ async function parseSubmissionRequest(request: Request): Promise<ParsedSubmissio
       eventId: identifierValue(body.eventId),
       deviceCategory: stringValue(body.deviceCategory) || undefined,
       elapsedMs: numberValue(body.elapsedMs),
-      honeypot: stringValue(body.companyWebsite),
+      honeypot,
       renderedAt: numberValue(body.formRenderedAt ?? body.renderedAt ?? body.startedAt),
       payload,
       metadata: attributionMetadata(body),

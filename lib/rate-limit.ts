@@ -7,6 +7,8 @@ type RateLimitOptions = {
   limit: number;
   windowMs: number;
   keyParts?: Array<string | number | boolean | undefined | null>;
+  /** false keys the limit on bucket and keyParts only, shared by every client. */
+  perClient?: boolean;
 };
 
 type RateLimitState = {
@@ -77,7 +79,7 @@ export function applyRateLimitHeaders(response: NextResponse, result: Extract<Ra
 export function rateLimitKey(request: Request, options: RateLimitOptions) {
   const parts = [
     options.bucket,
-    clientFingerprint(request),
+    ...(options.perClient === false ? [] : [clientFingerprint(request)]),
     ...((options.keyParts ?? []).map((part) => String(part ?? "") || "-"))
   ];
   return createHash("sha256").update(parts.join("\n")).digest("hex");

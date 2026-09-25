@@ -43,6 +43,8 @@ export type AnalyticsServingContext =
       version: SiteVersion;
       buildInput: SitePublicBuildInput;
       trafficClass: AnalyticsTrafficClass;
+      /** Form submissions only: a lead the owner or Lodesta sent on purpose. */
+      submissionKind?: "owner_test" | "synthetic";
     };
 
 export async function parseAnalyticsClientEvent(request: Request) {
@@ -60,19 +62,23 @@ export async function resolveAnalyticsServingContext(
   request: Request,
   claimedSiteId: string,
   claimedVersionId?: string,
-  options: { requireAnalytics?: boolean } = {}
+  options: { requireAnalytics?: boolean; purpose?: "analytics" | "form" } = {}
 ): Promise<AnalyticsServingContext> {
+  const form = options.purpose === "form";
   const userAgent = request.headers.get("user-agent");
   const trafficClass = hasValidInternalTrafficHeader(request)
     ? "lodesta_internal"
     : classifyAnalyticsTraffic(userAgent);
   const site = await resolveServingSite(request, claimedSiteId);
   if (!site) return { ok: false, status: 404, reason: "invalid" };
-  if (trafficClass === "lodesta_internal") return { ok: false, status: 202, reason: "internal", site };
-  if (trafficClass === "known_bot") return { ok: false, status: 202, reason: "bot", site };
+  // A lead is never dropped for its user agent; spam controls judge forms.
+  if (trafficClass === "lodesta_internal" && !form) return { ok: false, status: 202, reason: "internal", site };
+  if (trafficClass === "known_bot" && !form) return { ok: false, status: 202, reason: "bot", site };
   if (isPreviewRequest(request)) return { ok: false, status: 202, reason: "preview", site };
   if (site.status !== "active" || !site.publishedVersionId) return { ok: false, status: 202, reason: "inactive", site };
-  if (claimedVersionId && claimedVersionId !== site.publishedVersionId) return { ok: false, status: 409, reason: "invalid", site };
+  // A page loaded before a republish still submits its old version. Forms are
+  // served by the current version, whose own form references decide acceptance.
+  if (!form && claimedVersionId && claimedVersionId !== site.publishedVersionId) return { ok: false, status: 409, reason: "invalid", site };
 
   const version = await sitePlatformRepository.getSiteVersion(site.publishedVersionId);
   if (!version || version.siteId !== site.id || version.status !== "published") {
@@ -84,9 +90,12 @@ export async function resolveAnalyticsServingContext(
     return { ok: false, status: 202, reason: "disabled", site };
   }
 
+  if (form && trafficClass === "lodesta_internal") return { ok: true, site, version, buildInput, trafficClass, submissionKind: "synthetic" };
   const auth = await getCurrentUser();
   if (auth.user?.id && (site.ownerUserId === auth.user.id || auth.user.app_metadata?.role === "platform_admin")) {
-    return { ok: false, status: 202, reason: "internal", site };
+    return form
+      ? { ok: true, site, version, buildInput, trafficClass, submissionKind: "owner_test" }
+      : { ok: false, status: 202, reason: "internal", site };
   }
   return { ok: true, site, version, buildInput, trafficClass };
 }

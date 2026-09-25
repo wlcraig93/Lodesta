@@ -108,6 +108,12 @@ try {
     host: "localhost", referer: "http://localhost/sites/context-test", "user-agent": "Mozilla/5.0 Safari/605.1.15"
   } }), input.siteId, "version_not_current");
   assert.deepEqual(stale.ok ? null : [stale.status, stale.reason], [409, "invalid"], "A stale rendered version was accepted.");
+  // A form on a page loaded before a republish is served by the current
+  // version; the published form references then decide acceptance.
+  const staleForm = await resolveAnalyticsServingContext(new Request("http://localhost/api/forms/submit", { headers: {
+    host: "localhost", referer: "http://localhost/sites/context-test", "user-agent": ""
+  } }), input.siteId, "version_not_current", { requireAnalytics: false, purpose: "form" });
+  assert.equal(staleForm.ok && staleForm.version.id, version.id, "A lead from a page loaded before republish was rejected.");
   active = false;
   assert.equal((await GET(new Request(`${origin}/sites/context-test`), { params: Promise.resolve({ slug: "context-test" }) })).status, 404);
   const tricky = '<!-- <html> --><HTML data-lodesta-site-id="site_test" title="a > b &amp; c"><head></head><body>untouched</body></HTML>';

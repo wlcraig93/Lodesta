@@ -2,6 +2,7 @@ import { connect } from "node:tls";
 import { configuredAppOriginOrDefault } from "@/lib/app-origin";
 import { internalTrafficHeaderValue } from "@/lib/analytics-ingestion";
 import { ownerNotificationRepository, type OwnerNotificationRepository } from "@/packages/owner-notifications/repository";
+import { siteCapabilityRepository, type SiteCapabilityRepository } from "@/packages/site-capabilities";
 import { platformOperationsRepository, type PlatformOperationsRepository } from "@/packages/platform-operations";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
 import type { PlatformSiteRecord } from "@/packages/site-contracts";
@@ -18,6 +19,7 @@ export type SiteMonitorDependencies = {
   platform: Pick<SitePlatformRepository, "listSites" | "getSiteVersion" | "getPublicBuildInput">;
   domains: Pick<PlatformOperationsRepository, "listDomains">;
   alerts: Pick<OwnerNotificationRepository, "enqueue">;
+  inquiries: Pick<SiteCapabilityRepository, "listRecentFormSubmissions">;
   fetch: typeof fetch;
   certificateExpiry(hostname: string): Promise<Date | undefined>;
   appOrigin(): string;
@@ -34,7 +36,8 @@ export function createSiteMonitor(deps: SiteMonitorDependencies) {
       for (const site of await deps.platform.listSites()) {
         if (!site.publishedVersionId || (site.status !== "active" && site.status !== "offline")) continue;
         const domain = liveDomains.find((item) => item.siteId === site.id);
-        const url = domain ? `https://${domain.hostname}/` : `${deps.appOrigin()}/sites/${encodeURIComponent(site.slug)}`;
+        // Canonical slashed URLs: trailingSlash redirects anything else with a 308.
+        const url = domain ? `https://${domain.hostname}/` : `${deps.appOrigin()}/sites/${encodeURIComponent(site.slug)}/`;
         for (const kind of ["site", "form"] as const) {
           if (kind === "form" && site.status !== "active") continue;
           const [last] = await deps.checks.recent(site.id, kind, 1);
@@ -95,15 +98,23 @@ export function createSiteMonitor(deps: SiteMonitorDependencies) {
       else if (!input.forms.every((form) => version.formDefinitionIds.includes(form.id))) problems.push("a site form is not part of the published version");
       if (!problems.length && site.id === deps.syntheticFormSiteId() && input?.forms[0]) {
         const form = input.forms[0];
-        const payload = Object.fromEntries(form.fields.map((field) => [field.id, syntheticValue(field.type)]));
-        const response = await deps.fetch(new URL("/api/forms/submit", url), {
+        const payload = Object.fromEntries(form.fields.map((field) => [field.id, syntheticValue(field)]));
+        const submittedAt = new Date();
+        // Same request a visitor's browser sends: slashed endpoint, page referrer, runtime render stamp.
+        const response = await deps.fetch(new URL("/api/forms/submit/", url), {
           method: "POST",
-          headers: { "content-type": "application/json", "x-lodesta-internal-traffic": internalTrafficHeaderValue(), ...pilotAccessHeaders() },
-          body: JSON.stringify({ siteId: site.id, formId: form.id, pageId: "/", formRenderedAt: Date.now() - 5_000, payload }),
+          headers: { "content-type": "application/json", referer: url, "x-lodesta-internal-traffic": internalTrafficHeaderValue(), ...pilotAccessHeaders() },
+          body: JSON.stringify({ siteId: site.id, versionId: site.publishedVersionId, formId: form.id, pageId: new URL(url).pathname, formRenderedAt: Date.now() - 5_000, payload }),
           signal: AbortSignal.timeout(15_000)
         });
-        const body = await response.json().catch(() => ({})) as { accepted?: boolean; submissionKind?: string };
-        if (response.status !== 200 || body.accepted !== true || body.submissionKind !== "synthetic") problems.push(`synthetic inquiry answered ${response.status}`);
+        const body = await response.json().catch(() => ({})) as { accepted?: boolean; submissionKind?: string; error?: string };
+        if (response.status !== 200 || body.accepted !== true || body.submissionKind !== "synthetic") {
+          problems.push(`synthetic inquiry answered ${response.status}${body.error ? `: ${body.error}` : ""}`);
+        } else {
+          // A success response is not enough: the inquiry must be in the inbox.
+          const saved = await deps.inquiries.listRecentFormSubmissions(new Date(submittedAt.getTime() - 60_000).toISOString(), 50);
+          if (!saved.some((event) => event.siteId === site.id && event.metadata?.submissionKind === "synthetic")) problems.push("synthetic inquiry was accepted but not saved to the inbox");
+        }
       }
     } catch (error) {
       problems.push(`form check failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -112,16 +123,16 @@ export function createSiteMonitor(deps: SiteMonitorDependencies) {
   }
 
   async function alertIfRepeated(site: PlatformSiteRecord, kind: SiteMonitorKind, now: Date) {
-    const recent = await deps.checks.recent(site.id, kind, 20);
+    const recent = await deps.checks.recent(site.id, kind, 2);
     if (recent.length < 2 || recent[0]?.ok || recent[1]?.ok) return;
-    // One alert per failure episode, keyed by the episode's first failed check.
-    const lastSuccess = recent.findIndex((check) => check.ok);
-    const episodeStart = (lastSuccess === -1 ? recent.at(-1) : recent[lastSuccess - 1])!;
+    // One alert per failure episode. The episode is named by the last success
+    // before it, which stays fixed however long the failure lasts.
+    const lastSuccess = await deps.checks.lastSuccess(site.id, kind);
     await deps.alerts.enqueue({
       siteId: site.id,
       kind: kind === "site" ? "site_unreachable" : "form_unreachable",
-      subjectId: episodeStart.id,
-      dedupeKey: `monitor:${site.id}:${kind}:${episodeStart.checkedAt}`,
+      subjectId: recent[0]!.id,
+      dedupeKey: `monitor:${site.id}:${kind}:after:${lastSuccess?.checkedAt ?? "never"}`,
       audience: "operator",
       test: false
     }, now);
@@ -134,9 +145,12 @@ function pilotAccessHeaders(): Record<string, string> {
   return credential ? { authorization: `Basic ${Buffer.from(credential).toString("base64")}` } : {};
 }
 
-function syntheticValue(type: string) {
-  if (type === "email") return "monitor@lodesta.invalid";
-  if (type === "tel") return "5555550100";
+/** A value each field type accepts, so the synthetic inquiry validates like a real one. */
+function syntheticValue(field: { type: string; options?: string[] }) {
+  if (field.type === "email") return "monitor@lodesta.example";
+  if (field.type === "phone") return "(512) 555-0100";
+  if (field.type === "select" || field.type === "radio") return field.options?.[0] ?? "Lodesta synthetic monitoring check";
+  if (field.type === "checkbox") return field.options?.length ? [field.options[0]] : "true";
   return "Lodesta synthetic monitoring check";
 }
 
@@ -157,6 +171,7 @@ export const siteMonitor = createSiteMonitor({
   platform: sitePlatformRepository,
   domains: platformOperationsRepository,
   alerts: ownerNotificationRepository,
+  inquiries: siteCapabilityRepository,
   fetch: (input, init) => fetch(input, init),
   certificateExpiry,
   appOrigin: configuredAppOriginOrDefault,

@@ -19,6 +19,7 @@ export interface SiteMonitorRepository {
   record(check: Omit<SiteMonitorCheck, "id">): Promise<SiteMonitorCheck>;
   /** Newest first. */
   recent(siteId: string, kind: SiteMonitorKind, limit: number): Promise<SiteMonitorCheck[]>;
+  lastSuccess(siteId: string, kind: SiteMonitorKind): Promise<SiteMonitorCheck | undefined>;
 }
 
 class LocalSiteMonitorRepository implements SiteMonitorRepository {
@@ -49,6 +50,10 @@ class LocalSiteMonitorRepository implements SiteMonitorRepository {
       .slice(0, limit);
   }
 
+  async lastSuccess(siteId: string, kind: SiteMonitorKind) {
+    return (await this.recent(siteId, kind, 1_000)).find((check) => check.ok);
+  }
+
   private async read(): Promise<SiteMonitorCheck[]> {
     try {
       return JSON.parse(await readFile(this.path, "utf8")) as SiteMonitorCheck[];
@@ -76,10 +81,19 @@ class SupabaseSiteMonitorRepository implements SiteMonitorRepository {
     const { data, error } = await this.client.from("site_monitor_checks").select("*")
       .eq("site_id", siteId).eq("kind", kind).order("checked_at", { ascending: false }).limit(limit);
     if (error) throw new Error(`List site monitor checks: ${error.message}`);
-    return ((data ?? []) as SiteMonitorRow[]).map((row) => ({
-      id: row.id, siteId: row.site_id, kind: row.kind, target: row.target, ok: row.ok, detail: row.detail ?? {}, checkedAt: row.checked_at
-    }));
+    return ((data ?? []) as SiteMonitorRow[]).map(rowToCheck);
   }
+
+  async lastSuccess(siteId: string, kind: SiteMonitorKind) {
+    const { data, error } = await this.client.from("site_monitor_checks").select("*")
+      .eq("site_id", siteId).eq("kind", kind).eq("ok", true).order("checked_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) throw new Error(`Load last successful site monitor check: ${error.message}`);
+    return data ? rowToCheck(data as SiteMonitorRow) : undefined;
+  }
+}
+
+function rowToCheck(row: SiteMonitorRow): SiteMonitorCheck {
+  return { id: row.id, siteId: row.site_id, kind: row.kind, target: row.target, ok: row.ok, detail: row.detail ?? {}, checkedAt: row.checked_at };
 }
 
 export const siteMonitorRepository: SiteMonitorRepository = configuredRepositoryMode() === "local"

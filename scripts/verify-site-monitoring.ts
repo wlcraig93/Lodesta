@@ -18,12 +18,14 @@ try {
     { id: "site_draft", slug: "draft", status: "draft" }
   ];
   let healthy = true;
+  let syntheticSaved = true;
   const requested: string[] = [];
   const syntheticPosts: Array<{ internal: boolean; body: string }> = [];
   const html = `<html><head><script src="/_lodesta/runtime/site-runtime-v4.js"></script></head><body></body></html>`;
   const monitor = createSiteMonitor({
     checks,
     alerts,
+    inquiries: { listRecentFormSubmissions: async () => syntheticSaved ? [{ siteId: "site_live", metadata: { submissionKind: "synthetic" } }] as never : [] },
     platform: {
       listSites: async () => sites as PlatformSiteRecord[],
       getSiteVersion: async (id) => ({ id, publicBuildInputId: `input_${id}`, formDefinitionIds: ["form_1"] }) as never,
@@ -33,11 +35,12 @@ try {
     fetch: (async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       requested.push(url);
-      if (url.endsWith("/api/forms/submit")) {
+      if (url.includes("/api/forms/submit")) {
         syntheticPosts.push({ internal: Boolean(new Headers(init?.headers).get("x-lodesta-internal-traffic")), body: String(init?.body) });
         return Response.json({ accepted: true, submissionKind: "synthetic" });
       }
       if (url.includes("/_lodesta/runtime/")) return new Response("/* runtime */", { status: healthy ? 200 : 404 });
+      if (url.endsWith("/sites/chets-pest")) return new Response(null, { status: 308 });
       if (url.includes("chets-pest")) return new Response("unavailable", { status: 503 });
       return new Response(html, {
         status: healthy ? 200 : 500,
@@ -72,6 +75,16 @@ try {
   await monitor.runDueChecks(at(25));
   await monitor.runDueChecks(at(30));
   assert.equal((await alerts.list()).filter((alert) => alert.kind === "site_unreachable").length, 2, "A new failure episode alerts again.");
+
+  // A long outage alerts once, however many checks fail.
+  for (let minute = 35; minute <= 35 + 5 * 30; minute += 5) await monitor.runDueChecks(at(minute));
+  assert.equal((await alerts.list()).filter((alert) => alert.kind === "site_unreachable").length, 2, "A long outage produced repeated alerts.");
+
+  // An accepted synthetic inquiry that never reaches the inbox is a form failure.
+  healthy = true;
+  syntheticSaved = false;
+  const formCheck = (await monitor.runDueChecks(at(300))).find((check) => check.kind === "form");
+  assert.equal(formCheck?.ok, false, "An unsaved synthetic inquiry passed the form check.");
 
   console.log(JSON.stringify({ ok: true, probes: "site-form-offline", alerts: "once-per-episode", synthetic: "labelled" }));
 } finally {

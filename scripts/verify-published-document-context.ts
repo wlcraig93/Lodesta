@@ -18,6 +18,10 @@ import { resolveAnalyticsServingContext } from "../lib/analytics-ingestion";
 import { NextRequest } from "next/server";
 import { middleware } from "../middleware";
 import { platformOperationsRepository } from "../packages/platform-operations";
+import { POST as submitForm } from "../app/api/forms/submit/route";
+import { createLocalOwnerNotificationRepository } from "../packages/owner-notifications";
+import { siteCapabilityRepository } from "../packages/site-capabilities";
+import { createLocalSiteMonitorRepository, createSiteMonitor } from "../packages/site-monitoring";
 
 assert.notEqual(process.env.LODESTA_REPOSITORY, "supabase", "This fixture is local only.");
 const previousCwd = process.cwd();
@@ -167,6 +171,53 @@ try {
     } finally {
       globalThis.fetch = realFetch;
       platformOperationsRepository.listDomains = originalListDomains;
+    }
+  }
+  // Monitoring end to end: the monitor's own requests go through the real
+  // middleware, page route and form endpoint, and the synthetic inquiry must
+  // land in the real inbox with the real form schema.
+  {
+    const originalGetPublishedForm = repository.getPublishedFormDefinition;
+    repository.getPublishedFormDefinition = async (siteId: string, formId: string) => {
+      const form = input.forms.find((item) => item.id === formId);
+      return form && siteId === input.siteId ? { ...form, schemaVersion: 1, siteId, status: "published" } as never : undefined;
+    };
+    try {
+      const appOrigin = "http://localhost:4330";
+      const dispatch = (async (target: string | URL, init?: RequestInit) => {
+        const request = new NextRequest(String(target), { ...init, headers: { host: new URL(String(target)).host, ...Object.fromEntries(new Headers(init?.headers)) } } as never);
+        const routed = await middleware(request);
+        if (routed.status >= 400 || routed.headers.get("location")) return routed;
+        const url = new URL(String(target));
+        if (url.pathname.startsWith("/api/forms/submit")) {
+          return submitForm(new Request(url, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), host: url.host } }));
+        }
+        if (url.pathname.startsWith("/_lodesta/runtime/")) return new Response(runtime, { status: 200, headers: { "content-type": "application/javascript" } });
+        const path = url.pathname.replace(/^\/sites\/context-test\/?/, "").split("/").filter(Boolean);
+        return GET(new Request(url, init), { params: Promise.resolve({ slug: "context-test", path }) });
+      }) as typeof fetch;
+      const monitorDirectory = await mkdtemp(join(tmpdir(), "lodesta-monitor-e2e-"));
+      const monitor = createSiteMonitor({
+        checks: createLocalSiteMonitorRepository(join(monitorDirectory, "checks.json")),
+        alerts: createLocalOwnerNotificationRepository(join(monitorDirectory, "alerts.json")),
+        inquiries: siteCapabilityRepository,
+        platform: {
+          listSites: async () => [{ id: input.siteId, slug: "context-test", status: "active", publishedVersionId: version.id }] as never,
+          getSiteVersion: async () => ({ ...version, formDefinitionIds: input.forms.map((form) => form.id) }) as never,
+          getPublicBuildInput: async () => input
+        },
+        domains: { listDomains: async () => [] },
+        fetch: dispatch,
+        certificateExpiry: async () => undefined,
+        appOrigin: () => appOrigin,
+        syntheticFormSiteId: () => input.siteId
+      });
+      const checks = await monitor.runDueChecks(new Date());
+      assert.deepEqual(checks.map((check) => `${check.kind}:${check.ok}`), ["site:true", "form:true"],
+        `Monitoring failed against the real routes: ${JSON.stringify(await createLocalSiteMonitorRepository(join(monitorDirectory, "checks.json")).recent(input.siteId, "form", 1))}`);
+      await rm(monitorDirectory, { recursive: true, force: true });
+    } finally {
+      repository.getPublishedFormDefinition = originalGetPublishedForm;
     }
   }
   active = false;

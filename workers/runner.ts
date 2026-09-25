@@ -34,10 +34,10 @@ async function notifyOwners(since: string) {
     for (const run of await sitePlatformRepository.listAgentRunsForOwnerNotification(since, 100)) {
       await ownerNotificationService.enqueueRun(run);
     }
-    // Every five minutes, any saved inquiry from the last day without a lead notification gets one.
+    // Every five minutes, any saved inquiry from the last seven days without a lead notification gets one.
     if (Date.now() >= nextLeadReconciliationAt) {
       nextLeadReconciliationAt = Date.now() + 5 * 60_000;
-      await ownerNotificationService.reconcileLeads(new Date(Date.now() - 24 * 60 * 60_000));
+      await ownerNotificationService.reconcileLeads(new Date(Date.now() - 7 * 24 * 60 * 60_000));
     }
     const delivered = await ownerNotificationService.deliverDue({ workerId });
     if (delivered.length) console.log(JSON.stringify({ event: "owner_notifications_processed", delivered }));

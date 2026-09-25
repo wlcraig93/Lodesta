@@ -43,12 +43,18 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
      */
     async reconcileLeads(since: Date, now = new Date()) {
       let recorded = 0;
-      for (const event of await deps.capabilities.listRecentFormSubmissions(since.toISOString(), 500)) {
-        const kind = event.metadata?.submissionKind;
-        const submissionKind = kind === "owner_test" || kind === "synthetic" ? kind : undefined;
-        if (await recordLead({ siteId: event.siteId, inquiryId: event.inquiryId, eventId: event.id, submissionKind }, now)) recorded += 1;
+      // Page through every submission in the window, not just the newest batch.
+      let before: string | undefined;
+      for (;;) {
+        const page = await deps.capabilities.listRecentFormSubmissions(since.toISOString(), 500, before);
+        for (const event of page) {
+          const kind = event.metadata?.submissionKind;
+          const submissionKind = kind === "owner_test" || kind === "synthetic" ? kind : undefined;
+          if (await recordLead({ siteId: event.siteId, inquiryId: event.inquiryId, eventId: event.id, submissionKind }, now)) recorded += 1;
+        }
+        if (page.length < 500) return recorded;
+        before = page.at(-1)!.createdAt;
       }
-      return recorded;
     },
 
     /** Records the notification a run's current state calls for, once per state. */

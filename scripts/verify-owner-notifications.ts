@@ -121,6 +121,28 @@ try {
   await service.deliverDue({ workerId: "w", now: at(501) });
   assert.equal(sent[reconciledSent]?.subject, "New inquiry from Dana R.");
 
+  // Reconciliation pages through every submission in its window, not only the newest batch.
+  {
+    const many = Array.from({ length: 1_203 }, (_, index) => ({
+      id: `bulk_${index}_event`, siteId: "site_owned", inquiryId: `bulk_${index}`, metadata: {},
+      createdAt: new Date(Date.UTC(2026, 8, 25, 11, 0, 0, 0) - index * 1_000).toISOString()
+    }));
+    const paged = createOwnerNotificationService({
+      notifications: createLocalOwnerNotificationRepository(join(directory, "paged.json")),
+      platform: { getSite: async () => undefined, getAgentRun: async () => undefined },
+      capabilities: {
+        getInquiry: async () => null, listInquiryEvents: async () => [],
+        listRecentFormSubmissions: async (_since, limit, before) => many.filter((event) => !before || event.createdAt < before).slice(0, limit) as never
+      },
+      domains: { getDomainById: async () => null },
+      accountEmail: async () => undefined,
+      send: async () => ({ status: "sent" }),
+      appOrigin: () => "https://app.lodesta.example",
+      operatorEmail: () => undefined
+    });
+    assert.equal(await paged.reconcileLeads(at(0), at(0)), 1_203, "Reconciliation stopped at the first page.");
+  }
+
   // A live domain that stops pointing to Lodesta is reported once per episode.
   assert.equal(await service.enqueueDomainAttention({ id: "domain_1", siteId: "site_owned", attentionRequiredAt: "2026-09-25T12:00:00.000Z" }, at(399)), true);
   assert.equal(await service.enqueueDomainAttention({ id: "domain_1", siteId: "site_owned", attentionRequiredAt: "2026-09-25T12:00:00.000Z" }, at(399)), false);

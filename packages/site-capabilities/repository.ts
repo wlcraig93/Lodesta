@@ -44,8 +44,8 @@ export interface SiteCapabilityRepository {
   listInquiries(siteId?: string): Promise<Inquiry[]>;
   getInquiry(siteId: string, inquiryId: string): Promise<Inquiry | null>;
   listInquiryEvents(inquiryId: string): Promise<InquiryEvent[]>;
-  /** Visitor form submissions since `since`, newest first, across sites. */
-  listRecentFormSubmissions(since: string, limit: number): Promise<InquiryEvent[]>;
+  /** Visitor form submissions since `since` (and before `before`, for paging), newest first, across sites. */
+  listRecentFormSubmissions(since: string, limit: number, before?: string): Promise<InquiryEvent[]>;
   updateInquiryStatus(input: { siteId: string; inquiryId: string; status: InquiryStatus }): Promise<Inquiry | null>;
   recordAnalyticsEvent(event: AnalyticsEvent): Promise<{ event: AnalyticsEvent; duplicate: boolean }>;
   recordAnalyticsCollection(siteId: string, reason: AnalyticsCollectionReason, at?: string): Promise<void>;
@@ -126,9 +126,9 @@ class LocalSiteCapabilityRepository implements SiteCapabilityRepository {
     return (await this.read()).inquiryEvents.filter((event) => event.inquiryId === inquiryId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
-  async listRecentFormSubmissions(since: string, limit: number) {
+  async listRecentFormSubmissions(since: string, limit: number, before?: string) {
     return (await this.read()).inquiryEvents
-      .filter((event) => event.type === "form_submission" && event.createdAt >= since)
+      .filter((event) => event.type === "form_submission" && event.createdAt >= since && (!before || event.createdAt < before))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, limit);
   }
@@ -264,9 +264,10 @@ class SupabaseSiteCapabilityRepository implements SiteCapabilityRepository {
     return rows.map(rowToInquiryEvent);
   }
 
-  async listRecentFormSubmissions(since: string, limit: number) {
-    const rows = await requireData<InquiryEventRow[]>(this.client.from("inquiry_events").select("*")
-      .eq("type", "form_submission").gte("created_at", since).order("created_at", { ascending: false }).limit(limit), "List recent form submissions");
+  async listRecentFormSubmissions(since: string, limit: number, before?: string) {
+    let query = this.client.from("inquiry_events").select("*").eq("type", "form_submission").gte("created_at", since);
+    if (before) query = query.lt("created_at", before);
+    const rows = await requireData<InquiryEventRow[]>(query.order("created_at", { ascending: false }).limit(limit), "List recent form submissions");
     return rows.map(rowToInquiryEvent);
   }
 

@@ -2540,6 +2540,32 @@ console.log(JSON.stringify({ ok: true, focusedInspection: "below-fold-native-png
     "Content the production policy blocks passed release verification.");
 }
 
+// Contact details are checked as the visitor sees them: CSS generated content
+// assembled from several custom properties or attr(), and a replaced phone
+// split across inline spans, all fail release verification.
+{
+  const withContact = (markup: string, css: string, policy = prepared.contactPolicy!) => ({
+    ...prepared,
+    contactPolicy: policy,
+    routes: prepared.routes.map((route) => route.path === "/" ? { ...route, html: route.html.replace("</main>", `${markup}</main>`) } : route),
+    files: prepared.files.map((file) => file.path === "index.html"
+      ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${markup}</main>`)) }
+      : file.path === "site.css" ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n${css}`) } : file)
+  });
+  const renderedContactFindings = async (candidate: ReturnType<typeof withContact>) => (await runArtifactBrowserGate({
+    prepared: candidate, buildInput, blobStore: new MemoryBlobStore(), capturePrefix: "verification/site-authoring-render-rendered-contacts", routePaths: ["/"]
+  })).findings.filter((finding) => finding.id === "fact.rendered_contact_marker" && isTechnicalReleaseBlocker(finding));
+  assert((await renderedContactFindings(withContact(`<p class="rendered-phone-vars">Call</p>`, `.rendered-phone-vars { --area: "512"; --rest: "5550199"; } .rendered-phone-vars::after { content: var(--area) var(--rest); }`))).length,
+    "A phone assembled from several CSS custom properties passed.");
+  assert((await renderedContactFindings(withContact(`<p class="rendered-phone-attr" data-number="512-555-0199">Call</p>`, `.rendered-phone-attr::after { content: " " attr(data-number); }`))).length,
+    "A phone supplied through CSS attr() passed.");
+  const replaced = { ...prepared.contactPolicy!, legalOnlyPhones: ["5125550100"] };
+  assert((await renderedContactFindings(withContact(`<p>Call 512-<span>555</span>-<span>0100</span></p>`, "", replaced))).length,
+    "A replaced phone split across inline spans passed.");
+  assert.equal((await renderedContactFindings(withContact(`<p class="rendered-phone-clean">Call</p>`, `.rendered-phone-clean::after { content: " us today"; }`))).length, 0,
+    "Ordinary generated content was reported as a contact detail.");
+}
+
 const axeSabotage = `<script>window.axe=undefined;Object.defineProperty(window,"axe",{value:undefined,writable:false,configurable:false});</script>`;
 const axeUnavailablePrepared = {
   ...prepared,

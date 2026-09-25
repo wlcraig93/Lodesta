@@ -6,6 +6,8 @@ import { DomUtils, parseDocument } from "htmlparser2";
 import { chromium, type Browser, type Locator, type Page, type Request } from "playwright";
 import { sha256 } from "@/packages/business-data";
 import { isRequiredCustomerDestination } from "@/packages/site-contracts";
+import type { RenderedContactPolicy } from "./finalizer";
+import { isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
 import { generatedSiteContentSecurityPolicy } from "@/lib/generated-site-security";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts/blob-store";
 import type { SitePublicBuildInput } from "@/packages/site-contracts";
@@ -269,6 +271,9 @@ async function runArtifactBrowserGateOnce(input: {
           });
           if (viewport.name === "mobile" && !isAuthorReview) {
             routeFindings.push(...await inspectMobileCanonicalFunctionalLinks(page, input.buildInput, route.path));
+          }
+          if (viewport.name === "mobile" && input.prepared.contactPolicy) {
+            routeFindings.push(...await inspectRenderedContacts(page, input.prepared.contactPolicy, route.path));
           }
           // Retain one opened-state frame in final artifacts. Navigation
           // presentation cannot be assessed honestly from the closed header,
@@ -1499,6 +1504,51 @@ async function inspectMobileCanonicalFunctionalLinks(
     route,
     "link"
   )];
+}
+
+/**
+ * The one interpretation of contact text that matters is what the visitor
+ * sees. Read the rendered text and every ::before/::after generated content
+ * (custom properties, attr() and string concatenation resolved by the
+ * browser), and require each phone and email to be one the business uses.
+ */
+async function inspectRenderedContacts(page: Page, policy: RenderedContactPolicy, route: string) {
+  // A plain script string: compiled helpers must not leak into the page.
+  const texts = await page.evaluate(`(() => {
+    const generated = [];
+    const pattern = /"((?:[^"\\\\]|\\\\.)*)"|'((?:[^'\\\\]|\\\\.)*)'|attr\\(\\s*([\\w-]+)\\s*\\)/g;
+    for (const element of document.querySelectorAll("body *")) {
+      for (const pseudo of ["::before", "::after"]) {
+        const content = getComputedStyle(element, pseudo).content;
+        if (!content || content === "none" || content === "normal") continue;
+        const parts = [];
+        for (const match of content.matchAll(pattern)) {
+          parts.push(match[3] ? (element.getAttribute(match[3]) || "") : (match[1] ?? match[2] ?? "").replace(/\\\\(.)/g, "$1"));
+        }
+        if (parts.length) generated.push(parts.join(""));
+      }
+    }
+    return { visible: document.body.innerText, generated };
+  })()`) as { visible: string; generated: string[] };
+  const legal = isLegalSourcePagePath(route);
+  const phones = new Set([...policy.phones, ...(legal ? policy.legalOnlyPhones : [])]);
+  const emails = new Set([...policy.emails, ...(legal ? policy.legalOnlyEmails : [])].map((email) => email.toLowerCase()));
+  const unexpected = new Set<string>();
+  for (const text of [texts.visible, ...texts.generated]) {
+    const normalized = text.replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "-");
+    for (const match of normalized.matchAll(/(?<![\dA-Za-z])(?:\+?1[\s.-]*)?\(?\s*[2-9]\d{2}\s*\)?[\s.-]*[2-9]\d{2}[\s.-]*\d{4}(?![\dA-Za-z])/g)) {
+      if (!phones.has(match[0].replace(/\D/g, "").slice(-10))) unexpected.add(match[0].trim());
+    }
+    for (const match of normalized.matchAll(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)) {
+      if (!emails.has(match[0].toLowerCase())) unexpected.add(match[0]);
+    }
+  }
+  return [...unexpected].slice(0, 5).map((marker) => finding(
+    "fact.rendered_contact_marker",
+    `The rendered page shows ${JSON.stringify(marker)}, which is not a phone number or email the business uses (including text produced by CSS).`,
+    route,
+    "claim"
+  ));
 }
 
 async function hasHitTestableCanonicalLink(page: Page, expected: ReadonlySet<string>) {

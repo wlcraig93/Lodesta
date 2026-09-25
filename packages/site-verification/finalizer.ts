@@ -46,6 +46,19 @@ export type PreparedSiteArtifact = {
     routeSimilarity: Array<{ left: string; right: string; jaccard: number; smallerPageContainment: number }>;
     informationArchitecture: InformationArchitectureAdvisoryReport;
   };
+  /**
+   * Phones and emails the rendered site may show. The browser gate checks the
+   * text as rendered (including CSS generated content) against it. Replaced
+   * values stay allowed only in legal documents, which keep verbatim text.
+   */
+  contactPolicy?: RenderedContactPolicy;
+};
+
+export type RenderedContactPolicy = {
+  phones: string[];
+  emails: string[];
+  legalOnlyPhones: string[];
+  legalOnlyEmails: string[];
 };
 
 export type BrowserGateResult = {
@@ -183,7 +196,13 @@ export function prepareSiteArtifact(input: {
     factBindings: [...factBindings.bindings, ...structuredBindings],
     capabilityBindings,
     findings: dedupeFindings(findings),
-    qualityMetrics
+    qualityMetrics,
+    contactPolicy: {
+      phones: [...allowedPhoneNumbers],
+      emails: [...allowedEmailAddresses],
+      legalOnlyPhones: [...superseded.phones],
+      legalOnlyEmails: [...superseded.emails]
+    }
   } satisfies PreparedSiteArtifact;
 }
 

@@ -37,7 +37,7 @@ const snapshots = [
 ];
 const context = createSiteAuthoringContext({ buildInput, snapshots });
 assert.equal(context.provisionalSources.length, 2);
-assert(context.provisionalSources[0]!.meaningfulExcerpt.length <= 2_400);
+assert((context.provisionalSources[0]!.meaningfulExcerpt ?? "").length <= 2_400);
 assert.equal(context.provisionalSources[1]!.availability, "unavailable");
 assert.equal(context.provisionalSources[0]!.untrusted, true);
 assert(authoringContextCharacters(context) < 25_000);

@@ -5686,6 +5686,12 @@ export class SiteAuthoringWorkflow {
         };
         return { modelOutput: JSON.stringify(value), diagnosticOutput: value };
       }
+      if (input.call.name === "retrieve_public_source" && !retainedSourceHost(requestedUrl, input.sourceCatalog, input.getBuildInput())) {
+        // Only hosts this run already holds evidence from, so injected text
+        // cannot turn the fetch into a channel to an arbitrary server.
+        const value = { ok: false, error: "source_host_not_permitted", url: requestedUrl };
+        return { modelOutput: JSON.stringify(value), diagnosticOutput: value };
+      }
       try {
         const fetched = await fetchPublicText(requestedUrl, {
           signal: input.signal,
@@ -6757,6 +6763,24 @@ function combineAbortSignals(left?: AbortSignal, right?: AbortSignal) {
 function urlPath(url: string) {
   try {
     return new URL(url).pathname.replace(/\/+$/, "") || "/";
+  } catch {
+    return undefined;
+  }
+}
+
+export function retainedSourceHost(url: string, sourceCatalog: Map<string, SourceSnapshot>, buildInput: SitePublicBuildInput) {
+  const host = sourceHostname(url);
+  if (!host) return false;
+  const known = [
+    ...[...sourceCatalog.values()].map((snapshot) => snapshot.sourceUrl),
+    ...buildInput.business.links.map((link) => link.url)
+  ];
+  return known.some((candidate) => candidate && sourceHostname(candidate) === host);
+}
+
+function sourceHostname(url: string) {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
   } catch {
     return undefined;
   }

@@ -329,7 +329,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       ok: true,
       workspaceHash: this.workspaceHash,
       files: [
-        ...this.currentFiles().map((file) => ({ path: file.path, contentHash: sha256(file.content), bytes: Buffer.byteLength(file.content), lines: file.content.split("\n").length, readOnly: false })),
+        ...this.currentFiles().map((file) => ({ path: file.path, contentHash: sha256(file.content), bytes: Buffer.byteLength(file.content), lines: file.content.split("\n").length, readOnly: platformAuthorityPaths.has(file.path) })),
         ...[...this.referenceFiles.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([path, content]) => ({
           path,
           contentHash: sha256(content),
@@ -464,6 +464,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
 
   private write(args: Record<string, unknown>): ManagerToolExecution {
     const file = workspaceSourceFileSchema.parse({ path: args.path, content: args.content });
+    if (platformAuthorityPaths.has(file.path)) return platformAuthorityRefusal(file.path);
     if (this.files.get(file.path) === file.content) {
       return result({ ok: true, unchanged: true, path: file.path, contentHash: sha256(file.content), workspaceHash: this.workspaceHash });
     }
@@ -480,6 +481,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
 
   private delete(args: Record<string, unknown>): ManagerToolExecution {
     const path = workspaceSourceFileSchema.shape.path.parse(args.path);
+    if (platformAuthorityPaths.has(path)) return platformAuthorityRefusal(path);
     const existed = this.files.delete(path);
     if (existed) this.mutated();
     return result({ ok: true, unchanged: !existed, path, deleted: existed, workspaceHash: this.workspaceHash });
@@ -493,6 +495,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
       if (paths.has(change.path)) return result({ ok: false, error: "patch_file_duplicated", path: change.path });
       paths.add(change.path);
       const path = workspaceSourceFileSchema.shape.path.parse(change.path);
+      if (platformAuthorityPaths.has(path)) return platformAuthorityRefusal(path);
       if (change.content === null) next.delete(path);
       else {
         const file = workspaceSourceFileSchema.parse({ path, content: change.content });
@@ -509,6 +512,7 @@ export class WorkspaceManagerRuntime<Checkpoint> implements ManagerToolRuntime {
 
   private edit(args: Record<string, unknown>): ManagerToolExecution {
     const parsed = managerToolArguments.edit_file.parse(args);
+    if (platformAuthorityPaths.has(parsed.path)) return platformAuthorityRefusal(parsed.path);
     const current = this.files.get(parsed.path);
     if (current === undefined) return result({ ok: false, error: "workspace_file_missing", path: parsed.path });
     const currentHash = sha256(current);
@@ -1601,6 +1605,14 @@ function hasVisualBlocker(summary: Record<string, unknown>) {
 
 function numericCount(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+// The platform writes the approved route plan and source index; later edits
+// derive their release plan from these files, so the author reads them only.
+const platformAuthorityPaths = new Set(["src/approved-architecture.ts", "src/approved-source-index.ts"]);
+
+function platformAuthorityRefusal(path: string) {
+  return result({ ok: false, error: "platform_file_read_only", path, guidance: "This platform-owned file defines the approved routes and sources. Read it, but put site code in other src/ files." });
 }
 
 function result(value: Record<string, unknown>): ManagerToolExecution {

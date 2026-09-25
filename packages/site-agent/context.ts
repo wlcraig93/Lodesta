@@ -57,7 +57,8 @@ export type SiteAuthoringContext = {
     contentType: "website" | "research" | "owner_material" | "operator_material";
     provenance: string;
     availability: "available" | "pending" | "unavailable";
-    meaningfulExcerpt: string;
+    /** First-party and owner sources only; research results stay pull-only through source tools. */
+    meaningfulExcerpt?: string;
     media: {
       referencedUrls: number;
       imageLikeUrls: number;
@@ -192,7 +193,7 @@ export function createSiteAuthoringContext(input: {
       contentType: sourceContentType(snapshot.sourceType),
       provenance: `${snapshot.sourceType}:${snapshot.sourceUrl ?? snapshot.id}`,
       availability: sourceAvailability(snapshot.payload),
-      meaningfulExcerpt: meaningfulSourceExcerpt(snapshot.payload),
+      ...(snapshot.sourceType === "web_research" ? {} : { meaningfulExcerpt: meaningfulSourceExcerpt(snapshot.payload) }),
       media: sourceMediaMetadata(snapshot.payload),
       untrusted: true,
       websiteInventory: websiteInventory(snapshot, (input.sourceInventoryPages ?? input.pages ?? []).filter((page) => page.sourceSnapshotId === snapshot.id))

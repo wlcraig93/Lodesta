@@ -1945,8 +1945,8 @@ const bookingDestinations = selectSourceLinksForGeneration(`${authorityOrigin}/`
   .map((link) => link.url);
 assert.deepEqual(
   new Set(bookingDestinations),
-  new Set([`${authorityOrigin}/schedule-service/`, "https://calendly.com/fixture/consultation"]),
-  "Book and schedule words inside unrelated external article URLs were treated as booking destinations."
+  new Set(["https://calendly.com/fixture/consultation"]),
+  "Only a third-party booking service is a booking destination: article URLs with book or schedule words are not, and a scheduling page on the site being replaced is rebuilt rather than linked."
 );
 
 const headingOrigin = "https://heading-boundary.example";

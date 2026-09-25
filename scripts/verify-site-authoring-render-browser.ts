@@ -1140,7 +1140,7 @@ const footerOnlyPortalBrowser = await runArtifactBrowserGate({
   routePaths: ["/"]
 });
 const mobilePortalFinding = footerOnlyPortalBrowser.findings.find((finding) =>
-  finding.id === "functional.canonical_link" && finding.message.includes("mobile experience"));
+  finding.id === "functional.canonical_link" && finding.message.includes("tappable on mobile"));
 assert(
   mobilePortalFinding?.severity === "error" && isTechnicalReleaseBlocker(mobilePortalFinding),
   `A canonical customer portal available only below the mobile fold escaped the functional release gate: ${footerOnlyPortalBrowser.findings
@@ -1166,7 +1166,7 @@ const headerPortalBrowser = await runArtifactBrowserGate({
 });
 assert(
   !headerPortalBrowser.findings.some((finding) =>
-    finding.id === "functional.canonical_link" && finding.message.includes("mobile experience")),
+    finding.id === "functional.canonical_link" && finding.message.includes("tappable on mobile")),
   "A visible exact customer portal in the mobile primary navigation was incorrectly rejected."
 );
 

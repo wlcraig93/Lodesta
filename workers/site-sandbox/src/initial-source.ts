@@ -1,10 +1,10 @@
-import { isCustomerPortalLink, type SitePublicBuildInput } from "../../../packages/site-contracts";
+import { isRequiredCustomerDestination, type SitePublicBuildInput } from "../../../packages/site-contracts";
 
 export const requiredDestinationsSourcePath = "src/required-destinations.tsx";
 
 export function requiredDestinationsSource(input: SitePublicBuildInput) {
   const destinations = input.business.links.filter((link) =>
-    link.publicEligible && isCustomerPortalLink(link.url, link.label)
+    link.publicEligible && isRequiredCustomerDestination(link)
   );
   const body = destinations.length
     ? `<>

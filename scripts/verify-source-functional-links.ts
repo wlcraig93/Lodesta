@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import type { CrawlAssessment } from "../lib/crawler";
+import { normalizeLinkReference, type CrawlAssessment } from "../lib/crawler";
+import { isPaymentLink, isRequiredCustomerDestination } from "../packages/site-contracts";
 import {
   isCustomerPortalLink,
   normalizeServiceAreaCandidate,
@@ -47,6 +48,39 @@ assert.deepEqual(selectSourceLinksForGeneration("https://surgepest.com/", crawl)
     url: "https://surgepestcontrol.pestportals.com/landing/index"
   }
 ]);
+
+// Bill payment and third-party booking are kept alongside the customer portal.
+assert.equal(isPaymentLink("https://www.paypal.com/paypalme/haynespest", ""), true);
+assert.equal(isPaymentLink("https://buy.stripe.com/abc123", "Pay"), true);
+assert.equal(isPaymentLink("https://pay.fieldservice.example/invoice", "Pay Bill"), true);
+assert.equal(isPaymentLink("https://link.clover.com/urlshortener/abc", "Pay Bill"), false, "A shortener hides its destination.");
+assert.equal(isPaymentLink("https://example.com/blog/payday-tips", "Payday tips"), false);
+assert.equal(isRequiredCustomerDestination({ url: "https://calendly.com/altar/massage", label: "Book Online", kind: "booking" }), true);
+assert.equal(isRequiredCustomerDestination({ url: "https://www.facebook.com/altar", label: "Facebook", kind: "social" }), false);
+const flows = selectSourceLinksForGeneration("https://altarspa.example/", {
+  extractedFacts: { socialLinks: [], bookingLinks: [] },
+  pageSummaries: [{
+    url: "https://altarspa.example/",
+    sourceTextBlocks: [],
+    extractedFacts: { socialLinks: [], bookingLinks: ["https://altarspa.example/book-now/", "https://book.squareup.com/appointments/abc/location/xyz"] },
+    linkReferences: [
+      { href: "https://altarspa.example/pay/", text: "Pay Bill", kind: "internal" },
+      { href: "https://www.paypal.com/paypalme/altarspa", text: "Pay Bill", kind: "external" }
+    ]
+  }]
+} as unknown as CrawlAssessment);
+assert.deepEqual(flows.filter((link) => link.kind !== "website"), [
+  { kind: "booking", label: "Book Online", url: "https://book.squareup.com/appointments/abc/location/xyz" },
+  { kind: "other", label: "Pay Bill", url: "https://www.paypal.com/paypalme/altarspa" }
+], "Same-site booking and payment pages are rebuilt, while third-party booking and payment links are kept.");
+
+// Square serves appointments and online stores: only its booking surfaces are booking.
+const kindOf = (href: string, text?: string) => normalizeLinkReference(href, "https://altarspa.example/", "altarspa.example", text)?.kind;
+assert.equal(kindOf("https://book.squareup.com/appointments/abc/location/xyz"), "booking");
+assert.equal(kindOf("https://squareup.com/appointments/book/abc/xyz"), "booking");
+assert.equal(kindOf("https://squareup.com/store/altar-spa"), "ordering");
+assert.equal(kindOf("https://book.housecallpro.com/book/Pest-Pros/abc"), "booking");
+assert.equal(kindOf("https://www.doordash.com/store/altar"), "ordering");
 
 const repeatedPhone = "+1 (919) 981-9798";
 const supportingPhoneBlock = selectSupportingSourceBlock([

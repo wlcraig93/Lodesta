@@ -11,6 +11,7 @@ import {
   siteIntentSchema,
   sourceSnapshotSchema,
   isCustomerPortalLink,
+  isPaymentLink,
   type BusinessOffering,
   type BusinessState,
   type FormDefinition,
@@ -1655,12 +1656,22 @@ export function selectSourceLinksForGeneration(sourceUrl: string, crawl: CrawlAs
     .flatMap((page) => page.linkReferences)
     .filter((link) => isCustomerPortalLink(link.href, link.text))
     .map((link) => ({ kind: "other" as const, label: "Customer Login", url: link.href })), (item) => item.url);
+  // A booking or payment page on the site being replaced is not a destination;
+  // the managed lead form and the rebuilt pages take its place.
+  const sourceHost = hostnameOf(sourceUrl);
+  const bookingLinks = unique(eligiblePages.flatMap((page) => page.extractedFacts.bookingLinks))
+    .filter((url) => hostnameOf(url) !== sourceHost)
+    .map((url) => ({ kind: "booking" as const, label: "Book Online", url }));
+  const paymentLinks = uniqueBy(eligiblePages
+    .flatMap((page) => page.linkReferences)
+    .filter((link) => hostnameOf(link.href) !== sourceHost && isPaymentLink(link.href, link.text))
+    .map((link) => ({ kind: "other" as const, label: "Pay Bill", url: link.href })), (item) => item.url);
   const values = [
     { kind: "website" as const, label: "Source website", url: sourceUrl },
     ...(socialProfile ? [{ kind: "social" as const, label: "Social profile", url: socialProfile }] : []),
-    ...unique(eligiblePages.flatMap((page) => page.extractedFacts.bookingLinks))
-      .map((url) => ({ kind: "booking" as const, label: "Booking", url })),
-    ...customerPortalLinks
+    ...bookingLinks,
+    ...customerPortalLinks,
+    ...paymentLinks
   ];
   return uniqueBy(values.filter((item) => safeHttpUrl(item.url)), (item) => item.url).slice(0, 20);
 }
@@ -2099,4 +2110,12 @@ function uniqueBy<T>(values: T[], key: (value: T) => string) {
     seen.add(id);
     return true;
   });
+}
+
+function hostnameOf(value: string) {
+  try {
+    return new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return undefined;
+  }
 }

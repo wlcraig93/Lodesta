@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { DomUtils, parseDocument } from "htmlparser2";
 import { chromium, type Browser, type Locator, type Page, type Request } from "playwright";
-import { isCustomerPortalLink, sha256 } from "@/packages/business-data";
+import { sha256 } from "@/packages/business-data";
+import { isRequiredCustomerDestination } from "@/packages/site-contracts";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts/blob-store";
 import type { SitePublicBuildInput } from "@/packages/site-contracts";
 import { isTechnicalReleaseBlocker, type PreparedSiteArtifact } from "./finalizer";
@@ -1415,30 +1416,31 @@ async function inspectCanonicalFunctionalLinks(
   buildInput: SitePublicBuildInput,
   route: string
 ) {
-  const canonicalPortals = buildInput.business.links
-    .filter((link) => link.publicEligible && isCustomerPortalLink(link.url, link.label))
+  const canonicalDestinations = buildInput.business.links
+    .filter((link) => link.publicEligible && isRequiredCustomerDestination(link))
     .map((link) => normalizedPublicUrl(link.url))
     .filter((url): url is string => Boolean(url));
-  if (!canonicalPortals.length) return [];
-  const expected = new Set(canonicalPortals);
+  if (!canonicalDestinations.length) return [];
+  const expected = new Set(canonicalDestinations);
   const rendered = await page.locator("a[href]").evaluateAll((links) => links.map((link) => ({
     href: (link as HTMLAnchorElement).href,
     label: (link.textContent ?? link.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim()
   })));
-  const exactMatches = rendered.filter((link) => expected.has(normalizedPublicUrl(link.href) ?? ""));
+  const renderedUrls = new Set(rendered.map((link) => normalizedPublicUrl(link.href) ?? ""));
+  const missing = canonicalDestinations.filter((url) => !renderedUrls.has(url));
   const mislabeled = rendered.filter((link) =>
-    /\b(?:customer|client|member|resident|owner)?\s*(?:portal|login|log in|sign in|my account)\b/i.test(link.label)
+    /\b(?:customer|client|member|resident|owner)?\s*(?:portal|login|log in|sign in|my account|pay (?:my |your )?bill|make a payment|book online)\b/i.test(link.label)
     && /^https?:/i.test(link.href)
     && !expected.has(normalizedPublicUrl(link.href) ?? "")
   );
-  if (exactMatches.length && !mislabeled.length) return [];
+  if (!missing.length && !mislabeled.length) return [];
   const details = [
-    !exactMatches.length ? `no rendered link uses ${canonicalPortals.join(" or ")}` : "",
-    ...mislabeled.slice(0, 4).map((link) => `“${link.label || "portal"}” points to ${link.href}`)
-  ].filter(Boolean).join("; ");
+    ...missing.map((url) => `no rendered link uses ${url}`),
+    ...mislabeled.slice(0, 4).map((link) => `“${link.label || "link"}” points to ${link.href}`)
+  ].join("; ");
   return [finding(
     "functional.canonical_link",
-    `The retained customer portal must remain an exact, usable destination; ${details}.`,
+    `The business's existing customer portal, bill payment and booking links must remain exact, usable destinations; ${details}.`,
     route,
     "link"
   )];
@@ -1449,12 +1451,12 @@ async function inspectMobileCanonicalFunctionalLinks(
   buildInput: SitePublicBuildInput,
   route: string
 ) {
-  const canonicalPortals = buildInput.business.links
-    .filter((link) => link.publicEligible && isCustomerPortalLink(link.url, link.label))
+  const canonicalDestinations = buildInput.business.links
+    .filter((link) => link.publicEligible && isRequiredCustomerDestination(link))
     .map((link) => normalizedPublicUrl(link.url))
     .filter((url): url is string => Boolean(url));
-  if (!canonicalPortals.length) return [];
-  const expected = new Set(canonicalPortals);
+  if (!canonicalDestinations.length) return [];
+  const expected = new Set(canonicalDestinations);
   if (await hasHitTestableCanonicalLink(page, expected)) return [];
   const toggles = page.locator([
     "[data-lodesta-menu-toggle]",
@@ -1480,7 +1482,7 @@ async function inspectMobileCanonicalFunctionalLinks(
   }
   return [finding(
     "functional.canonical_link",
-    `The retained customer portal must remain a visible, hit-testable destination at the top of the mobile experience or while its navigation is open; no usable link exposes ${canonicalPortals.join(" or ")}.`,
+    `The business's existing customer portal, bill payment and booking links must stay visible and tappable on mobile, at the top of the page or in the open navigation; no usable link exposes ${canonicalDestinations.join(" or ")}.`,
     route,
     "link"
   )];

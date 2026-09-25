@@ -788,7 +788,7 @@ function extractLinkReferences(html: string, sourceUrl: string, sourceHostname: 
   return uniqueBy(references, (reference) => `${reference.kind}:${reference.href}`).slice(0, 60);
 }
 
-function normalizeLinkReference(
+export function normalizeLinkReference(
   rawHref: string,
   sourceUrl: string,
   sourceHostname: string,
@@ -1731,16 +1731,22 @@ function isSocialHost(host: string) {
 }
 
 function isOrderingHost(host: string) {
-  return /(?:toasttab|squareup|doordash|ubereats|grubhub|chownow|clover)\.com$/.test(host);
+  return /(?:toasttab|doordash|ubereats|grubhub|chownow|clover)\.com$/.test(host);
 }
 
-function isBookingHost(host: string) {
-  return /(?:opentable|resy|booksy|vagaro|mindbodyonline|fresha|calendly|acuityscheduling|squareup)\.com$/.test(host);
+// Scheduling vendors local businesses link to for online booking. Square
+// serves both appointments and online stores, so only its booking surfaces count.
+function isBookingHost(host: string, pathname = "/") {
+  if (/(?:^|\.)squareup\.com$/.test(host)) return host === "book.squareup.com" || /^\/appointments(?:\/|$)/i.test(pathname);
+  if (/\.square\.site$/.test(host)) return /\/(?:book|booking|appointments?|s\/appointments)(?:\/|$)/i.test(pathname);
+  return /(?:^|\.)(?:opentable|resy|booksy|vagaro|mindbodyonline|fresha|calendly|acuityscheduling|glossgenius|mangomint|phorest|booker|schedulicity|setmore|simplybook|housecallpro|getjobber|servicetitan)\.(?:com|me|it)$/.test(host)
+    && !/^(?:www\.)?(?:getjobber|servicetitan|housecallpro)\.com$/.test(host);
 }
 
 function isOrderingLink(url: URL, sameSite: boolean, text?: string) {
   const host = url.hostname.replace(/^www\./, "");
-  if (isOrderingHost(host)) return true;
+  if (isBookingHost(host, url.pathname)) return false;
+  if (isOrderingHost(host) || (/(?:^|\.)squareup\.com$/.test(host) && /^\/(?:store|order|shop)(?:\/|$)/i.test(url.pathname))) return true;
   const actionText = normalizedLinkActionText(text);
   if (/^(?:order(?: now| online| pickup| delivery)?|view (?:the )?menu|get delivery|start (?:an )?order)$/.test(actionText)) {
     return true;
@@ -1750,7 +1756,7 @@ function isOrderingLink(url: URL, sameSite: boolean, text?: string) {
 
 function isBookingLink(url: URL, sameSite: boolean, text?: string) {
   const host = url.hostname.replace(/^www\./, "");
-  if (isBookingHost(host)) return true;
+  if (isBookingHost(host, url.pathname)) return true;
   const actionText = normalizedLinkActionText(text);
   if (/^(?:book(?: now| online| service| an? appointment| a service call)?|schedule(?: now| online| service| an? appointment| a service call)?|request (?:service|an? appointment)|make an? appointment|reserve(?: now| a time)?)$/.test(actionText)) {
     return true;

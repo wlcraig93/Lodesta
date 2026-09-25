@@ -102,7 +102,7 @@ import {
   platformSiteRecordSchema,
   siteVersionSchema,
   siteWorkspaceRevisionSchema,
-  isCustomerPortalLink,
+  isRequiredCustomerDestination,
   type SiteAgentRun,
   type SiteAgentContinuationHead,
   type AssetRevision,
@@ -6593,7 +6593,7 @@ function assertMaterializedInitialSource(
   const requiredDestinations = files.get("src/required-destinations.tsx")
     ?? invalid("missing:src/required-destinations.tsx");
   for (const link of buildInput.business.links.filter((candidate) => (
-    candidate.publicEligible && isCustomerPortalLink(candidate.url, candidate.label)
+    candidate.publicEligible && isRequiredCustomerDestination(candidate)
   ))) {
     if (!requiredDestinations.includes(`id=${JSON.stringify(link.id)}`)) {
       invalid(`missing_required_destination:${link.id}`);

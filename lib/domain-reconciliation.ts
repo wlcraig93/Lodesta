@@ -1,4 +1,5 @@
 import { platformOperationsRepository, type DomainRecord, type PlatformOperationsRepository } from "@/packages/platform-operations";
+import { ownerNotificationService } from "@/packages/owner-notifications";
 
 const reconciliationIntervalMs: Record<DomainRecord["status"], number | undefined> = {
   pending_verification: 5 * 60_000,
@@ -26,5 +27,13 @@ export async function processDomainReconciliations(input: {
     .filter((domain) => isDomainReconciliationDue(domain, now))
     .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
     .slice(0, limit);
-  return Promise.all(due.map((domain) => repository.refreshDomain({ domainId: domain.id })));
+  return Promise.all(due.map(async (domain) => {
+    const refreshed = await repository.refreshDomain({ domainId: domain.id });
+    if (refreshed?.status === "attention_required" && domain.status !== "attention_required") {
+      await ownerNotificationService.enqueueDomainAttention(refreshed).catch((error) => console.error(JSON.stringify({
+        event: "owner_notification_enqueue_failed", kind: "domain_attention", domainId: refreshed.id, message: error instanceof Error ? error.message : String(error)
+      })));
+    }
+    return refreshed;
+  }));
 }

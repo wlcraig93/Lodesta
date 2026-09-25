@@ -5,7 +5,7 @@ import { AnalyticsTimezoneForm } from "@/components/AnalyticsTimezoneForm";
 import { RedirectRulesPanel } from "@/components/RedirectRulesPanel";
 import { SiteOnlineToggle } from "@/components/SiteOnlineToggle";
 import { WorkspacePageHeader, WorkspaceStatus } from "@/components/OwnerWorkspaceUI";
-import { humanize } from "@/lib/product-format";
+import { isApexHostname, registrarHostField } from "@/lib/domains";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 import { sitePlatformRepository } from "@/packages/platform-data";
@@ -41,19 +41,23 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
               {domains.map((domain) => (
                 <article key={domain.id}>
                   <div><strong>{domain.hostname}</strong><span>Custom hostname</span></div>
-                  <WorkspaceStatus tone={domain.status === "active" ? "success" : "attention"}>{humanize(domain.status)}</WorkspaceStatus>
-                  {domain.status === "attention_required" ? <p className="form-status">This hostname is no longer routing safely. Recheck DNS to restore it.</p> : null}
+                  <WorkspaceStatus tone={domain.status === "active" ? "success" : "attention"}>{domainStatusLabel(domain.status)}</WorkspaceStatus>
+                  {domain.status === "attention_required" ? <p className="form-status">This domain has stopped pointing to Lodesta. Your site is still being served, but visitors may not reach it. Check the records below with your domain provider.</p> : null}
+                  {domain.status === "expired" ? <p className="form-status">The DNS records weren’t added in time. Remove this domain and connect it again to get fresh records.</p> : null}
+                  {domain.status === "conflict" ? <p className="form-status">Another Lodesta website has already proved this domain. Remove it here, or contact support if the domain is yours.</p> : null}
+                  {domain.ownershipProofStatus === "pending" && isApexHostname(domain.hostname) ? <p className="form-status">Most domain providers can’t point a bare domain like {domain.hostname} with a CNAME. If yours can’t, connect www.{domain.hostname} instead and turn on your provider’s domain forwarding from {domain.hostname} to https://www.{domain.hostname}.</p> : null}
                   <dl>
-                    <dt>TXT ownership record</dt>
-                    <dd><code>{domain.verificationName}</code></dd>
-                    <dd><code>{domain.verificationValue}</code></dd>
-                    <dt>CNAME or ALIAS routing record</dt>
-                    <dd><code>{domain.routingName}</code></dd>
-                    <dd><code>{domain.routingTarget}</code></dd>
+                    <dt>Add a TXT record</dt>
+                    <dd>Host: <code>{registrarHostField(domain.verificationName, domain.hostname)}</code></dd>
+                    <dd>Value: <code>{domain.verificationValue}</code></dd>
+                    <dt>Add a CNAME record (or ALIAS if your provider offers it)</dt>
+                    <dd>Host: <code>{registrarHostField(domain.routingName, domain.hostname)}</code></dd>
+                    <dd>Points to: <code>{domain.routingTarget}</code></dd>
                     <dt>Progress</dt>
-                    <dd>Ownership: {humanize(domain.ownershipProofStatus)} · Routing: {humanize(domain.routingStatus)} · Cloudflare: {humanize(domain.providerStatus)} · Certificate: {humanize(domain.certificateStatus)}</dd>
+                    <dd>Ownership {domain.ownershipProofStatus === "verified" ? "confirmed" : "not confirmed yet"} · Routing {domain.routingStatus === "active" ? "confirmed" : "not confirmed yet"} · Security certificate {domain.certificateStatus === "active" ? "ready" : domain.certificateStatus === "invalid" ? "needs attention" : "in progress"}</dd>
+                    {domain.ownershipProofStatus === "pending" && domain.status === "pending_verification" ? <dd>Add both records by {new Date(domain.expiresAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}. DNS changes can take up to an hour to appear.</dd> : null}
                   </dl>
-                  <DomainRefreshButton domainId={domain.id} />
+                  <DomainRefreshButton domainId={domain.id} hostname={domain.hostname} />
                 </article>
               ))}
               {!domains.length ? <div className="workspace-empty-state"><strong>No custom domain connected</strong><p>The Lodesta site URL remains available until you add one.</p></div> : null}
@@ -80,4 +84,15 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
       </section>
     </main>
   );
+}
+
+function domainStatusLabel(status: string) {
+  return ({
+    pending_verification: "Waiting for DNS records",
+    provisioning: "Setting up",
+    active: "Connected",
+    attention_required: "Needs attention",
+    expired: "Expired",
+    conflict: "In use elsewhere"
+  } as Record<string, string>)[status] ?? "Checking";
 }

@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { configuredAppOriginOrDefault } from "@/lib/app-origin";
 import { sitePlatformRepository } from "@/packages/platform-data";
+import { platformOperationsRepository } from "@/packages/platform-operations";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${baseUrl}/privacy/`, lastModified: generatedAt, changeFrequency: "yearly", priority: 0.3 },
     { url: `${baseUrl}/terms/`, lastModified: generatedAt, changeFrequency: "yearly", priority: 0.3 }
   ];
-  const sites = (await sitePlatformRepository.listSites()).filter((site) => site.status === "active" && site.publishedVersionId);
+  // A site with a live custom domain is indexed there, not under /sites/.
+  const liveDomainSiteIds = new Set((await platformOperationsRepository.listDomains()).filter((domain) => domain.status === "active").map((domain) => domain.siteId));
+  const sites = (await sitePlatformRepository.listSites()).filter((site) => site.status === "active" && site.publishedVersionId && !liveDomainSiteIds.has(site.id));
   const sitePages = (await Promise.all(sites.map(async (site) => {
     const version = site.publishedVersionId ? await sitePlatformRepository.getSiteVersion(site.publishedVersionId) : undefined;
     const artifact = version ? await sitePlatformRepository.getBuildArtifact(version.artifactId) : undefined;

@@ -95,13 +95,13 @@ assert(middleware.includes('"/workspace/"'), "Custom-domain routing does not pro
 assert(agentSessionRoute.includes("runs: runs.map(ownerSiteAgentRun)"), "Owner workspace API exposes raw agent-run telemetry.");
 assert(!agentRetryRoute.includes("failureCode"), "Owner retry API exposes internal failure diagnostics.");
 assert(!agentWorkspace.includes("failureReason") && !agentWorkspace.includes("estimatedCostUsd") && !agentWorkspace.includes("costUsd"), "Owner website workspace exposes internal failure or cost diagnostics.");
-assert(agentWorkspace.includes('run.status !== "failed" || !run.retryableByOwner') && ownerRunView.includes("You do not need to keep retrying"), "Owner failure UI does not gate retries or explain platform-owned failures.");
+assert(agentWorkspace.includes('run.status !== "failed" || !run.retryableByOwner') && ownerRunView.includes("no need to keep retrying"), "Owner failure UI does not gate retries or explain platform-owned failures.");
 for (const failureCode of ["authoring_stalled", "cost_limit_exhausted", "cost_telemetry_unavailable", "browser_verification_unavailable", "source_preparation_failed", "deadline_exhausted", "platform_version_mismatch"]) {
   assert(ownerRunView.includes(failureCode), `Owner failure UI does not explain ${failureCode}.`);
   assert(adminRunTelemetry.includes(failureCode), `Admin run UI does not provide recovery guidance for ${failureCode}.`);
 }
-assert(ownerRunView.includes("retrying the unchanged request will not help"), "Owner stall messaging does not prevent ineffective retries.");
-assert(ownerRunView.includes("Your website was not changed") && !ownerRunView.includes("sandboxImageDigest"), "Owner platform-update copy must be safe and omit internal identifiers.");
+assert(ownerRunView.includes("repeating it unchanged won't help"), "Owner stall messaging does not prevent ineffective retries.");
+assert(ownerRunView.includes("Your live website hasn't changed") && !ownerRunView.includes("sandboxImageDigest"), "Owner platform-update copy must be safe and omit internal identifiers.");
 assert(adminRunPage.includes("<RunTelemetryInspector") && adminRunInspector.includes('label="Recovery"') && adminRunInspector.includes("Metered model usage by request"), "Admin run UI does not expose guardrail recovery or complete metered-model telemetry.");
 
 console.log("Owner workspace verification passed.");

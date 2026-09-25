@@ -36,6 +36,8 @@ export type DomainRecord = {
   lastProviderInvalidAt?: string;
   executionFailureCount: number;
   lastExecutionError?: string;
+  /** When the routing probe first saw a verified hostname stop pointing to Lodesta. */
+  routingFailedSince?: string;
 };
 
 export type RegisterDomainInput = {

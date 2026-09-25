@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/client";
 import { sendTransactionalEmail, type TransactionalEmailResult } from "@/lib/transactional-email";
 import { siteCapabilityRepository, type SiteCapabilityRepository } from "@/packages/site-capabilities";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
+import { platformOperationsRepository, type PlatformOperationsRepository } from "@/packages/platform-operations";
 import type { PlatformSiteRecord, SiteAgentRun } from "@/packages/site-contracts";
 import { ownerNotificationRepository, type OwnerNotification, type OwnerNotificationRepository } from "./repository";
 
@@ -13,6 +14,7 @@ export type OwnerNotificationDependencies = {
   notifications: OwnerNotificationRepository;
   platform: Pick<SitePlatformRepository, "getSite" | "getAgentRun">;
   capabilities: Pick<SiteCapabilityRepository, "getInquiry" | "listInquiryEvents">;
+  domains: Pick<PlatformOperationsRepository, "getDomainById">;
   /** The confirmed sign-in email of an account, or undefined when it has none. */
   accountEmail(userId: string): Promise<string | undefined>;
   send(input: { to: string; subject: string; text: string }): Promise<TransactionalEmailResult>;
@@ -54,6 +56,18 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
         kind,
         subjectId: run.id,
         dedupeKey: `${kind}:${run.id}:${run.executionNumber}`,
+        audience: "owner",
+        test: false
+      });
+    },
+
+    /** Records one notice each time a live domain starts needing attention. */
+    async enqueueDomainAttention(domain: { id: string; siteId: string; attentionRequiredAt?: string }) {
+      return deps.notifications.enqueue({
+        siteId: domain.siteId,
+        kind: "domain_attention",
+        subjectId: domain.id,
+        dedupeKey: `domain_attention:${domain.id}:${domain.attentionRequiredAt ?? "unknown"}`,
         audience: "owner",
         test: false
       });
@@ -137,7 +151,18 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
         ].join("\n")
       };
     }
-    if (notification.kind === "domain_attention") return undefined;
+    if (notification.kind === "domain_attention") {
+      const domain = await deps.domains.getDomainById(notification.subjectId);
+      if (!domain || domain.status !== "attention_required") return undefined;
+      return {
+        subject: `${domain.hostname} isn't pointing to your website`,
+        text: [
+          `${domain.hostname} has stopped pointing to your Lodesta website for more than a day, so visitors may not reach it.`,
+          "This usually means a DNS record changed at your domain provider. Your Lodesta address still works.",
+          `Check the records here: ${workspace}/settings#domain`
+        ].join("\n\n")
+      };
+    }
     const run = await deps.platform.getAgentRun(notification.subjectId);
     if (!run) return undefined;
     const editor = `${workspace}/editor`;
@@ -182,6 +207,7 @@ export const ownerNotificationService = createOwnerNotificationService({
   notifications: ownerNotificationRepository,
   platform: sitePlatformRepository,
   capabilities: siteCapabilityRepository,
+  domains: platformOperationsRepository,
   accountEmail: confirmedAccountEmail,
   send: sendTransactionalEmail,
   appOrigin: configuredAppOriginOrDefault,

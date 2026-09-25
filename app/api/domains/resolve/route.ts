@@ -13,7 +13,8 @@ export async function GET(request: Request) {
   if (!domain) return NextResponse.json({ resolved: false }, { status: 404 });
 
   const site = await sitePlatformRepository.getSite(domain.siteId);
-  if (!site?.publishedVersionId || site.status !== "active") return NextResponse.json({ resolved: false }, { status: 403 });
+  // Offline sites still resolve so visitors see the "temporarily unavailable" page.
+  if (!site?.publishedVersionId || (site.status !== "active" && site.status !== "offline")) return NextResponse.json({ resolved: false }, { status: 403 });
 
   return NextResponse.json({
     resolved: true,

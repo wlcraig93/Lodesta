@@ -3,6 +3,10 @@ import { resolve4, resolve6, resolveCname, resolveTxt } from "node:dns/promises"
 import type { DomainRecord } from "@/packages/platform-operations/contracts";
 
 const providerInvalidWindowMs = 72 * 60 * 60 * 1000;
+/** Confirmed misrouting a live domain must show before it needs the owner's attention. */
+const routingFailureWindowMs = 24 * 60 * 60 * 1000;
+/** How long an owner has to add the DNS records after connecting a domain. */
+const verificationWindowMs = 7 * 24 * 60 * 60 * 1000;
 
 export type CloudflareHostnameObservation = {
   kind: "active" | "pending" | "invalid";
@@ -42,7 +46,7 @@ export function newDomainVerification(input: { siteId: string; hostname: string;
     verificationValue: `lodesta-site-verification=${randomBytes(24).toString("base64url")}`,
     routingName: hostname,
     routingTarget: platformDomainTarget(),
-    expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    expiresAt: new Date(now.getTime() + verificationWindowMs).toISOString(),
     providerInvalidCount: 0,
     executionFailureCount: 0,
     createdAt: now.toISOString(),
@@ -89,6 +93,17 @@ export async function refreshCustomHostnameStatus(input: {
   return cloudflareObservation(response, "refresh");
 }
 
+export async function deleteCustomHostname(providerHostnameId: string) {
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  const zoneId = process.env.CLOUDFLARE_ZONE_ID;
+  if (!token || !zoneId) return;
+  const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/custom_hostnames/${providerHostnameId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok && response.status !== 404) throw new Error(`Cloudflare hostname delete failed with status ${response.status}.`);
+}
+
 export function applyProviderObservation(
   domain: DomainRecord,
   observation: CloudflareHostnameObservation,
@@ -120,7 +135,8 @@ export function applyProviderObservation(
     next.providerInvalidCount = 0;
     next.firstProviderInvalidAt = undefined;
     next.lastProviderInvalidAt = undefined;
-    next.status = "provisioning";
+    // A live hostname stays live while the provider renews or revalidates it.
+    if (next.status !== "active" && next.status !== "attention_required") next.status = "provisioning";
     return next;
   }
 
@@ -133,6 +149,30 @@ export function applyProviderObservation(
     next.providerInvalidCount >= 3 &&
     now.getTime() - Date.parse(next.firstProviderInvalidAt) >= providerInvalidWindowMs
   ) {
+    next.status = "attention_required";
+    next.attentionRequiredAt ??= now.toISOString();
+  }
+  return next;
+}
+
+/**
+ * Records a definitive routing answer. A verified domain that stops pointing
+ * to Lodesta keeps serving; after 24 hours of confirmed misrouting it needs
+ * the owner's attention, and it recovers as soon as routing returns.
+ */
+export function applyRoutingObservation(domain: DomainRecord, routing: boolean, now = new Date()): DomainRecord {
+  const next = { ...domain, routingStatus: routing ? "active" as const : "pending" as const, updatedAt: now.toISOString() };
+  if (routing) {
+    next.routingFailedSince = undefined;
+    if (next.status === "attention_required" && next.ownershipProofStatus === "verified" && next.providerStatus === "active") {
+      next.status = "active";
+      next.attentionRequiredAt = undefined;
+    }
+    return next;
+  }
+  if (next.status !== "active" && next.status !== "attention_required") return next;
+  next.routingFailedSince ??= now.toISOString();
+  if (next.status === "active" && now.getTime() - Date.parse(next.routingFailedSince) >= routingFailureWindowMs) {
     next.status = "attention_required";
     next.attentionRequiredAt ??= now.toISOString();
   }
@@ -165,12 +205,32 @@ export function normalizeCustomHostname(value: string) {
   return hostname;
 }
 
+/** Live domains keep serving while they need attention; DNS decides whether visitors arrive. */
 export function isResolvableCustomDomain(domain: Pick<DomainRecord, "status">) {
-  return domain.status === "active";
+  return domain.status === "active" || domain.status === "attention_required";
 }
 
+export const resolvableDomainStatuses = ["active", "attention_required"] as const;
+
 export function platformDomainTarget() {
-  return (process.env.CLOUDFLARE_FALLBACK_ORIGIN ?? "customers.lodesta.example").toLowerCase().replace(/\.$/, "");
+  const target = process.env.CLOUDFLARE_FALLBACK_ORIGIN?.trim().toLowerCase().replace(/\.$/, "");
+  if (target && !target.endsWith(".example")) return target;
+  // Owners must never be told to point DNS at a placeholder.
+  if (process.env.NODE_ENV === "production") throw new Error("custom_domain_target_unconfigured");
+  return "customers.lodesta.example";
+}
+
+/** Registrar "Host" field for a record: relative to the registered domain, "@" for the apex. */
+export function registrarHostField(recordName: string, hostname: string) {
+  const labels = hostname.split(".");
+  const registered = labels.slice(-2).join(".");
+  if (recordName === registered) return "@";
+  return recordName.endsWith(`.${registered}`) ? recordName.slice(0, -registered.length - 1) : recordName;
+}
+
+/** A bare domain such as example.com, which most registrars cannot point with a CNAME. */
+export function isApexHostname(hostname: string) {
+  return hostname.split(".").length === 2;
 }
 
 async function cloudflareObservation(response: Response, operation: "register" | "refresh") {
@@ -235,9 +295,11 @@ async function hasRoutingRecord(name: string, target: string) {
   }
 }
 
+// Only a definitive "no such record" counts as missing. Server failures and
+// timeouts are inconclusive and throw, so a live domain is never judged on them.
 function isDnsNotFound(error: unknown) {
   const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
-  return ["ENODATA", "ENOTFOUND", "ESERVFAIL", "ENOTIMP"].includes(code);
+  return ["ENODATA", "ENOTFOUND"].includes(code);
 }
 
 function dnsEmpty(error: unknown): string[] {

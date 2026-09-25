@@ -9,7 +9,8 @@ export type DomainResolutionCacheValue =
       resolved: false;
     };
 
-const positiveTtlMs = 300_000;
+// Short enough that removing a domain or taking a site offline reaches every instance within a minute.
+const positiveTtlMs = 60_000;
 const negativeTtlMs = 30_000;
 
 const cache = new Map<

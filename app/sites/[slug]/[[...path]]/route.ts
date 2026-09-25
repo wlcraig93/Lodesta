@@ -19,6 +19,16 @@ export async function GET(
     return site?.status === "offline" ? offlineSiteResponse() : new Response(null, { status: 404 });
   }
   const { site, version, artifact } = context;
+  // Once a custom domain is live, it is the site's only address; the Lodesta
+  // path redirects there so search engines index one copy.
+  if (request.headers.get("x-lodesta-custom-domain-routed") !== "1") {
+    const liveDomain = (await platformOperationsRepository.listDomains(site.id)).find((domain) => domain.status === "active");
+    if (liveDomain) {
+      const target = new URL(`https://${liveDomain.hostname}/${path?.join("/") ?? ""}`);
+      target.search = new URL(request.url).search;
+      return new Response(null, { status: 308, headers: { location: target.href, "cache-control": "public, max-age=300" } });
+    }
+  }
   const policy = context.intent.agentAccessPolicy;
   const requested = path?.join("/") ?? "";
   if (requested === "robots.txt") return siteRobots(request, slug, artifact.artifactHash, version.id, policy);

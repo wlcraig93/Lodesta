@@ -27,6 +27,9 @@ try {
       getInquiry: async (siteId, inquiryId) => ({ id: inquiryId, siteId, contactName: "Dana R.", contactPhone: "(863) 555-0142", contactEmail: "dana@visitor.example" }) as never,
       listInquiryEvents: async (inquiryId) => [{ id: `${inquiryId}_event`, inquiryId, messageText: "Ants in the kitchen." }] as never
     },
+    domains: {
+      getDomainById: async (id) => id === "domain_1" ? { id, siteId: "site_owned", hostname: "www.haynespest.example", status: "attention_required" } as never : null
+    },
     // Only the account's confirmed sign-in email is ever a recipient.
     accountEmail: async (userId) => userId === "user_owner" ? "owner@account.example" : undefined,
     send: async (message) => {
@@ -105,6 +108,14 @@ try {
   assert(runMessages.every((item) => item.to === "owner@account.example"));
   assert.match(runMessages.find((item) => item.subject.includes("answer"))!.text, /Which phone number should customers call\?/);
   assert.match(runMessages.find((item) => item.subject.includes("didn't"))!.text, /Your live website has not changed\./);
+
+  // A live domain that stops pointing to Lodesta is reported once per episode.
+  assert.equal(await service.enqueueDomainAttention({ id: "domain_1", siteId: "site_owned", attentionRequiredAt: "2026-09-25T12:00:00.000Z" }), true);
+  assert.equal(await service.enqueueDomainAttention({ id: "domain_1", siteId: "site_owned", attentionRequiredAt: "2026-09-25T12:00:00.000Z" }), false);
+  const domainSent = sent.length;
+  await service.deliverDue({ workerId: "w", now: at(400) });
+  assert.equal(sent[domainSent]?.subject, "www.haynespest.example isn't pointing to your website");
+  assert.match(sent[domainSent]!.text, /workspace\/haynes-pest\/settings#domain/);
 
   console.log(JSON.stringify({ ok: true, lead: "owner-account-only", dedupe: "pass", retries: "bounded", staleClaims: "recovered", runs: "once-per-outcome" }));
 } finally {

@@ -4,7 +4,10 @@ import { dirname, resolve } from "node:path";
 import {
   applyProviderExecutionFailure,
   applyProviderObservation,
+  applyRoutingObservation,
   inspectDomainDns,
+  isResolvableCustomDomain,
+  resolvableDomainStatuses,
   newDomainVerification,
   refreshCustomHostnameStatus,
   registerCustomHostname
@@ -96,6 +99,8 @@ export interface PlatformOperationsRepository {
   listDomains(siteId?: string): Promise<DomainRecord[]>;
   getDomainById(domainId: string): Promise<DomainRecord | null>;
   getDomainByHostname(hostname: string): Promise<DomainRecord | null>;
+  /** Owner-only; releases the hostname claim immediately. Returns the removed record. */
+  removeDomain(domainId: string, actorId: string): Promise<DomainRecord | null>;
   upsertRedirect(input: UpsertSiteRedirectInput): Promise<SiteRedirectRule>;
   setRedirectStatus(input: { redirectId: string; status: SiteRedirectRule["status"] }): Promise<SiteRedirectRule | null>;
   listRedirects(siteId: string): Promise<SiteRedirectRule[]>;
@@ -314,8 +319,15 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
         result = structuredClone(domain);
         return;
       }
-      const dns = await inspectDomainDns(domain);
-      domain.routingStatus = dns.routing ? "active" : "pending";
+      let dns: Awaited<ReturnType<typeof inspectDomainDns>>;
+      try {
+        dns = await inspectDomainDns(domain);
+      } catch (error) {
+        Object.assign(domain, applyProviderExecutionFailure(domain, error, now));
+        result = structuredClone(domain);
+        return;
+      }
+      Object.assign(domain, applyRoutingObservation(domain, dns.routing, now));
       if (dns.ownershipProof && domain.ownershipProofStatus === "pending") {
         const conflict = store.domains.some((item) =>
           item.id !== domain.id && item.hostname === domain.hostname && item.ownershipProofStatus === "verified" &&
@@ -353,7 +365,14 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
   }
   async listDomains(siteId?: string) { return (await this.read()).domains.filter((item) => !siteId || item.siteId === siteId).sort(byCreatedDesc); }
   async getDomainById(id: string) { return structuredClone((await this.read()).domains.find((item) => item.id === id) ?? null); }
-  async getDomainByHostname(hostname: string) { return structuredClone((await this.read()).domains.find((item) => item.hostname === hostname.toLowerCase() && item.status === "active") ?? null); }
+  async getDomainByHostname(hostname: string) { return structuredClone((await this.read()).domains.find((item) => item.hostname === hostname.toLowerCase() && isResolvableCustomDomain(item)) ?? null); }
+  async removeDomain(domainId: string, actorId: string) {
+    const domain = await this.getDomainById(domainId);
+    const site = domain ? await sitePlatformRepository.getSite(domain.siteId) : undefined;
+    if (!domain || site?.ownerUserId !== actorId) return null;
+    await this.write((store) => { store.domains = store.domains.filter((item) => item.id !== domainId); });
+    return domain;
+  }
 
   async upsertRedirect(input: UpsertSiteRedirectInput) {
     const now = new Date().toISOString();
@@ -780,6 +799,7 @@ type DomainRow = {
   last_provider_invalid_at: string | null;
   execution_failure_count: number;
   last_execution_error: string | null;
+  routing_failed_since: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -945,7 +965,7 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
     } catch (error) {
       return this.updateDomain(applyProviderExecutionFailure(existing, error, now));
     }
-    existing = { ...existing, routingStatus: dns.routing ? "active" : "pending", updatedAt: now.toISOString() };
+    existing = applyRoutingObservation(existing, dns.routing, now);
 
     if (dns.ownershipProof && existing.ownershipProofStatus === "pending") {
       const verified = await maybe<DomainRow>(this.client.rpc("claim_domain_ownership", {
@@ -966,14 +986,17 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
     } catch (error) {
       next = applyProviderExecutionFailure(existing, error, now);
     }
-    if (next.routingStatus !== "active" && next.status === "active") {
-      next = { ...next, status: "attention_required", attentionRequiredAt: next.attentionRequiredAt ?? now.toISOString() };
-    }
     return this.updateDomain(next);
   }
   async listDomains(siteId?: string) { let query = this.client.from("domains").select("*").order("created_at", { ascending: false }); if (siteId) query = query.eq("site_id", siteId); return (await data<DomainRow[]>(query, "List domains")).map(domainFromRow); }
   async getDomainById(id: string) { const row = await maybe<DomainRow>(this.client.from("domains").select("*").eq("id", id).maybeSingle(), "Get domain"); return row ? domainFromRow(row) : null; }
-  async getDomainByHostname(hostname: string) { const row = await maybe<DomainRow>(this.client.from("domains").select("*").eq("hostname", hostname.toLowerCase()).eq("status", "active").maybeSingle(), "Resolve domain"); return row ? domainFromRow(row) : null; }
+  async getDomainByHostname(hostname: string) { const row = await maybe<DomainRow>(this.client.from("domains").select("*").eq("hostname", hostname.toLowerCase()).in("status", [...resolvableDomainStatuses]).maybeSingle(), "Resolve domain"); return row ? domainFromRow(row) : null; }
+  async removeDomain(domainId: string, actorId: string) {
+    const domain = await this.getDomainById(domainId);
+    if (!domain) return null;
+    const removed = await data<boolean>(this.client.rpc("remove_site_domain", { target_domain_id: domainId, actor_id: actorId }), "Remove domain");
+    return removed ? domain : null;
+  }
 
   private async updateDomain(value: DomainRecord) {
     const row = await data<DomainRow>(this.client.from("domains").update(domainToRow(value)).eq("id", value.id).select("*").single(), "Update domain");
@@ -1268,6 +1291,7 @@ function domainFromRow(row: DomainRow): DomainRecord {
     lastProviderInvalidAt: row.last_provider_invalid_at ?? undefined,
     executionFailureCount: row.execution_failure_count,
     lastExecutionError: row.last_execution_error ?? undefined,
+    routingFailedSince: row.routing_failed_since ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -1296,6 +1320,7 @@ function domainToRow(value: DomainRecord) {
     last_provider_invalid_at: value.lastProviderInvalidAt ?? null,
     execution_failure_count: value.executionFailureCount,
     last_execution_error: value.lastExecutionError ?? null,
+    routing_failed_since: value.routingFailedSince ?? null,
     created_at: value.createdAt,
     updated_at: value.updatedAt
   };

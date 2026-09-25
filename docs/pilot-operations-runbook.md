@@ -52,6 +52,8 @@ Goal: prove we can recover the database and published artifacts after data loss.
 
 The drill never writes to the production project.
 
+**What this drill does not prove.** It restores the database and reads artifact files that still exist in R2. It proves recovery from database loss with storage intact, not recovery from lost or deleted artifact storage: R2 objects are write-once but have no independent copy today. Losing the bucket would lose published sites' bytes. Before the external pilot, either enable an independent copy of the artifact bucket and include restoring from it in this drill, or record the accepted risk.
+
 ## Pilot metrics
 
 Weekly, from the database:

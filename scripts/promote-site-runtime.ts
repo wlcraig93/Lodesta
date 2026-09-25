@@ -39,15 +39,17 @@ if (series && retained?.id === series.activePatchId) {
 const sites = await sitePlatformRepository.listSites();
 // A runtime patch reaches every published site at once, so it must first load
 // cleanly on each of them (scripts/verify-runtime-against-live-sites.ts).
-const liveSiteIds = sites.filter((site) => site.publishedVersionId && (site.status === "active" || site.status === "offline")).map((site) => site.id);
-if (liveSiteIds.length) {
+const liveSites = sites.filter((site) => site.publishedVersionId && (site.status === "active" || site.status === "offline"));
+const liveSiteIds = liveSites.map((site) => site.id);
+if (liveSites.length) {
   const evidencePath = process.argv.find((value) => value.startsWith("--live-sites-evidence="))?.slice("--live-sites-evidence=".length);
   if (!evidencePath) throw new Error(`${liveSiteIds.length} site(s) are published; pass --live-sites-evidence=<path> from verify-runtime-against-live-sites.`);
-  const evidence = JSON.parse(await readFile(evidencePath, "utf8")) as { runtimeContentHash?: string; checkedAt?: string; sites?: Array<{ siteId: string; failures: string[] }> };
+  const evidence = JSON.parse(await readFile(evidencePath, "utf8")) as { runtimeContentHash?: string; checkedAt?: string; sites?: Array<{ siteId: string; versionId: string; failures: string[] }> };
   if (evidence.runtimeContentHash !== prepared.patch.contentHash) throw new Error("Live-site evidence was produced for a different runtime build.");
   if (!evidence.checkedAt || Date.now() - Date.parse(evidence.checkedAt) > 24 * 60 * 60_000) throw new Error("Live-site evidence is older than 24 hours; run the check again.");
-  const covered = new Set((evidence.sites ?? []).filter((site) => site.failures.length === 0).map((site) => site.siteId));
-  const missing = liveSiteIds.filter((siteId) => !covered.has(siteId));
+  // Coverage is per published version: a site republished after the check must be checked again.
+  const covered = new Set((evidence.sites ?? []).filter((site) => site.failures.length === 0).map((site) => `${site.siteId}:${site.versionId}`));
+  const missing = liveSites.filter((site) => !covered.has(`${site.id}:${site.publishedVersionId}`)).map((site) => site.id);
   if (missing.length) throw new Error(`Live-site evidence does not show a clean load for: ${missing.join(", ")}.`);
 }
 let retainedVersionsChecked = 0;

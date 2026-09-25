@@ -1466,8 +1466,11 @@ async function inspectMobileCanonicalFunctionalLinks(
     .map((link) => normalizedPublicUrl(link.url))
     .filter((url): url is string => Boolean(url));
   if (!canonicalDestinations.length) return [];
-  const expected = new Set(canonicalDestinations);
-  if (await hasHitTestableCanonicalLink(page, expected)) return [];
+  // Each destination must be reachable on its own; a visible portal link does
+  // not excuse a hidden booking or payment link.
+  const missing = new Set<string>();
+  for (const url of canonicalDestinations) if (!await hasHitTestableCanonicalLink(page, new Set([url]))) missing.add(url);
+  if (!missing.size) return [];
   const toggles = page.locator([
     "[data-lodesta-menu-toggle]",
     "header details > summary",
@@ -1485,14 +1488,14 @@ async function inspectMobileCanonicalFunctionalLinks(
       await toggle.click({ timeout: 1_000 }).catch(() => undefined);
       await page.waitForTimeout(100);
     }
-    const available = await hasHitTestableCanonicalLink(page, expected);
+    for (const url of [...missing]) if (await hasHitTestableCanonicalLink(page, new Set([url]))) missing.delete(url);
     if (!wasOpen) await closeBrowserNavigationTrigger(page, toggle);
     await page.waitForTimeout(75);
-    if (available) return [];
+    if (!missing.size) return [];
   }
   return [finding(
     "functional.canonical_link",
-    `The business's existing customer portal, bill payment and booking links must stay visible and tappable on mobile, at the top of the page or in the open navigation; no usable link exposes ${canonicalDestinations.join(" or ")}.`,
+    `The business's existing customer portal, bill payment and booking links must stay visible and tappable on mobile, at the top of the page or in the open navigation; no usable link exposes ${[...missing].join(" or ")}.`,
     route,
     "link"
   )];

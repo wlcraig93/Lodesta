@@ -53,14 +53,18 @@ export async function DELETE(request: Request) {
   if (!domain) return NextResponse.json({ error: "That domain is already removed." }, { status: 404 });
   const actor = await requireSiteOwner(domain.siteId);
   if (!actor.ok) return actor.response;
+  // Provider cleanup comes first: if it fails, the domain stays listed so the
+  // owner (or an operator) can retry, instead of leaving an orphaned hostname.
+  if (domain.providerHostnameId) {
+    try {
+      await deleteCustomHostname(domain.providerHostnameId);
+    } catch (error) {
+      console.error(JSON.stringify({ event: "custom_hostname_cleanup_failed", domainId: domain.id, message: error instanceof Error ? error.message : String(error) }));
+      return NextResponse.json({ error: "We couldn't remove the domain right now. Try again in a minute." }, { status: 503 });
+    }
+  }
   const removed = await repository.removeDomain(domain.id, actor.actorId);
   if (!removed) return NextResponse.json({ error: "That domain is already removed." }, { status: 404 });
   invalidateDomainResolution(removed.hostname);
-  if (removed.providerHostnameId) {
-    // The hostname no longer resolves to the site; provider cleanup can be retried by an operator.
-    await deleteCustomHostname(removed.providerHostnameId).catch((error) => console.error(JSON.stringify({
-      event: "custom_hostname_cleanup_failed", domainId: removed.id, message: error instanceof Error ? error.message : String(error)
-    })));
-  }
   return NextResponse.json({ ok: true });
 }

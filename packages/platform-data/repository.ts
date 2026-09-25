@@ -363,6 +363,8 @@ export interface SitePlatformRepository {
   listAgentRunAdminPage(input?: SiteAgentRunAdminQuery): Promise<SiteAgentRunAdminPage>;
   listQueuedAgentRuns(limit: number): Promise<SiteAgentRun[]>;
   listStaleRunningAgentRuns(staleBefore: string, limit: number): Promise<SiteAgentRun[]>;
+  /** Runs an owner may need to hear about: finished since `since`, or waiting on an answer. */
+  listAgentRunsForOwnerNotification(since: string, limit: number): Promise<SiteAgentRun[]>;
   saveAgentRunEvents(events: SiteAgentRunEvent[]): Promise<SiteAgentRunEvent[]>;
   getAgentRunEvent(runId: string, eventId: string): Promise<SiteAgentRunEvent | undefined>;
   listAgentRunEvents(runId: string, input?: { afterSequence?: number; limit?: number; order?: "ascending" | "descending" }): Promise<SiteAgentRunEvent[]>;
@@ -1920,6 +1922,11 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
     return Object.values((await this.read()).runs).filter((run) => run.status === "queued")
       .sort((a, b) => a.startedAt.localeCompare(b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRun);
   }
+  async listAgentRunsForOwnerNotification(since: string, limit: number) {
+    return Object.values((await this.read()).runs)
+      .filter((run) => run.status === "needs_input" || ((run.status === "succeeded" || run.status === "failed") && (run.completedAt ?? "") >= since))
+      .sort((a, b) => (b.completedAt ?? b.startedAt).localeCompare(a.completedAt ?? a.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRun);
+  }
   async listStaleRunningAgentRuns(staleBefore: string, limit: number) {
     return Object.values((await this.read()).runs).filter((run) => run.status === "running" && (run.heartbeatAt ?? run.startedAt) < staleBefore)
       .sort((a, b) => (a.heartbeatAt ?? a.startedAt).localeCompare(b.heartbeatAt ?? b.startedAt)).slice(0, limit).map((run) => clone(run) as SiteAgentRun);
@@ -3279,6 +3286,15 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
     const rows = await requireData<Array<{ run: unknown }>>(
       this.client.from("site_agent_runs").select("run").eq("status", "queued").order("started_at").limit(limit),
       "List queued site agent runs"
+    );
+    return rows.map((row) => siteAgentRunSchema.parse(row.run));
+  }
+  async listAgentRunsForOwnerNotification(since: string, limit: number) {
+    const rows = await requireData<Array<{ run: unknown }>>(
+      this.client.from("site_agent_runs").select("run")
+        .or(`status.eq.needs_input,and(status.in.(succeeded,failed),completed_at.gte.${since})`)
+        .order("started_at", { ascending: false }).limit(limit),
+      "List site agent runs for owner notification"
     );
     return rows.map((row) => siteAgentRunSchema.parse(row.run));
   }

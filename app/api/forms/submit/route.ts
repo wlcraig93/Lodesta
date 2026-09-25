@@ -9,6 +9,7 @@ import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
 import { validateFormSubmission } from "@/lib/form-validation";
 import { siteCapabilityRepository } from "@/packages/site-capabilities";
 import { sitePlatformRepository } from "@/packages/platform-data";
+import { ownerNotificationService } from "@/packages/owner-notifications";
 
 export async function POST(request: Request) {
   const limit = rateLimit(request, {
@@ -105,6 +106,15 @@ export async function POST(request: Request) {
     ipHash: ipHashForRequest(request, { siteId, at: submittedAt }),
     analyticsEvent
   });
+
+  if (!inquiryResult.duplicate) {
+    await ownerNotificationService.enqueueLead({
+      siteId,
+      inquiryId: inquiryResult.inquiry.id,
+      eventId: inquiryResult.event.id,
+      submissionKind: serving.submissionKind
+    });
+  }
 
   return applyRateLimitHeaders(NextResponse.json({ accepted: true, status: "received", ...(serving.submissionKind ? { submissionKind: serving.submissionKind } : {}) }), limit);
 }

@@ -4,6 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { siteAuthoringWorkflow } from "../packages/site-platform/workflow";
 import { sitePlatformRepository } from "../packages/platform-data";
 import { processNextWebsiteAssessmentJob } from "../packages/website-assessment/jobs";
+import { ownerNotificationService } from "../packages/owner-notifications";
 
 const localRecoveryStaleAfterMs = 5 * 60_000;
 const workerId = `site-authoring-worker-${process.pid}-${Date.now().toString(36)}`;
@@ -11,6 +12,21 @@ const workerId = `site-authoring-worker-${process.pid}-${Date.now().toString(36)
 let shuttingDown = false;
 process.once("SIGTERM", () => { shuttingDown = true; });
 process.once("SIGINT", () => { shuttingDown = true; });
+
+const notificationTickMs = 15_000;
+
+/** Records owner notifications for run outcomes and delivers everything due. Never fatal. */
+async function notifyOwners(since: string) {
+  try {
+    for (const run of await sitePlatformRepository.listAgentRunsForOwnerNotification(since, 100)) {
+      await ownerNotificationService.enqueueRun(run);
+    }
+    const delivered = await ownerNotificationService.deliverDue({ workerId });
+    if (delivered.length) console.log(JSON.stringify({ event: "owner_notifications_processed", delivered }));
+  } catch (error) {
+    console.error(JSON.stringify({ event: "owner_notification_tick_failure", message: compactErrorMessage(error) }));
+  }
+}
 
 async function main() {
   const command = process.argv[2] ?? "demo";
@@ -61,6 +77,9 @@ async function main() {
     const configuredInFlight = Number.parseInt(process.env.LODESTA_WORKER_MAX_IN_FLIGHT?.trim() ?? "", 10);
     const maxInFlight = Math.min(limit, Number.isInteger(configuredInFlight) && configuredInFlight > 0 ? configuredInFlight : 4);
     const inFlight = new Set<Promise<void>>();
+    // Runs that ended shortly before this worker started are still reported once.
+    const notificationsSince = new Date(Date.now() - 10 * 60_000).toISOString();
+    let nextNotificationTickAt = 0;
     let fatalError: unknown;
     let backoffMs = idleMs;
     const startClaimedRun = (run: Awaited<ReturnType<typeof sitePlatformRepository.claimNextAgentRun>>) => {
@@ -128,6 +147,10 @@ async function main() {
           }
         }
         if (shuttingDown || fatalError !== undefined) break;
+        if (Date.now() >= nextNotificationTickAt) {
+          nextNotificationTickAt = Date.now() + notificationTickMs;
+          await notifyOwners(notificationsSince);
+        }
         await sleep(inFlight.size ? idleMs : backoffMs);
         backoffMs = inFlight.size ? idleMs : Math.min(2_000, backoffMs * 2);
       }

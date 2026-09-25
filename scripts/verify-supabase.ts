@@ -74,7 +74,8 @@ assert.deepEqual(
     "202609070001_privacy_minimal_analytics.sql",
     "202609100001_atomic_prepared_source_input_finalization.sql",
     "202609210001_retire_cloudflare_sandbox_control.sql",
-    "202609220001_gpt6_luna_site_authoring.sql"
+    "202609220001_gpt6_luna_site_authoring.sql",
+    "202609250001_owner_notifications.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );
@@ -838,6 +839,16 @@ if (process.env.LODESTA_VERIFY_LIVE_DATABASE === "true") {
   const { error: anonWrite } = await browser.from("sites").insert({ id: "forbidden" });
   assert(anonWrite, "The anon role unexpectedly mutated an application table.");
 }
+
+const ownerNotifications = await readFile(`${migrationDirectory}/202609250001_owner_notifications.sql`, "utf8");
+assert(
+  ownerNotifications.includes("dedupe_key text not null unique")
+    && ownerNotifications.includes("for update skip locked")
+    && ownerNotifications.includes("alter table public.owner_notifications enable row level security")
+    && ownerNotifications.includes("revoke all on table public.owner_notifications from public, anon, authenticated")
+    && !/^\s*(?:recipient|email|to_address)\w*\s+text/im.test(ownerNotifications),
+  "Owner notifications must be server-only, deduplicated, and never store a recipient address."
+);
 
 console.log(JSON.stringify({
   ok: true,

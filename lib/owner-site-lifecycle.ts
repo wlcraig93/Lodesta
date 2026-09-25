@@ -10,6 +10,7 @@ export type OwnerSiteLifecycleState =
   | "needs_attention"
   | "ready_to_publish"
   | "live"
+  | "offline"
   | "update_in_progress";
 
 export type OwnerSiteLifecycleTone = "neutral" | "attention" | "success" | "info";
@@ -35,7 +36,7 @@ export type OwnerSiteAttention = {
 
 export function deriveOwnerSiteLifecycle(input: {
   slug: string;
-  site: Pick<PlatformSiteRecord, "publishedVersionId">;
+  site: Pick<PlatformSiteRecord, "publishedVersionId"> & Partial<Pick<PlatformSiteRecord, "status">>;
   versions: Array<Pick<SiteVersion, "id" | "number" | "status">>;
   runs: Array<Pick<SiteAgentRun, "kind" | "status" | "stage" | "inputQuestion" | "retryableByOwner">>;
   candidateIntegrity?: Pick<SiteCandidateIntegrity, "status" | "issues">;
@@ -100,6 +101,11 @@ export function deriveOwnerSiteLifecycle(input: {
       "The current preview has a technical issue that Lodesta needs to rebuild.",
       `${base}/editor`, "Review website");
   }
+  if (input.site.status === "offline") {
+    return lifecycle("offline", "attention", "Offline",
+      "Your website is offline. Visitors see a temporarily unavailable page.",
+      `${base}/settings#visibility`, "Put back online");
+  }
   if (input.site.publishedVersionId || published) {
     return lifecycle("live", "success", "Live",
       published?.number ? `Published version ${published.number} is current.` : "The published website is current.",
@@ -127,6 +133,7 @@ function lifecycle(
       needs_attention: "Your website needs attention",
       ready_to_publish: "Your website update is ready",
       live: "Your website is live and current",
+      offline: "Your website is offline",
       update_in_progress: "Your website update is in progress"
     }[state],
     detail,

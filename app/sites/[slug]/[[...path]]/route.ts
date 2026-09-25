@@ -14,7 +14,10 @@ export async function GET(
 ) {
   const { slug, path } = await params;
   const context = await loadPublishedSiteContext(slug);
-  if (!context) return new Response(null, { status: 404 });
+  if (!context) {
+    const site = await sitePlatformRepository.getSiteBySlug(slug);
+    return site?.status === "offline" ? offlineSiteResponse() : new Response(null, { status: 404 });
+  }
   const { site, version, artifact } = context;
   const policy = context.intent.agentAccessPolicy;
   const requested = path?.join("/") ?? "";
@@ -127,4 +130,20 @@ function siteHeaders(contentType: string, artifactHash: string, versionId: strin
     headers.set("content-security-policy", generatedSiteContentSecurityPolicy("self"));
   }
   return headers;
+}
+
+/** An owner took the site offline: say so plainly and keep it out of search while it is down. */
+function offlineSiteResponse() {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Temporarily unavailable</title></head><body><main><h1>This website is temporarily unavailable.</h1><p>Please check back soon.</p></main></body></html>`;
+  return new Response(html, {
+    status: 503,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "retry-after": "3600",
+      "x-robots-tag": "noindex",
+      "content-security-policy": generatedSiteContentSecurityPolicy("none"),
+      "x-content-type-options": "nosniff"
+    }
+  });
 }

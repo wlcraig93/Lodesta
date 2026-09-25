@@ -787,7 +787,8 @@ export const platformSiteRecordSchema = z.object({
   normalizedSource: publicUrl.optional(),
   businessId: identifier,
   slug: z.string().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
-  status: z.enum(["draft", "active", "paused"]),
+  // offline: published, taken down by its owner; publishedVersionId is kept for going back online.
+  status: z.enum(["draft", "active", "offline", "paused"]),
   reportingTimezone: z.string().min(1).max(100).default("UTC"),
   publishedVersionId: identifier.optional(),
   currentWorkspaceRevisionId: identifier.optional(),

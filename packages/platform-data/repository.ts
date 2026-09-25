@@ -298,6 +298,8 @@ export interface SitePlatformRepository {
   listSiteVersionsBySiteIds(siteIds: string[]): Promise<SiteVersion[]>;
   markUnpublishedVersionsStale(siteId: string): Promise<void>;
   promoteSiteVersion(versionId: string, actorId: string): Promise<void>;
+  /** Takes a published site offline or back online without a new build. Owner only. */
+  setSiteOnline(siteId: string, actorId: string, online: boolean): Promise<void>;
   saveRuntimePatch(patch: TrustedRuntimePatch): Promise<void>;
   getRuntimePatch(id: string): Promise<TrustedRuntimePatch | undefined>;
   getRuntimePatchByHash(hash: string): Promise<TrustedRuntimePatch | undefined>;
@@ -1355,6 +1357,21 @@ export class LocalSitePlatformRepository implements SitePlatformRepository {
         if (version.siteId !== siteId || version.status !== "candidate") continue;
         version.status = "stale";
         version.staleReason = "owner_authority_changed";
+      }
+    });
+  }
+  setSiteOnline(siteId: string, actorId: string, online: boolean) {
+    return this.write((store) => {
+      const site = store.sites[siteId];
+      if (!site || site.ownerUserId !== actorId) throw new Error("site_owner_required");
+      if (!site.publishedVersionId || (site.status !== "active" && site.status !== "offline")) throw new Error("site_not_published");
+      if (online && site.status === "offline") {
+        if (store.versions[site.publishedVersionId]?.status !== "published") throw new Error("published_version_unavailable");
+        site.status = "active";
+        site.updatedAt = new Date().toISOString();
+      } else if (!online && site.status === "active") {
+        site.status = "offline";
+        site.updatedAt = new Date().toISOString();
       }
     });
   }
@@ -2913,6 +2930,9 @@ export class SupabaseSitePlatformRepository implements SitePlatformRepository {
         "Mark site version stale"
       );
     }
+  }
+  async setSiteOnline(siteId: string, actorId: string, online: boolean) {
+    await requireData(this.client.rpc("set_site_online", { target_site_id: siteId, actor_id: actorId, target_online: online }), "Set site online state");
   }
   async promoteSiteVersion(versionId: string, actorId: string) {
     await requireData(this.client.rpc("promote_site_version", { target_version_id: versionId, actor_id: actorId }), "Promote site version");

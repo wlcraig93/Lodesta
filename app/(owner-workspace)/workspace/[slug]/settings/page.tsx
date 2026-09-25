@@ -3,6 +3,7 @@ import { DomainConnectForm } from "@/components/DomainConnectForm";
 import { DomainRefreshButton } from "@/components/DomainRefreshButton";
 import { AnalyticsTimezoneForm } from "@/components/AnalyticsTimezoneForm";
 import { RedirectRulesPanel } from "@/components/RedirectRulesPanel";
+import { SiteOnlineToggle } from "@/components/SiteOnlineToggle";
 import { WorkspacePageHeader, WorkspaceStatus } from "@/components/OwnerWorkspaceUI";
 import { humanize } from "@/lib/product-format";
 import { requireOwnerWorkspace } from "@/lib/owner-workspace";
@@ -23,6 +24,13 @@ export default async function WorkspaceSettingsPage({ params }: { params: Promis
   return (
     <main className="workspace-page workspace-settings-page">
       <WorkspacePageHeader eyebrow="Settings" title="Site settings" description="Domains, redirects, and account access for this website." />
+      {context.site.publishedVersionId && (context.site.status === "active" || context.site.status === "offline") ? (
+        <section className="workspace-settings-section" id="visibility">
+          <div className="workspace-settings-intro"><span>Visibility</span><h2>{context.site.status === "offline" ? "Your site is offline" : "Your site is live"}</h2><p>{context.site.status === "offline" ? "Visitors see a “temporarily unavailable” page. Put the same version back online whenever you’re ready." : "Take the site down temporarily without deleting anything. It can take a few minutes for every visitor to see the change."}</p></div>
+          <div className="workspace-settings-content is-single"><section className="workspace-panel"><div className="workspace-panel-heading"><div><span>Status</span><h3>{context.site.status === "offline" ? "Offline" : "Live"}</h3></div><WorkspaceStatus tone={context.site.status === "offline" ? "attention" : "success"}>{context.site.status === "offline" ? "Offline" : "Live"}</WorkspaceStatus></div><SiteOnlineToggle siteId={context.site.id} online={context.site.status === "active"} /></section></div>
+        </section>
+      ) : null}
+
       <section className="workspace-settings-section" id="domain">
         <div className="workspace-settings-intro"><span>Domain</span><h2>Connect the address customers know</h2><p>Prove control with DNS, then point the hostname to Lodesta. Your Lodesta URL stays available throughout setup.</p></div>
         <div className="workspace-settings-content">

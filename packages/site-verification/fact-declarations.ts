@@ -48,6 +48,8 @@ type VisibleRoute = {
   hasBusinessNameMarker: boolean;
   businessNameMarkerTexts: string[];
   attributeTexts: string[];
+  /** Text as a browser lays it out: inline elements joined, block elements separated. */
+  renderedText: string;
 };
 
 export class FactBindingValidator {
@@ -77,6 +79,7 @@ export class FactBindingValidator {
       findings.push(...internalAuthoringArtifactFindings(route));
       findings.push(...bodyMarkerFindings(route, input.buildInput, provisionalGoogleRatings, legalSourceText, firstParty));
       findings.push(...attributeContactFindings(route, input.buildInput, firstParty));
+      findings.push(...renderedPhoneFindings(route, input.buildInput, firstParty));
       findings.push(...locationWordFindings(route, firstParty));
       findings.push(...bodySensitiveFindings(route, input.buildInput, legalSourceText));
       findings.push(...metadataFindings(route, "title", route.title, input.buildInput, provisionalGoogleRatings));
@@ -129,7 +132,8 @@ function visibleRoute(
     bindingIndex: 0,
     hasBusinessNameMarker: false,
     businessNameMarkerTexts: [] as string[],
-    attributeTexts: [] as string[]
+    attributeTexts: [] as string[],
+    renderedText: ""
   };
 
   const append = (value: string) => {
@@ -143,10 +147,13 @@ function visibleRoute(
     for (const node of nodes) {
       if (node.type === "text") {
         append(node.data);
+        state.renderedText += node.data;
         continue;
       }
       if (node.type !== "tag") continue;
       if (["script", "style", "noscript", "svg"].includes(node.name)) continue;
+      const inline = inlineTextElements.has(node.name);
+      if (!inline) state.renderedText += "\n";
       for (const name of ["alt", "title", "aria-label"]) {
         const value = node.attribs[name]?.trim();
         if (value) state.attributeTexts.push(value);
@@ -227,7 +234,8 @@ function visibleRoute(
     bindings: state.bindings,
     hasBusinessNameMarker: state.hasBusinessNameMarker,
     businessNameMarkerTexts: state.businessNameMarkerTexts,
-    attributeTexts: state.attributeTexts
+    attributeTexts: state.attributeTexts,
+    renderedText: state.renderedText
   };
 }
 
@@ -359,6 +367,26 @@ function attributeContactFindings(route: VisibleRoute, buildInput: SitePublicBui
 }
 
 const contactMarkerPattern = /@|\d{3}\D*\d{4}$/;
+
+const inlineTextElements = new Set(["a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "dfn", "em", "i", "kbd", "label", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var", "wbr"]);
+
+/**
+ * Digits split across inline elements render as one number but reach the
+ * body scan with spaces between them. Phones found only in the rendered text
+ * must still be ones the business uses.
+ */
+function renderedPhoneFindings(route: VisibleRoute, buildInput: SitePublicBuildInput, firstParty: FirstPartyMarkerSupport) {
+  const bodyPhones = new Set(factualMarkers(route.bodyText).map((marker) => marker.text.replace(/\D/g, "").slice(-10)).filter((digits) => digits.length === 10));
+  return factualMarkers(route.renderedText)
+    .filter((marker) => /\d{3}\D*\d{4}$/.test(marker.text) && !marker.text.includes("@"))
+    .filter((marker) => !bodyPhones.has(marker.text.replace(/\D/g, "").slice(-10)))
+    .filter((marker) => !naturallySupportedFactualMarker(marker.text, buildInput) && !firstParty.contact(marker.text))
+    .map((marker) => finding(
+      "fact.undeclared_marker",
+      `Phone number ${JSON.stringify(marker.text)} is split across page elements and is not a phone the business uses.`,
+      route.path
+    ));
+}
 
 function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildInput, legalSourceText?: string) {
   return scanSensitiveClaimText(route.bodyText).flatMap((match) => {

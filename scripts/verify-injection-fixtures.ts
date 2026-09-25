@@ -123,6 +123,15 @@ const fixtures: Fixture[] = [
   }
 ];
 
+// Counterexamples found in review: digits split mid-group across inline
+// elements, which render as one number.
+fixtures.push({
+  id: "S13", attack: "phone digits split mid-group across inline elements",
+  hostile: { body: `<p>Call 5<span>12</span>-555-0<b>199</b> now</p>` },
+  clean: { body: `<p>Call <span>(512)</span> <span>555-0142</span> now</p>` },
+  blockedBy: ["fact.undeclared_marker"]
+});
+
 const results: Record<string, string> = {};
 for (const fixture of fixtures) {
   const hostile = prepare(fixture.hostile.body, fixture.hostile);
@@ -135,5 +144,20 @@ for (const fixture of fixtures) {
   }
   assert.deepEqual(clean.blockers, [], `${fixture.id} clean twin was blocked: ${clean.blockers.join(", ")}`);
   results[fixture.id] = fixture.blockedBy ? "blocked" : "neutralized";
+}
+// A phone number carried by a CSS custom property and shown through var().
+{
+  const css = (sharedCss: string) => prepareSiteArtifact({
+    authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+      kind: "agent-authored-artifact", compilerManifest: expectedSiteSandboxManifest, siteName: input.business.name, sharedCss,
+      routes: [{ path: "/", title: input.business.name, description: "Collision repair in Austin.", bodyHtml: shell(`<p class="phone">Call</p>`) }]
+    })),
+    buildInput: input,
+    runtimeSeriesId: "site-runtime-v4"
+  }).findings.map(withReleaseSeverity).filter(isTechnicalReleaseBlocker).map((finding) => finding.id);
+  assert(css(`.phone { --p: "512-555-0199"; } .phone::after { content: var(--p); }`).includes("fact.css_contact_marker"), "S14: a phone in a CSS custom property passed.");
+  assert(css(`.phone { --p: "5125" "550199"; } .phone::after { content: var(--p); }`).includes("fact.css_contact_marker"), "S14: a phone split across CSS strings passed.");
+  assert.deepEqual(css(`.phone { --accent: #1e5b8a; --label: "Call us"; } .phone::after { content: var(--label); }`), [], "S14 clean twin was blocked.");
+  results.S14 = "blocked";
 }
 console.log(JSON.stringify({ ok: true, fixtures: results }));

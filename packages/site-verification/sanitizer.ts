@@ -126,8 +126,9 @@ export function sanitizeAgentCss(css: string, eligibleAssets: AssetRevisionRef[]
       declaration.remove();
       return;
     }
-    // Generated content escapes the page's fact checks, so it cannot carry contact details.
-    if (decodeCssEscapes(declaration.prop).toLowerCase() === "content" && cssContactMarker(decodeCssEscapes(declaration.value))) {
+    // CSS text (generated content, or a custom property it reads through var())
+    // escapes the page's fact checks, so no CSS string may carry contact details.
+    if (cssContactMarker(cssStringText(declaration.value))) {
       findings.push(finding("fact.css_contact_marker", "claim", "CSS generated content cannot contain a phone number or email address; put contact details in the page."));
       declaration.remove();
       return;
@@ -510,6 +511,15 @@ function hrefDisposition(value: string, input: SanitizeArtifactInput): "safe" | 
   } catch {
     return "unsafe";
   }
+}
+
+/** Every quoted string in a declaration value, decoded and joined as it would render. */
+function cssStringText(value: string) {
+  const strings: string[] = [];
+  valueParser(value).walk((node) => {
+    if (node.type === "string") strings.push(decodeCssEscapes(node.value));
+  });
+  return strings.join("");
 }
 
 function cssContactMarker(value: string) {

@@ -198,6 +198,7 @@ import {
 } from "./source-photo-curation";
 import { canonicalSourceLogoAssetId, canonicalSourceLogoRevisionId, materializeCanonicalSourceLogo, materializeSourceLogo } from "./source-logo-materialization";
 import { artifactRouteChanges } from "./route-changes";
+import { supersededContactValues } from "./superseded-contacts";
 
 export { siteAuthoringPlatformIdentity, siteToolchainIdentity };
 
@@ -3202,26 +3203,25 @@ export class SiteAuthoringWorkflow {
     };
   }
 
-  /** Phones and emails the owner replaced since the version this run edits. */
+  /**
+   * Phones and emails the site has used in any earlier build input that the
+   * current input no longer has: the owner replaced them, so they stay
+   * unsupported on every later edit, not just the one right after the change.
+   */
   private async supersededContacts(run: SiteAgentRun, buildInput: SitePublicBuildInput) {
     if (run.kind === "initial_build") return undefined;
-    const parentRevisionId = run.exactParentRevisionId ?? (await this.repository.getSite(run.siteId))?.currentWorkspaceRevisionId;
+    const site = await this.repository.getSite(run.siteId);
+    const parentRevisionId = run.exactParentRevisionId ?? site?.currentWorkspaceRevisionId;
     const parentRevision = parentRevisionId ? await this.repository.getWorkspaceRevision(parentRevisionId) : undefined;
-    if (!parentRevision || parentRevision.publicBuildInputId === buildInput.id) return undefined;
-    const parentInput = await this.repository.getPublicBuildInput(parentRevision.publicBuildInputId);
-    if (!parentInput) return undefined;
-    const contacts = (input: SitePublicBuildInput) => ({
-      phones: new Set([input.business.contacts.phone, ...input.publicFacts.filter((fact) => fact.kind === "phone").map((fact) => String(fact.value))]
-        .filter((value): value is string => Boolean(value)).map((value) => value.replace(/\D/g, "").slice(-10))),
-      emails: new Set([input.business.contacts.email, ...input.publicFacts.filter((fact) => fact.kind === "email").map((fact) => String(fact.value))]
-        .filter((value): value is string => Boolean(value)).map((value) => value.trim().toLowerCase()))
-    });
-    const before = contacts(parentInput);
-    const after = contacts(buildInput);
-    return {
-      phones: [...before.phones].filter((phone) => !after.phones.has(phone)),
-      emails: [...before.emails].filter((email) => !after.emails.has(email))
-    };
+    const earlierInputIds = new Set([
+      ...(await this.repository.listSiteVersions(run.siteId)).map((version) => version.publicBuildInputId),
+      ...(parentRevision ? [parentRevision.publicBuildInputId] : [])
+    ]);
+    earlierInputIds.delete(buildInput.id);
+    const earlierInputs = (await Promise.all([...earlierInputIds].map((id) => this.repository.getPublicBuildInput(id))))
+      .filter((input): input is SitePublicBuildInput => Boolean(input));
+    if (!earlierInputs.length) return undefined;
+    return supersededContactValues(buildInput, earlierInputs);
   }
 
   /** Pages this candidate changed relative to the revision it was built from. */

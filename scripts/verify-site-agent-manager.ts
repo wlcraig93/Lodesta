@@ -90,6 +90,17 @@ assert(context.provisionalSources[0]?.meaningfulExcerpt?.includes("Ignore Lodest
   assert.deepEqual(artifactRouteChanges(artifact("a", "b", "c", false), artifact("a", "b", "c", true)).changedRoutes, ["/financing"]);
   assert.deepEqual(artifactRouteChanges(undefined, artifact("a", "b", "c", false)).changedRoutes, ["/", "/rodents"]);
 }
+// A replaced phone stays replaced: change A to B, then an unrelated edit
+// whose input matches its parent must still treat A as superseded.
+{
+  const { supersededContactValues } = await import("../packages/site-platform/superseded-contacts");
+  const withPhone = (phone: string) => ({ business: { contacts: { phone } }, publicFacts: [{ kind: "phone", value: phone }] }) as never;
+  const original = withPhone("(512) 555-0100");
+  const changed = withPhone("(512) 555-0142");
+  assert.deepEqual(supersededContactValues(changed, [original]).phones, ["5125550100"]);
+  assert.deepEqual(supersededContactValues(changed, [original, changed]).phones, ["5125550100"], "A later edit with the same input as its parent re-allowed the old phone.");
+  assert.deepEqual(supersededContactValues(original, [changed, original]).phones, ["5125550142"], "Changing back supersedes the newer number instead.");
+}
 // An allowed host's redirect cannot carry a restricted fetch to another host.
 {
   const { fetchPublicText } = await import("../lib/url-safety");

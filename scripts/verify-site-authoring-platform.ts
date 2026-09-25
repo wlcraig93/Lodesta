@@ -941,6 +941,22 @@ for (const html of [
     && ["fact.sdk_value_mismatch", "fact.sdk_fact_missing", "fact.undeclared_marker"].includes(finding.id)));
 }
 
+for (const html of [
+  "<p>Call 999-555-<span>0199</span> today.</p>",
+  "<p>Call (999)555-0199 today.</p>",
+  "<p>Call 9995550199 today.</p>",
+  "<p>Call 999\u2011555\u20110199 today.</p>",
+  '<p><img src="x" alt="Call 999-555-0199"></p>',
+  '<p><a href="#" aria-label="Email invented@northstarcollision.com">Email</a></p>'
+]) {
+  const result = new FactBindingValidator().validate({ buildInput: input, routes: [{ path: "/", html }] });
+  assert(result.findings.some((finding) => finding.id === "fact.undeclared_marker" && finding.severity === "error"), `Contact variant passed the fact gate: ${html}`);
+}
+for (const html of ["<p>License EC 28122, serving 78613 and 78641 since 2004.</p>", "<p>Order 12345678901234 ships soon.</p>"]) {
+  const result = new FactBindingValidator().validate({ buildInput: input, routes: [{ path: "/", html }] });
+  assert(!result.findings.some((finding) => finding.id === "fact.undeclared_marker"), `Non-phone digits were read as a phone: ${html}`);
+}
+
 const sensitiveName = "#1 Coby's Tentless Termite and Pest Control";
 const sensitiveNameInput = sitePublicBuildInputSchema.parse({
   ...input,
@@ -1611,6 +1627,24 @@ assert.equal(errors(formLedMain).length, 0, JSON.stringify(errors(formLedMain)))
 assert.equal(sanitizeAgentCss(`.hero{background-image:url("asset://${asset.assetId}")}`, [asset]).findings.length, 0);
 assert(sanitizeAgentCss(`.hero{background-image:u\\72l("https://evil.example/x")}`, [asset]).findings.some((finding) => finding.severity === "error"));
 assert(sanitizeAgentCss(`.hero{background-image:url("asset://unknown")}`, [asset]).findings.some((finding) => finding.severity === "error"));
+for (const href of [" https://evil.example/", "\thttps://evil.example/contact", "//evil.example/", "/\\evil.example/", "https://user@evil.example/"]) {
+  const result = sanitizeAgentHtml({
+    route: "/",
+    bodyHtml: `<a href="${href}">Book</a>`,
+    declaredRoutes: new Set(["/", "/contact"]),
+    assets: [],
+    allowedFormIds: new Set(),
+    allowedExternalHrefs: new Set(["https://evil.example/"]),
+    allowedPhoneNumbers: new Set(),
+    allowedEmailAddresses: new Set()
+  });
+  assert(result.findings.some((finding) => finding.id === "link.unsafe"), `Ambiguous href ${JSON.stringify(href)} passed the sanitizer.`);
+  assert(result.html.includes('href="#"'), `Ambiguous href ${JSON.stringify(href)} survived into public HTML.`);
+}
+for (const css of [`.cta::after{content:"Call (512) 555-0199"}`, `.cta::after{content:"512\\2011 555\\2011 0199"}`, `.cta::after{content:"help@evil.example"}`]) {
+  assert(sanitizeAgentCss(css, []).findings.some((finding) => finding.id === "fact.css_contact_marker"), `CSS generated contact text passed: ${css}`);
+}
+assert.equal(sanitizeAgentCss(`.steps li::before{content:attr(value) ". "} .rule::after{content:"\\2014"}`, []).findings.length, 0);
 const prioritizedAsset = sanitizeAgentHtml({
   route: "/",
   bodyHtml: `<img src="asset://${asset.assetId}" alt="Workshop exterior" loading="eager" fetchpriority="high">`,

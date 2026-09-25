@@ -47,6 +47,7 @@ type VisibleRoute = {
   bindings: FactBinding[];
   hasBusinessNameMarker: boolean;
   businessNameMarkerTexts: string[];
+  attributeTexts: string[];
 };
 
 export class FactBindingValidator {
@@ -75,6 +76,7 @@ export class FactBindingValidator {
       const legalSourceText = legalSourceTextByPath.get(normalizedSourcePagePath(route.path));
       findings.push(...internalAuthoringArtifactFindings(route));
       findings.push(...bodyMarkerFindings(route, input.buildInput, provisionalGoogleRatings, legalSourceText, firstParty));
+      findings.push(...attributeContactFindings(route, input.buildInput, firstParty));
       findings.push(...locationWordFindings(route, firstParty));
       findings.push(...bodySensitiveFindings(route, input.buildInput, legalSourceText));
       findings.push(...metadataFindings(route, "title", route.title, input.buildInput, provisionalGoogleRatings));
@@ -126,7 +128,8 @@ function visibleRoute(
     bindings: [] as FactBinding[],
     bindingIndex: 0,
     hasBusinessNameMarker: false,
-    businessNameMarkerTexts: [] as string[]
+    businessNameMarkerTexts: [] as string[],
+    attributeTexts: [] as string[]
   };
 
   const append = (value: string) => {
@@ -144,6 +147,10 @@ function visibleRoute(
       }
       if (node.type !== "tag") continue;
       if (["script", "style", "noscript", "svg"].includes(node.name)) continue;
+      for (const name of ["alt", "title", "aria-label"]) {
+        const value = node.attribs[name]?.trim();
+        if (value) state.attributeTexts.push(value);
+      }
       const isBusinessName = node.attribs["data-lodesta-business-name"] !== undefined;
       if (isBusinessName) state.hasBusinessNameMarker = true;
       const start = state.text.length;
@@ -219,7 +226,8 @@ function visibleRoute(
     sourceQuotationSpans: state.sourceQuotationSpans,
     bindings: state.bindings,
     hasBusinessNameMarker: state.hasBusinessNameMarker,
-    businessNameMarkerTexts: state.businessNameMarkerTexts
+    businessNameMarkerTexts: state.businessNameMarkerTexts,
+    attributeTexts: state.attributeTexts
   };
 }
 
@@ -334,6 +342,21 @@ function bodyMarkerFindings(
     )];
   });
 }
+
+// Alternative text, titles and accessible names are read aloud and shown as
+// tooltips, so a phone or email there must be one the business uses.
+function attributeContactFindings(route: VisibleRoute, buildInput: SitePublicBuildInput, firstParty: FirstPartyMarkerSupport) {
+  return route.attributeTexts.flatMap((text) => factualMarkers(text)
+    .filter((marker) => contactMarkerPattern.test(marker.text))
+    .filter((marker) => !naturallySupportedFactualMarker(marker.text, buildInput) && !firstParty.contact(marker.text))
+    .map((marker) => finding(
+      "fact.undeclared_marker",
+      `Contact marker ${JSON.stringify(marker.text)} in an alt, title or aria-label attribute is not a phone or email the business uses.`,
+      route.path
+    )));
+}
+
+const contactMarkerPattern = /@|\d{3}\D*\d{4}$/;
 
 function bodySensitiveFindings(route: VisibleRoute, buildInput: SitePublicBuildInput, legalSourceText?: string) {
   return scanSensitiveClaimText(route.bodyText).flatMap((match) => {
@@ -762,9 +785,11 @@ function factualMarkers(text: string) {
   // Availability, including 24/7, is checked once by the sensitive-claim
   // scanner against canonical evidence, in both body text and metadata.
   const markers: Array<{ text: string; start: number; end: number }> = [];
+  // One-for-one replacement keeps offsets aligned with the rendered text.
+  text = text.replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-");
   for (const pattern of [
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
-    /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/g,
+    /(?<![\dA-Za-z])(?:\+?1[\s.-]*)?\(?\s*[2-9]\d{2}\s*\)?[\s.-]*[2-9]\d{2}[\s.-]*\d{4}(?![\dA-Za-z])/g,
     /\$\s?\d+(?:[,.]\d{2})?/g,
     /\b\d+(?:\.\d+)?\s*(?:stars?|years? in business|year warranty)\b/gi,
     /\b\d{1,3}(?:\.\d+)?\s*°(?:\s*\d{1,2}(?:\.\d+)?\s*[′']?)?(?:\s*\d{1,2}(?:\.\d+)?\s*[″"]?)?\s*[NSEW]\b/gi

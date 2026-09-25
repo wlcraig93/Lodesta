@@ -126,6 +126,12 @@ export function sanitizeAgentCss(css: string, eligibleAssets: AssetRevisionRef[]
       declaration.remove();
       return;
     }
+    // Generated content escapes the page's fact checks, so it cannot carry contact details.
+    if (decodeCssEscapes(declaration.prop).toLowerCase() === "content" && cssContactMarker(decodeCssEscapes(declaration.value))) {
+      findings.push(finding("fact.css_contact_marker", "claim", "CSS generated content cannot contain a phone number or email address; put contact details in the page."));
+      declaration.remove();
+      return;
+    }
     const parsed = valueParser(declaration.value);
     parsed.walk((node) => {
       if (node.type !== "function" || decodeCssEscapes(node.value).toLowerCase() !== "url") return;
@@ -468,8 +474,15 @@ function sanitizeForm(element: Element, allowedFormIds: Set<string>, findings: A
   }
 }
 
+// Browsers strip surrounding whitespace, drop tabs and newlines, and read a
+// backslash as a slash, so these spellings could navigate somewhere other than
+// the value this gate checked.
+function ambiguousHrefSyntax(value: string) {
+  return value !== value.trim() || /[\u0000-\u001f\u007f\\]/.test(value) || value.startsWith("//");
+}
+
 function hrefDisposition(value: string, input: SanitizeArtifactInput): "safe" | "factual_mismatch" | "unsafe" {
-  if (!value || /^javascript:|^data:|^blob:/i.test(value)) return "unsafe";
+  if (!value || ambiguousHrefSyntax(value) || /^javascript:|^data:|^blob:/i.test(value)) return "unsafe";
   if (value.startsWith("#")) return "safe";
   if (/^tel:/i.test(value)) {
     return input.allowedPhoneNumbers.has(comparablePhone(value.slice(4))) ? "safe" : "factual_mismatch";
@@ -480,6 +493,7 @@ function hrefDisposition(value: string, input: SanitizeArtifactInput): "safe" | 
   if (/^https?:\/\//i.test(value)) {
     try {
       const parsed = new URL(value);
+      if (parsed.username || parsed.password) return "unsafe";
       return (parsed.protocol === "https:" || parsed.protocol === "http:") && input.allowedExternalHrefs.has(parsed.toString())
         ? "safe"
         : "factual_mismatch";
@@ -488,11 +502,19 @@ function hrefDisposition(value: string, input: SanitizeArtifactInput): "safe" | 
     }
   }
   try {
-    const parsed = new URL(value, "https://site.lodesta.local");
+    const base = "https://site.lodesta.local";
+    const parsed = new URL(value, base);
+    if (parsed.origin !== base) return "unsafe";
     return input.declaredRoutes.has(normalizeRoutePath(parsed.pathname)) ? "safe" : "unsafe";
   } catch {
     return "unsafe";
   }
+}
+
+function cssContactMarker(value: string) {
+  const text = value.replace(/[‐-―−﹘﹣－]/g, "-");
+  return /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(text)
+    || /(?<!\d)(?:\+?1[\s.-]*)?\(?\s*\d{3}\s*\)?[\s.-]*\d{3}[\s.-]*\d{4}(?!\d)/.test(text);
 }
 
 function comparablePhone(value: string) {

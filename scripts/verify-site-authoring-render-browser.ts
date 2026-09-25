@@ -22,6 +22,13 @@ import { buildSyntheticSiteInput } from "./support/synthetic-site-input";
 import { BrowserVerificationInfrastructureError } from "../packages/site-verification/browser-gate";
 import { trustedFontFiles } from "../workers/site-sandbox/scaffold/platform/font-library";
 
+// Fixtures that simulate outcomes with inline style attributes or inline
+// scripts (which sanitized authored content never contains) run with inline
+// content allowed; everything else runs under the production policy.
+function runFixtureBrowserGate(input: Parameters<typeof runArtifactBrowserGate>[0]) {
+  return runArtifactBrowserGate({ ...input, testFixtureInlineContent: input.prepared.routes.some((route) => /\sstyle="|<script>/.test(route.html)) });
+}
+
 // Execute the actual navigation helper with deterministic request events. No
 // production timeout override or browser wait is needed to exercise failures.
 const navigationSource = await readFile("packages/site-verification/browser-gate.ts", "utf8");
@@ -244,13 +251,13 @@ assert.deepEqual(
   "Structured offerings did not come exclusively from normalized BusinessOffering authority."
 );
 
-const browser = await runArtifactBrowserGate({
+const browser = await runFixtureBrowserGate({
   prepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
   capturePrefix: "verification/site-authoring-render"
 });
-const repeatedBrowser = await runArtifactBrowserGate({
+const repeatedBrowser = await runFixtureBrowserGate({
   prepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -308,7 +315,7 @@ const browserDefaultDocumentPrepared = {
       }
     : file)
 };
-const browserDefaultDocumentBrowser = await runArtifactBrowserGate({
+const browserDefaultDocumentBrowser = await runFixtureBrowserGate({
   prepared: browserDefaultDocumentPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -345,7 +352,7 @@ const styledInlineCtaPrepared = {
       : file)
 };
 assert(styledInlineCtaPrepared.routes.find((route) => route.path === "/")!.html.includes('class="cta"'), "Inline CTA regression fixture did not alter the expected route.");
-const styledInlineCtaBrowser = await runArtifactBrowserGate({
+const styledInlineCtaBrowser = await runFixtureBrowserGate({
   prepared: styledInlineCtaPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -373,7 +380,7 @@ const uncontaminatedReviewPrepared = {
       }
     : file)
 };
-const uncontaminatedReview = await runArtifactBrowserGate({
+const uncontaminatedReview = await runFixtureBrowserGate({
   prepared: uncontaminatedReviewPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -404,7 +411,7 @@ const divWrappedDesktopNavigationPrepared = {
       }
     : file)
 };
-const divWrappedDesktopNavigationBrowser = await runArtifactBrowserGate({
+const divWrappedDesktopNavigationBrowser = await runFixtureBrowserGate({
   prepared: divWrappedDesktopNavigationPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -444,7 +451,7 @@ const keyboardSkipLinkPrepared = {
         }
       : file)
 };
-const keyboardSkipLinkBrowser = await runArtifactBrowserGate({
+const keyboardSkipLinkBrowser = await runFixtureBrowserGate({
   prepared: keyboardSkipLinkPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -466,7 +473,7 @@ const constrainedMapPrepared = {
     ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n[data-lodesta-map]{width:250px}`) }
     : file)
 };
-const constrainedMapBrowser = await runArtifactBrowserGate({
+const constrainedMapBrowser = await runFixtureBrowserGate({
   prepared: constrainedMapPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -492,7 +499,7 @@ const missingLocalPresencePrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace(localPresencePattern, "")) }
     : file)
 };
-const missingLocalPresenceBrowser = await runArtifactBrowserGate({
+const missingLocalPresenceBrowser = await runFixtureBrowserGate({
   prepared: missingLocalPresencePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -524,7 +531,7 @@ const conversationCtaPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("Request help", "Start a conversation")) }
     : file)
 };
-const conversationCtaBrowser = await runArtifactBrowserGate({
+const conversationCtaBrowser = await runFixtureBrowserGate({
   prepared: conversationCtaPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -547,7 +554,7 @@ const getInTouchCtaPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("Request help", "Get in touch")) }
     : file)
 };
-const getInTouchCtaBrowser = await runArtifactBrowserGate({
+const getInTouchCtaBrowser = await runFixtureBrowserGate({
   prepared: getInTouchCtaPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -561,7 +568,7 @@ assert(
   "A visible above-fold Get in touch CTA was not recognized as a primary conversion action."
 );
 
-const belowFoldHeroBrowser = await runArtifactBrowserGate({
+const belowFoldHeroBrowser = await runFixtureBrowserGate({
   prepared: belowFoldHeroPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -596,7 +603,7 @@ const mobileFormBeforeHeadingPrepared = {
       }
     : file)
 };
-const mobileFormBeforeHeadingBrowser = await runArtifactBrowserGate({
+const mobileFormBeforeHeadingBrowser = await runFixtureBrowserGate({
   prepared: mobileFormBeforeHeadingPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -625,7 +632,7 @@ const misleadingCallPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</header>", `${misleadingCallMarkup}${crampedCallMarkup}</header>`)) }
     : file)
 };
-const misleadingCallBrowser = await runArtifactBrowserGate({
+const misleadingCallBrowser = await runFixtureBrowserGate({
   prepared: misleadingCallPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -672,7 +679,7 @@ const linkedServiceDescriptionPrepared = {
     return { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${linkedServiceDescriptionMarkup}</main>`).replace("</footer>", `${unstructuredFooterMarkup}</footer>`)) };
   })
 };
-const linkedServiceDescriptionBrowser = await runArtifactBrowserGate({
+const linkedServiceDescriptionBrowser = await runFixtureBrowserGate({
   prepared: linkedServiceDescriptionPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -735,7 +742,7 @@ const undersizedProminentRasterPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${undersizedProminentRasterMarkup}</main>`)) }
     : file)
 };
-const undersizedProminentRasterBrowser = await runArtifactBrowserGate({
+const undersizedProminentRasterBrowser = await runFixtureBrowserGate({
   prepared: undersizedProminentRasterPrepared,
   buildInput: undersizedPhotoFixture.buildInput,
   blobStore: undersizedPhotoFixture.blobStore,
@@ -814,7 +821,7 @@ const preparedSourcePhotoArtifact = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${preparedSourcePhotoMarkup}</main>`)) }
     : file)
 };
-const preparedSourcePhotoBrowser = await runArtifactBrowserGate({
+const preparedSourcePhotoBrowser = await runFixtureBrowserGate({
   prepared: preparedSourcePhotoArtifact, buildInput: preparedSourcePhotoBuildInput,
   blobStore: preparedSourcePhotoBlobStore, capturePrefix: "verification/site-authoring-render-prepared-source-photo",
   routePaths: ["/"], viewports: [{ name: "desktop", width: 1280, height: 900 }]
@@ -844,7 +851,7 @@ const filteredRasterLogoPrepared = {
     return { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</footer>", `${filteredRasterLogoMarkup}</footer>`)) };
   })
 };
-const filteredRasterLogoBrowser = await runArtifactBrowserGate({
+const filteredRasterLogoBrowser = await runFixtureBrowserGate({
   prepared: filteredRasterLogoPrepared,
   buildInput: paddedSourceLogoFixture.buildInput,
   blobStore: paddedSourceLogoFixture.blobStore,
@@ -869,7 +876,7 @@ const oversizedFooterLogoPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</footer>", `${oversizedFooterLogoMarkup}</footer>`)) }
     : file)
 };
-const oversizedFooterLogoBrowser = await runArtifactBrowserGate({
+const oversizedFooterLogoBrowser = await runFixtureBrowserGate({
   prepared: oversizedFooterLogoPrepared,
   buildInput: paddedSourceLogoFixture.buildInput,
   blobStore: paddedSourceLogoFixture.blobStore,
@@ -896,7 +903,7 @@ const paddedPrimaryLogoPrepared = {
     return { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("<header>", `<header>${paddedPrimaryLogoMarkup}`)) };
   })
 };
-const paddedPrimaryLogoBrowser = await runArtifactBrowserGate({
+const paddedPrimaryLogoBrowser = await runFixtureBrowserGate({
   prepared: paddedPrimaryLogoPrepared,
   buildInput: paddedSourceLogoFixture.buildInput,
   blobStore: paddedSourceLogoFixture.blobStore,
@@ -922,7 +929,7 @@ const intentionallyCroppedLogoPrepared = {
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.cropped-brand-frame{display:block;position:relative;overflow:hidden;width:100px;height:60px;flex:0 0 100px}.cropped-brand-logo{display:block;position:absolute;width:240px;height:240px;max-width:none;left:-70px;top:-100px}`) }
       : file)
 };
-const intentionallyCroppedLogoBrowser = await runArtifactBrowserGate({
+const intentionallyCroppedLogoBrowser = await runFixtureBrowserGate({
   prepared: intentionallyCroppedLogoPrepared,
   buildInput: ownerLogoFixture.buildInput,
   blobStore: ownerLogoFixture.blobStore,
@@ -945,7 +952,7 @@ const sourceCroppedLogoPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace(ownerLogoFixture.revisionId, paddedSourceLogoFixture.revisionId)) }
     : file)
 };
-const sourceCroppedLogoBrowser = await runArtifactBrowserGate({
+const sourceCroppedLogoBrowser = await runFixtureBrowserGate({
   prepared: sourceCroppedLogoPrepared,
   buildInput: paddedSourceLogoFixture.buildInput,
   blobStore: paddedSourceLogoFixture.blobStore,
@@ -990,7 +997,7 @@ await officialLogoBlobStore.putImmutable({
   contentType: "image/png",
   contentHash: officialLogoContentHash
 });
-const missingOfficialLogoBrowser = await runArtifactBrowserGate({
+const missingOfficialLogoBrowser = await runFixtureBrowserGate({
   prepared,
   buildInput: officialLogoBuildInput,
   blobStore: officialLogoBlobStore,
@@ -1016,7 +1023,7 @@ const renderedOfficialLogoPrepared = {
     return { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("<header>", `<header>${renderedOfficialLogoMarkup}`)) };
   })
 };
-const renderedOfficialLogoBrowser = await runArtifactBrowserGate({
+const renderedOfficialLogoBrowser = await runFixtureBrowserGate({
   prepared: renderedOfficialLogoPrepared,
   buildInput: officialLogoBuildInput,
   blobStore: officialLogoBlobStore,
@@ -1044,7 +1051,7 @@ const lowContrastLogoPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("<header>", `<header style="background:#20382f">${lowContrastLogoMarkup}`)) }
     : file)
 };
-const lowContrastLogoBrowser = await runArtifactBrowserGate({
+const lowContrastLogoBrowser = await runFixtureBrowserGate({
   prepared: lowContrastLogoPrepared,
   buildInput: darkSourceLogoFixture.buildInput,
   blobStore: darkSourceLogoFixture.blobStore,
@@ -1070,7 +1077,7 @@ const compatibleLogoPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("background:#20382f", "background:#f7f4ee")) }
     : file)
 };
-const compatibleLogoBrowser = await runArtifactBrowserGate({
+const compatibleLogoBrowser = await runFixtureBrowserGate({
   prepared: compatibleLogoPrepared,
   buildInput: darkSourceLogoFixture.buildInput,
   blobStore: darkSourceLogoFixture.blobStore,
@@ -1108,7 +1115,7 @@ const wrongPortalPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</nav>", '<a href="https://northstar.example/">Customer portal</a></nav>')) }
     : file)
 };
-const wrongPortalBrowser = await runArtifactBrowserGate({
+const wrongPortalBrowser = await runFixtureBrowserGate({
   prepared: wrongPortalPrepared,
   buildInput: portalBuildInput,
   blobStore: new MemoryBlobStore(),
@@ -1132,7 +1139,7 @@ const footerOnlyPortalPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("<footer>", `<footer style="margin-top:150vh"><a href="${canonicalPortalUrl}">Customer login</a>`)) }
     : file)
 };
-const footerOnlyPortalBrowser = await runArtifactBrowserGate({
+const footerOnlyPortalBrowser = await runFixtureBrowserGate({
   prepared: footerOnlyPortalPrepared,
   buildInput: portalBuildInput,
   blobStore: new MemoryBlobStore(),
@@ -1157,7 +1164,7 @@ const headerPortalPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</nav>", `<a href="${canonicalPortalUrl}">Customer login</a></nav>`)) }
     : file)
 };
-const headerPortalBrowser = await runArtifactBrowserGate({
+const headerPortalBrowser = await runFixtureBrowserGate({
   prepared: headerPortalPrepared,
   buildInput: portalBuildInput,
   blobStore: new MemoryBlobStore(),
@@ -1179,7 +1186,7 @@ const placeholderLinkPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</nav>", '<a href="#">Customer login</a></nav>')) }
     : file)
 };
-const placeholderLinkBrowser = await runArtifactBrowserGate({
+const placeholderLinkBrowser = await runFixtureBrowserGate({
   prepared: placeholderLinkPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1202,7 +1209,7 @@ const missingAriaReferencePrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", '<section aria-labelledby="missing-section-title"><p>Section copy</p></section></main>')) }
     : file)
 };
-const missingAriaReferenceBrowser = await runArtifactBrowserGate({
+const missingAriaReferenceBrowser = await runFixtureBrowserGate({
   prepared: missingAriaReferencePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1227,7 +1234,7 @@ const missingFragmentTargetPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", '<a href="#missing-contact">Contact section</a></main>')) }
     : file)
 };
-const missingFragmentTargetBrowser = await runArtifactBrowserGate({
+const missingFragmentTargetBrowser = await runFixtureBrowserGate({
   prepared: missingFragmentTargetPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1249,7 +1256,7 @@ const undersizedFormPrepared = {
     ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\nform label,form input,form textarea,form button{font-size:13px}input,textarea{min-height:0;height:31px;padding:0}`) }
     : file)
 };
-const undersizedFormBrowser = await runArtifactBrowserGate({
+const undersizedFormBrowser = await runFixtureBrowserGate({
   prepared: undersizedFormPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1278,7 +1285,7 @@ const oversizedSingleLineFieldPrepared = {
     ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\ninput[type=tel]{height:144px}`) }
     : file)
 };
-const oversizedSingleLineFieldBrowser = await runArtifactBrowserGate({
+const oversizedSingleLineFieldBrowser = await runFixtureBrowserGate({
   prepared: oversizedSingleLineFieldPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1305,7 +1312,7 @@ const duplicateFieldLabelPrepared = {
     ? { ...file, bytes: Buffer.from(duplicateFirstFieldLabel(file.bytes.toString("utf8"))) }
     : file)
 };
-const duplicateFieldLabelBrowser = await runArtifactBrowserGate({
+const duplicateFieldLabelBrowser = await runFixtureBrowserGate({
   prepared: duplicateFieldLabelPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1334,7 +1341,7 @@ const narrowMediaSplitPrepared = {
       : file;
   })
 };
-const narrowMediaSplitBrowser = await runArtifactBrowserGate({
+const narrowMediaSplitBrowser = await runFixtureBrowserGate({
   prepared: narrowMediaSplitPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1362,7 +1369,7 @@ const narrowTextSplitPrepared = {
       : file;
   })
 };
-const narrowTextSplitBrowser = await runArtifactBrowserGate({
+const narrowTextSplitBrowser = await runFixtureBrowserGate({
   prepared: narrowTextSplitPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1393,7 +1400,7 @@ const longMobileCardWallPrepared = {
       : file;
   })
 };
-const longMobileCardWallBrowser = await runArtifactBrowserGate({
+const longMobileCardWallBrowser = await runFixtureBrowserGate({
   prepared: longMobileCardWallPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1423,7 +1430,7 @@ const fragmentedHeadingPrepared = {
       : file;
   })
 };
-const fragmentedHeadingBrowser = await runArtifactBrowserGate({
+const fragmentedHeadingBrowser = await runFixtureBrowserGate({
   prepared: fragmentedHeadingPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1451,7 +1458,7 @@ const midWordHeadingPrepared = {
       : file;
   })
 };
-const midWordHeadingBrowser = await runArtifactBrowserGate({
+const midWordHeadingBrowser = await runFixtureBrowserGate({
   prepared: midWordHeadingPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1490,7 +1497,7 @@ const hyphenHeadingPrepared = {
       : file;
   })
 };
-const hyphenHeadingBrowser = await runArtifactBrowserGate({
+const hyphenHeadingBrowser = await runFixtureBrowserGate({
   prepared: hyphenHeadingPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1520,7 +1527,7 @@ const fragmentedBodyPrepared = {
       : file;
   })
 };
-const fragmentedBodyBrowser = await runArtifactBrowserGate({
+const fragmentedBodyBrowser = await runFixtureBrowserGate({
   prepared: fragmentedBodyPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1555,7 +1562,7 @@ const mediaContainerOverflowPrepared = {
       : file;
   })
 };
-const mediaContainerOverflowBrowser = await runArtifactBrowserGate({
+const mediaContainerOverflowBrowser = await runFixtureBrowserGate({
   prepared: mediaContainerOverflowPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1596,7 +1603,7 @@ const croppedTransparentGraphicPrepared = {
       : file;
   })
 };
-const croppedTransparentGraphicBrowser = await runArtifactBrowserGate({
+const croppedTransparentGraphicBrowser = await runFixtureBrowserGate({
   prepared: croppedTransparentGraphicPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1629,7 +1636,7 @@ const primaryHeadingDecorationPrepared = {
       : file;
   })
 };
-const primaryHeadingDecorationBrowser = await runArtifactBrowserGate({
+const primaryHeadingDecorationBrowser = await runFixtureBrowserGate({
   prepared: primaryHeadingDecorationPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1668,7 +1675,7 @@ const opaqueForegroundOverPseudoPrepared = {
       : file;
   })
 };
-const opaqueForegroundOverPseudoBrowser = await runArtifactBrowserGate({
+const opaqueForegroundOverPseudoBrowser = await runFixtureBrowserGate({
   prepared: opaqueForegroundOverPseudoPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1724,7 +1731,7 @@ const headerBrandCollisionPrepared = {
       : file;
   })
 };
-const headerBrandCollisionBrowser = await runArtifactBrowserGate({
+const headerBrandCollisionBrowser = await runFixtureBrowserGate({
   prepared: headerBrandCollisionPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1755,7 +1762,7 @@ const headerContentOcclusionPrepared = {
 header{position:absolute!important;inset:0 0 auto 0!important;z-index:20!important;height:130px!important;background:#17342a!important}.header-content-occlusion-fixture{position:absolute;left:24px;top:112px;z-index:1;margin:0;color:#fff;font-size:16px;line-height:24px}`) }
       : file)
 };
-const headerContentOcclusionBrowser = await runArtifactBrowserGate({
+const headerContentOcclusionBrowser = await runFixtureBrowserGate({
   prepared: headerContentOcclusionPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1783,7 +1790,7 @@ const articleHeaderPrepared = {
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.article-header-fixture{position:relative;padding:48px 24px;background:#f4f1e9}`) }
       : file)
 };
-const articleHeaderBrowser = await runArtifactBrowserGate({
+const articleHeaderBrowser = await runFixtureBrowserGate({
   prepared: articleHeaderPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1813,7 +1820,7 @@ const syntheticIdentityAndRepeatedImagePrepared = {
       : file;
   })
 };
-const syntheticIdentityAndRepeatedImageBrowser = await runArtifactBrowserGate({
+const syntheticIdentityAndRepeatedImageBrowser = await runFixtureBrowserGate({
   prepared: syntheticIdentityAndRepeatedImagePrepared,
   buildInput: paddedSourceLogoFixture.buildInput,
   blobStore: paddedSourceLogoFixture.blobStore,
@@ -1856,7 +1863,7 @@ const compactAlphanumericMonogramPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${compactAlphanumericMonogramMarkup}</main>`)) }
     : file)
 };
-const compactAlphanumericMonogramBrowser = await runArtifactBrowserGate({
+const compactAlphanumericMonogramBrowser = await runFixtureBrowserGate({
   prepared: compactAlphanumericMonogramPrepared,
   buildInput: paddedSourceLogoFixture.buildInput,
   blobStore: paddedSourceLogoFixture.blobStore,
@@ -1917,7 +1924,7 @@ const filledGeographyAndDrawingPrepared = {
       : file;
   })
 };
-const filledGeographyAndDrawingBrowser = await runArtifactBrowserGate({
+const filledGeographyAndDrawingBrowser = await runFixtureBrowserGate({
   prepared: filledGeographyAndDrawingPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -1955,7 +1962,7 @@ const utilityDuplicatePrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("<header", `${utilityDuplicateMarkup}<header`)) }
     : file)
 };
-const utilityDuplicateBrowser = await runArtifactBrowserGate({
+const utilityDuplicateBrowser = await runFixtureBrowserGate({
   prepared: utilityDuplicatePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2009,7 +2016,7 @@ const collapsedDisclosurePrepared = {
       : file;
   })
 };
-const collapsedDisclosureBrowser = await runArtifactBrowserGate({
+const collapsedDisclosureBrowser = await runFixtureBrowserGate({
   prepared: collapsedDisclosurePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2037,7 +2044,7 @@ const belowFoldControlPrepared = {
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.below-fold-control{margin-top:200vh}`) }
       : file)
 };
-const belowFoldControlBrowser = await runArtifactBrowserGate({
+const belowFoldControlBrowser = await runFixtureBrowserGate({
   prepared: belowFoldControlPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2063,7 +2070,7 @@ const visuallyHiddenHeadingPrepared = {
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.visually-hidden-fixture{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}`) }
       : file)
 };
-const visuallyHiddenHeadingBrowser = await runArtifactBrowserGate({
+const visuallyHiddenHeadingBrowser = await runFixtureBrowserGate({
   prepared: visuallyHiddenHeadingPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2088,7 +2095,7 @@ const adjacentDuplicateTextPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${adjacentDuplicateTextMarkup}</main>`)) }
     : file)
 };
-const adjacentDuplicateTextBrowser = await runArtifactBrowserGate({
+const adjacentDuplicateTextBrowser = await runFixtureBrowserGate({
   prepared: adjacentDuplicateTextPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2114,7 +2121,7 @@ const sentenceBoundaryRepeatPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${sentenceBoundaryRepeatMarkup}</main>`)) }
     : file)
 };
-const sentenceBoundaryRepeatBrowser = await runArtifactBrowserGate({
+const sentenceBoundaryRepeatBrowser = await runFixtureBrowserGate({
   prepared: sentenceBoundaryRepeatPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2137,7 +2144,7 @@ const adjacentDuplicateContentPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${adjacentDuplicateContentMarkup}</main>`)) }
     : file)
 };
-const adjacentDuplicateContentBrowser = await runArtifactBrowserGate({
+const adjacentDuplicateContentBrowser = await runFixtureBrowserGate({
   prepared: adjacentDuplicateContentPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2165,7 +2172,7 @@ const duplicateHeaderIdentityPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</header>", `${duplicateHeaderIdentityMarkup}</header>`)) }
     : file)
 };
-const duplicateHeaderIdentityBrowser = await runArtifactBrowserGate({
+const duplicateHeaderIdentityBrowser = await runFixtureBrowserGate({
   prepared: duplicateHeaderIdentityPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2192,7 +2199,7 @@ const internalProvenancePrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${internalProvenanceMarkup}</main>`)) }
     : file)
 };
-const internalProvenanceBrowser = await runArtifactBrowserGate({
+const internalProvenanceBrowser = await runFixtureBrowserGate({
   prepared: internalProvenancePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2229,7 +2236,7 @@ const unrenderedVagueCopyPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", "<p>Readable place names and local service information.</p><p>We can shape the service conversation around your property.</p></main>")) }
     : file)
 };
-const unrenderedVagueCopyBrowser = await runArtifactBrowserGate({
+const unrenderedVagueCopyBrowser = await runFixtureBrowserGate({
   prepared: unrenderedVagueCopyPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2263,7 +2270,7 @@ const clippedComponentPrepared = {
       : file;
   })
 };
-const clippedComponentBrowser = await runArtifactBrowserGate({
+const clippedComponentBrowser = await runFixtureBrowserGate({
   prepared: clippedComponentPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2303,7 +2310,7 @@ const tabletShellPrepared = {
       : file;
   })
 };
-const tabletShellBrowser = await runArtifactBrowserGate({
+const tabletShellBrowser = await runFixtureBrowserGate({
   prepared: tabletShellPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2331,7 +2338,7 @@ const seriousOverflowPrepared = {
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.serious-overflow-fixture{width:calc(100vw + 24px);min-height:44px}`) }
       : file)
 };
-const seriousOverflowBrowser = await runArtifactBrowserGate({
+const seriousOverflowBrowser = await runFixtureBrowserGate({
   prepared: seriousOverflowPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2347,7 +2354,7 @@ assert(
   `Serious viewport overflow did not block candidate finalization: ${seriousOverflowFinding?.message ?? "missing finding"}`
 );
 
-const reviewBrowser = await runArtifactBrowserGate({
+const reviewBrowser = await runFixtureBrowserGate({
   prepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2369,7 +2376,7 @@ for (const capture of reviewBrowser.captures.filter((item) => item.frame === "fu
   assert.equal(metadata.width, viewport, `Full-page ${capture.viewport} review capture changed the viewport width.`);
   assert(metadata.height! >= (capture.viewport === "desktop" ? 900 : 844), `Full-page ${capture.viewport} review capture is shorter than its viewport.`);
 }
-const tabletReviewBrowser = await runArtifactBrowserGate({
+const tabletReviewBrowser = await runFixtureBrowserGate({
   prepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2384,7 +2391,7 @@ assert.deepEqual(
   "A tablet author review must return exactly one native tablet first-viewport frame per route."
 );
 
-const focusedBrowser = await runArtifactBrowserGate({
+const focusedBrowser = await runFixtureBrowserGate({
   prepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2448,7 +2455,7 @@ const magentaBounds = async (bytes: Buffer) => {
   }
   return { count, minX, minY, maxX, maxY, width: info.width, height: info.height };
 };
-const inspectionGapDefaultBrowser = await runArtifactBrowserGate({
+const inspectionGapDefaultBrowser = await runFixtureBrowserGate({
   prepared: inspectionGapPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2467,7 +2474,7 @@ for (const capture of inspectionGapDefaultCaptures) {
   const bounds = await magentaBounds(capture.bytes);
   assert(bounds.count > 10_000, `Default ${capture.viewport}:${capture.frame} did not include the below-fold target.`);
 }
-const inspectionGapFocusedBrowser = await runArtifactBrowserGate({
+const inspectionGapFocusedBrowser = await runFixtureBrowserGate({
   prepared: inspectionGapPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2497,7 +2504,7 @@ for (const selectorFixture of [
   { selector: ".inspection-target-does-not-exist", findingId: "render.inspection_selection_missing", prefix: "missing" },
   { selector: "[", findingId: "render.inspection_selection_invalid", prefix: "invalid" }
 ] as const) {
-  const fallbackBrowser = await runArtifactBrowserGate({
+  const fallbackBrowser = await runFixtureBrowserGate({
     prepared: inspectionGapPrepared,
     buildInput,
     blobStore: new MemoryBlobStore(),
@@ -2519,6 +2526,20 @@ for (const selectorFixture of [
 }
 console.log(JSON.stringify({ ok: true, focusedInspection: "below-fold-native-png", viewports: inspectionGapViewports.map(({ name, width, height }) => ({ name, width, height })), selectorFallback: ["missing", "invalid"] }));
 
+// Release verification renders under the production policy, so content the
+// live site would block (here an inline style attribute) fails verification too.
+{
+  const blockedInline = `<p class="csp-parity-fixture" style="color:#b00">Inline style</p>`;
+  const cspPrepared = {
+    ...prepared,
+    routes: prepared.routes.map((route) => route.path === "/" ? { ...route, html: route.html.replace("</main>", `${blockedInline}</main>`) } : route),
+    files: prepared.files.map((file) => file.path === "index.html" ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `${blockedInline}</main>`)) } : file)
+  };
+  const cspBrowser = await runArtifactBrowserGate({ prepared: cspPrepared, buildInput, blobStore: new MemoryBlobStore(), capturePrefix: "verification/site-authoring-render-csp-parity", routePaths: ["/"] });
+  assert(cspBrowser.findings.some((finding) => finding.id === "render.console" && /Content Security Policy/.test(finding.message) && isTechnicalReleaseBlocker(finding)),
+    "Content the production policy blocks passed release verification.");
+}
+
 const axeSabotage = `<script>window.axe=undefined;Object.defineProperty(window,"axe",{value:undefined,writable:false,configurable:false});</script>`;
 const axeUnavailablePrepared = {
   ...prepared,
@@ -2531,7 +2552,7 @@ const axeUnavailablePrepared = {
     : file)
 };
 await assert.rejects(
-  () => runArtifactBrowserGate({
+  () => runFixtureBrowserGate({
     prepared: axeUnavailablePrepared,
     buildInput,
     blobStore: new MemoryBlobStore(),
@@ -2558,7 +2579,7 @@ const lowContrastPrepared = {
       : file;
   })
 };
-const lowContrastBrowser = await runArtifactBrowserGate({
+const lowContrastBrowser = await runFixtureBrowserGate({
   prepared: lowContrastPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2584,7 +2605,7 @@ const shortInteractiveContrastPrepared = {
       : file;
   })
 };
-const shortInteractiveContrastBrowser = await runArtifactBrowserGate({
+const shortInteractiveContrastBrowser = await runFixtureBrowserGate({
   prepared: shortInteractiveContrastPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2612,7 +2633,7 @@ const translucentContrastPrepared = {
       : file;
   })
 };
-const translucentContrastBrowser = await runArtifactBrowserGate({
+const translucentContrastBrowser = await runFixtureBrowserGate({
   prepared: translucentContrastPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2641,7 +2662,7 @@ const translucentSafePrepared = {
       : file;
   })
 };
-const translucentSafeBrowser = await runArtifactBrowserGate({
+const translucentSafeBrowser = await runFixtureBrowserGate({
   prepared: translucentSafePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2669,7 +2690,7 @@ const decorativeBoundaryPrepared = {
       : file;
   })
 };
-const decorativeBoundaryBrowser = await runArtifactBrowserGate({
+const decorativeBoundaryBrowser = await runFixtureBrowserGate({
   prepared: decorativeBoundaryPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2694,7 +2715,7 @@ const escapedSequencePrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</main>", `<p>${escapedSequenceText}</p></main>`)) }
     : file)
 };
-const escapedSequenceBrowser = await runArtifactBrowserGate({
+const escapedSequenceBrowser = await runFixtureBrowserGate({
   prepared: escapedSequencePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2719,7 +2740,7 @@ const missingGlyphPrepared = {
       ? { ...file, bytes: Buffer.concat([file.bytes, Buffer.from('.portable-symbols,.unsupported-glyph{font-family:"Lodesta Inter"}')]) }
       : file)
 };
-const missingGlyphBrowser = await runArtifactBrowserGate({
+const missingGlyphBrowser = await runFixtureBrowserGate({
   prepared: missingGlyphPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2769,7 +2790,7 @@ const functionalDefectsPrepared = {
         }
       : file)
 };
-const functionalDefectsBrowser = await runArtifactBrowserGate({
+const functionalDefectsBrowser = await runFixtureBrowserGate({
   prepared: functionalDefectsPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2819,7 +2840,7 @@ const textCollisionPrepared = {
         }
       : file)
 };
-const textCollisionBrowser = await runArtifactBrowserGate({
+const textCollisionBrowser = await runFixtureBrowserGate({
   prepared: textCollisionPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2851,7 +2872,7 @@ const headerControlCollisionPrepared = {
 .header-control-collision-a,.header-control-collision-b{position:absolute;top:24px;right:32px;display:inline-flex;align-items:center;min-height:44px;padding:8px 14px;background:#fff}`) }
       : file)
 };
-const headerControlCollisionBrowser = await runArtifactBrowserGate({
+const headerControlCollisionBrowser = await runFixtureBrowserGate({
   prepared: headerControlCollisionPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2886,7 +2907,7 @@ const headerControlWrapPrepared = {
 @media(min-width:700px) and (max-width:800px){.header-wrap-a,.header-wrap-b{display:inline-block;margin-left:8px;white-space:normal}.header-wrap-a span,.header-wrap-b span{display:block}}`) }
       : file)
 };
-const headerControlWrapBrowser = await runArtifactBrowserGate({
+const headerControlWrapBrowser = await runFixtureBrowserGate({
   prepared: headerControlWrapPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2918,7 +2939,7 @@ const joinedFooterLinksPrepared = {
         }
       : file)
 };
-const joinedFooterLinksBrowser = await runArtifactBrowserGate({
+const joinedFooterLinksBrowser = await runFixtureBrowserGate({
   prepared: joinedFooterLinksPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -2959,7 +2980,7 @@ const joinedFooterMetaPrepared = {
         }
       : file)
 };
-const joinedFooterMetaBrowser = await runArtifactBrowserGate({
+const joinedFooterMetaBrowser = await runFixtureBrowserGate({
   prepared: joinedFooterMetaPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3002,7 +3023,7 @@ const mobileNavigationOverflowPrepared = {
         }
       : file)
 };
-const mobileNavigationOverflowBrowser = await runArtifactBrowserGate({
+const mobileNavigationOverflowBrowser = await runFixtureBrowserGate({
   prepared: mobileNavigationOverflowPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3030,7 +3051,7 @@ const missingMobileNavigationPrepared = {
       }
     : file)
 };
-const missingMobileNavigationBrowser = await runArtifactBrowserGate({
+const missingMobileNavigationBrowser = await runFixtureBrowserGate({
   prepared: missingMobileNavigationPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3060,7 +3081,7 @@ const disclosureNavigationPrepared = {
       }
     : file)
 };
-const disclosureNavigationBrowser = await runArtifactBrowserGate({
+const disclosureNavigationBrowser = await runFixtureBrowserGate({
   prepared: disclosureNavigationPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3106,7 +3127,7 @@ const paintedDisclosureNavigationPrepared = {
         }
       : file)
 };
-const paintedDisclosureNavigationBrowser = await runArtifactBrowserGate({
+const paintedDisclosureNavigationBrowser = await runFixtureBrowserGate({
   prepared: paintedDisclosureNavigationPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3142,7 +3163,7 @@ const indiscernibleDisclosureNavigationPrepared = {
         }
       : file)
 };
-const indiscernibleDisclosureNavigationBrowser = await runArtifactBrowserGate({
+const indiscernibleDisclosureNavigationBrowser = await runFixtureBrowserGate({
   prepared: indiscernibleDisclosureNavigationPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3184,7 +3205,7 @@ const siblingDisclosureNavigationPrepared = {
         }
       : file)
 };
-const siblingDisclosureNavigationBrowser = await runArtifactBrowserGate({
+const siblingDisclosureNavigationBrowser = await runFixtureBrowserGate({
   prepared: siblingDisclosureNavigationPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3218,7 +3239,7 @@ const labeledDesktopNavigationPrepared = {
       }
     : file)
 };
-const labeledDesktopNavigationBrowser = await runArtifactBrowserGate({
+const labeledDesktopNavigationBrowser = await runFixtureBrowserGate({
   prepared: labeledDesktopNavigationPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3249,7 +3270,7 @@ const ownerDrawerPrepared = {
         }
       : file)
 };
-const ownerDrawerBrowser = await runArtifactBrowserGate({
+const ownerDrawerBrowser = await runFixtureBrowserGate({
   prepared: ownerDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3288,7 +3309,7 @@ const openedDrawerCallSpacingPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("</nav></div></div>", '<a href="tel:+18049148120">Call<span>(804) 914-8120</span></a></nav></div></div>')) }
     : file)
 };
-const openedDrawerCallSpacingBrowser = await runArtifactBrowserGate({
+const openedDrawerCallSpacingBrowser = await runFixtureBrowserGate({
   prepared: openedDrawerCallSpacingPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3316,7 +3337,7 @@ const edgeAnchoredDrawerPrepared = {
       }
     : file)
 };
-const edgeAnchoredDrawerBrowser = await runArtifactBrowserGate({
+const edgeAnchoredDrawerBrowser = await runFixtureBrowserGate({
   prepared: edgeAnchoredDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3345,7 +3366,7 @@ const clippedDrawerPrepared = {
       }
     : file)
 };
-const clippedDrawerBrowser = await runArtifactBrowserGate({
+const clippedDrawerBrowser = await runFixtureBrowserGate({
   prepared: clippedDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3374,7 +3395,7 @@ const rawDrawerPrepared = {
       }
     : file)
 };
-const rawDrawerBrowser = await runArtifactBrowserGate({
+const rawDrawerBrowser = await runFixtureBrowserGate({
   prepared: rawDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3403,7 +3424,7 @@ const flushDrawerPrepared = {
       }
     : file)
 };
-const flushDrawerBrowser = await runArtifactBrowserGate({
+const flushDrawerBrowser = await runFixtureBrowserGate({
   prepared: flushDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3428,7 +3449,7 @@ const rawToggleAuthoredPanelPrepared = {
       }
     : file)
 };
-const rawToggleAuthoredPanelBrowser = await runArtifactBrowserGate({
+const rawToggleAuthoredPanelBrowser = await runFixtureBrowserGate({
   prepared: rawToggleAuthoredPanelPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3455,7 +3476,7 @@ const rawSubmitPrepared = {
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.raw-submit{appearance:auto;background:#9b2c20;color:#fff;border:2px outset ButtonBorder;border-radius:999px}`) }
       : file)
 };
-const rawSubmitBrowser = await runArtifactBrowserGate({
+const rawSubmitBrowser = await runFixtureBrowserGate({
   prepared: rawSubmitPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3482,7 +3503,7 @@ const duplicateManagedNavigationIconPrepared = {
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.owner-drawer button::before{content:"";display:block;width:21px;height:13px;border-top:2px solid currentColor;border-bottom:2px solid currentColor}`) }
       : file)
 };
-const duplicateManagedNavigationIconBrowser = await runArtifactBrowserGate({
+const duplicateManagedNavigationIconBrowser = await runFixtureBrowserGate({
   prepared: duplicateManagedNavigationIconPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3504,7 +3525,7 @@ const transparentDrawerPrepared = {
     ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.owner-drawer-panel{background:var(--undefined-navigation-surface)}`) }
     : file)
 };
-const transparentDrawerBrowser = await runArtifactBrowserGate({
+const transparentDrawerBrowser = await runFixtureBrowserGate({
   prepared: transparentDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3526,7 +3547,7 @@ const obscuringDrawerPrepared = {
     ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.owner-drawer-panel{transform:translateY(-100px)}`) }
     : file)
 };
-const obscuringDrawerBrowser = await runArtifactBrowserGate({
+const obscuringDrawerBrowser = await runFixtureBrowserGate({
   prepared: obscuringDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3553,7 +3574,7 @@ const collapsedManagedDrawerPrepared = {
       }
     : file)
 };
-const collapsedManagedDrawerBrowser = await runArtifactBrowserGate({
+const collapsedManagedDrawerBrowser = await runFixtureBrowserGate({
   prepared: collapsedManagedDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3582,7 +3603,7 @@ const managedIconDrawerPrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace(ownerDrawerMarkup, defaultIconDrawerMarkup)) }
     : file)
 };
-const managedIconDrawerBrowser = await runArtifactBrowserGate({
+const managedIconDrawerBrowser = await runFixtureBrowserGate({
   prepared: managedIconDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3605,7 +3626,7 @@ const duplicatedIconDrawerPrepared = {
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.owner-drawer button::before{content:"";display:block;width:18px;height:2px;background:#111;box-shadow:0 -6px #111,0 6px #111}`) }
       : file)
 };
-const duplicatedIconDrawerBrowser = await runArtifactBrowserGate({
+const duplicatedIconDrawerBrowser = await runFixtureBrowserGate({
   prepared: duplicatedIconDrawerPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3642,7 +3663,7 @@ const siblingDisclosurePrepared = {
       }
     : file)
 };
-const siblingDisclosureBrowser = await runArtifactBrowserGate({
+const siblingDisclosureBrowser = await runFixtureBrowserGate({
   prepared: siblingDisclosurePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3668,7 +3689,7 @@ const nestedDisclosurePrepared = {
       ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}\n.nested-mobile-navigation{display:none}.nested-desktop-navigation details[open]::after{content:"";position:fixed;inset:0;background:#f00;z-index:999;pointer-events:none}.nested-navigation-panel{background:#fff;color:#17211b;padding:24px;overflow:auto}.nested-navigation-panel nav{display:block}.nested-navigation-links{display:grid;gap:20px}.nested-navigation-links span,.nested-navigation-links a{display:block;min-height:80px}@media(max-width:640px){.nested-desktop-navigation{display:none}.nested-mobile-navigation{display:block}}`) }
       : file)
 };
-const nestedDisclosureBrowser = await runArtifactBrowserGate({
+const nestedDisclosureBrowser = await runFixtureBrowserGate({
   prepared: nestedDisclosurePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3711,7 +3732,7 @@ const unreachableDisclosurePrepared = {
     ? { ...file, bytes: Buffer.from(file.bytes.toString("utf8").replace("<summary>Menu</summary>", '<summary style="display:none">Menu</summary>')) }
     : file)
 };
-const unreachableDisclosureBrowser = await runArtifactBrowserGate({
+const unreachableDisclosureBrowser = await runFixtureBrowserGate({
   prepared: unreachableDisclosurePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3738,7 +3759,7 @@ const intentionalScrollPrepared = {
     ? { ...file, bytes: Buffer.from(`${file.bytes.toString("utf8")}[data-lodesta-map]{height:225px;overflow:auto}`) }
     : file)
 };
-const intentionalScrollBrowser = await runArtifactBrowserGate({
+const intentionalScrollBrowser = await runFixtureBrowserGate({
   prepared: intentionalScrollPrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3765,7 +3786,7 @@ const scrollTablePrepared = prepareSiteArtifact({
     capabilityBindings: []
   }
 });
-const scrollTableBrowser = await runArtifactBrowserGate({
+const scrollTableBrowser = await runFixtureBrowserGate({
   prepared: scrollTablePrepared,
   buildInput,
   blobStore: new MemoryBlobStore(),
@@ -3803,7 +3824,7 @@ const skipLinkPrepared = prepareSiteArtifact({
     capabilityBindings: []
   }
 });
-const skipLinkBrowser = await runArtifactBrowserGate({
+const skipLinkBrowser = await runFixtureBrowserGate({
   prepared: skipLinkPrepared, buildInput, blobStore: new MemoryBlobStore(),
   capturePrefix: "verification/site-authoring-focus-revealed-skip-link",
   routePaths: ["/", "/transformed", "/obscured", "/clipped-text", "/hidden", "/not-tabbable", "/ordinary"],
@@ -3831,7 +3852,7 @@ const fragmentedLinkPrepared = prepareSiteArtifact({
     ], capabilityBindings: []
   }
 });
-const fragmentedLinkBrowser = await runArtifactBrowserGate({
+const fragmentedLinkBrowser = await runFixtureBrowserGate({
   prepared: fragmentedLinkPrepared, buildInput, blobStore: new MemoryBlobStore(),
   capturePrefix: "verification/site-authoring-fragmented-link",
   captureMode: "review",

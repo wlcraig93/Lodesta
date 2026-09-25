@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -5,6 +6,7 @@ import { DomUtils, parseDocument } from "htmlparser2";
 import { chromium, type Browser, type Locator, type Page, type Request } from "playwright";
 import { sha256 } from "@/packages/business-data";
 import { isRequiredCustomerDestination } from "@/packages/site-contracts";
+import { generatedSiteContentSecurityPolicy } from "@/lib/generated-site-security";
 import type { ArtifactBlobStore } from "@/packages/site-artifacts/blob-store";
 import type { SitePublicBuildInput } from "@/packages/site-contracts";
 import { isTechnicalReleaseBlocker, type PreparedSiteArtifact } from "./finalizer";
@@ -119,6 +121,12 @@ export async function runArtifactBrowserGate(input: {
   signal?: AbortSignal;
   /** Exact audited patch bytes for candidate verification. Tests may omit this and build the named series source. */
   runtimeSource?: Buffer;
+  /**
+   * Tests only: fixtures that simulate outcomes with inline style attributes
+   * or inline scripts, which sanitized authored content can never contain.
+   * Release verification never sets this and runs under the production policy.
+   */
+  testFixtureInlineContent?: boolean;
 }): Promise<FullBrowserGateResult> {
   try {
     return await runArtifactBrowserGateOnce(input, 1);
@@ -151,6 +159,8 @@ async function runArtifactBrowserGateOnce(input: {
   viewports?: readonly BrowserGateViewport[];
   screenshotRoutePaths?: readonly string[];
   signal?: AbortSignal;
+  runtimeSource?: Buffer;
+  testFixtureInlineContent?: boolean;
 }, attempt: 1 | 2): Promise<FullBrowserGateResult> {
   const harness = await startHarness(input);
   let browser: Browser | undefined;
@@ -995,13 +1005,13 @@ async function runArtifactBrowserGateOnce(input: {
                   element.setAttribute("data-lodesta-inspection-focus", "true");
                   element.scrollIntoView({ block: "center", inline: "center" });
                 });
-                await page.addStyleTag({ content: `
+                await addHarnessStyle(page, `
                   [data-lodesta-inspection-focus="true"] {
                     outline: 4px solid #1683ff !important;
                     outline-offset: 3px !important;
                     box-shadow: 0 0 0 7px rgba(22, 131, 255, .2) !important;
                   }
-                ` });
+                `);
                 await page.waitForTimeout(75);
                 const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-focus.png`;
                 captures.push({
@@ -1040,13 +1050,13 @@ async function runArtifactBrowserGateOnce(input: {
                   element.setAttribute("data-lodesta-inspection-focus", "true");
                   element.scrollIntoView({ block: "center", inline: "center" });
                 });
-                await page.addStyleTag({ content: `
+                await addHarnessStyle(page, `
                   [data-lodesta-inspection-focus="true"] {
                     outline: 4px solid #1683ff !important;
                     outline-offset: 3px !important;
                     box-shadow: 0 0 0 7px rgba(22, 131, 255, .2) !important;
                   }
-                ` });
+                `);
                 await page.waitForTimeout(75);
                 const key = `${input.capturePrefix.replace(/\/$/, "")}/${routeKey(route.path)}-${viewport.name}-focus.png`;
                 captures.push({
@@ -1590,6 +1600,7 @@ async function startHarness(input: {
   buildInput: SitePublicBuildInput;
   blobStore: ArtifactBlobStore;
   runtimeSource?: Buffer;
+  testFixtureInlineContent?: boolean;
 }) {
   const routeFiles = new Map(input.prepared.routes.map((route) => [route.path, route.html]));
   const assetKeys = new Map(input.buildInput.business.assets.map((asset) => [asset.revisionId, asset.storageKey]));
@@ -1630,7 +1641,8 @@ async function startHarness(input: {
       }
       const normalized = normalizePath(url.pathname);
       const html = routeFiles.get(normalized);
-      return html ? send(response, 200, Buffer.from(html), "text/html; charset=utf-8") : send(response, 404, Buffer.from("Not found"), "text/plain");
+      // Pages render under the exact production policy, so anything it would block fails here too.
+      return html ? send(response, 200, Buffer.from(html), "text/html; charset=utf-8", { "content-security-policy": harnessContentSecurityPolicy(input.testFixtureInlineContent) }) : send(response, 404, Buffer.from("Not found"), "text/plain");
     } catch (error) {
       return send(response, 500, Buffer.from(error instanceof Error ? error.message : "Harness error"), "text/plain");
     }
@@ -4247,9 +4259,7 @@ async function loadCanonicalAxeRuntime(): Promise<CanonicalAxeRuntime> {
 
 async function settleImages(page: Page) {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.addStyleTag({
-    content: "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}"
-  }).catch(() => undefined);
+  await addHarnessStyle(page, "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}").catch(() => undefined);
   await page.evaluate(async () => {
     for (const animation of document.getAnimations()) animation.pause();
     for (const media of document.querySelectorAll<HTMLMediaElement>("video,audio")) {
@@ -4473,8 +4483,31 @@ function dedupe(findings: ArtifactGateFinding[]) {
   });
 }
 
-function send(response: import("node:http").ServerResponse, status: number, body: Buffer, contentType: string) {
-  response.writeHead(status, { "content-type": contentType, "cache-control": "no-store" });
+/**
+ * Pages load under the production content security policy. The harness's own
+ * stabilizing styles carry a per-process nonce that authored content cannot know.
+ */
+const harnessStyleNonce = randomBytes(18).toString("base64");
+
+function harnessContentSecurityPolicy(testFixtureInlineContent = false) {
+  const policy = generatedSiteContentSecurityPolicy("self");
+  // A nonce would make browsers ignore 'unsafe-inline', so fixture mode uses only the latter.
+  return testFixtureInlineContent
+    ? policy.replace("style-src 'self'", "style-src 'self' 'unsafe-inline'").replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
+    : policy.replace("style-src 'self'", `style-src 'self' 'nonce-${harnessStyleNonce}'`);
+}
+
+async function addHarnessStyle(page: Page, css: string) {
+  await page.evaluate(({ nonce, css: content }) => {
+    const style = document.createElement("style");
+    style.nonce = nonce;
+    style.textContent = content;
+    window.document.head.appendChild(style);
+  }, { nonce: harnessStyleNonce, css });
+}
+
+function send(response: import("node:http").ServerResponse, status: number, body: Buffer, contentType: string, headers: Record<string, string> = {}) {
+  response.writeHead(status, { "content-type": contentType, "cache-control": "no-store", ...headers });
   response.end(body);
 }
 

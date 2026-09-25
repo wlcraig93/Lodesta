@@ -16,7 +16,8 @@ async function main() {
       mkdir(join(fixture, "packages/site-platform"), { recursive: true }),
       mkdir(join(fixture, "packages/platform-data"), { recursive: true }),
       mkdir(join(fixture, "packages/website-assessment"), { recursive: true }),
-      mkdir(join(fixture, "packages/owner-notifications"), { recursive: true })
+      mkdir(join(fixture, "packages/owner-notifications"), { recursive: true }),
+      mkdir(join(fixture, "packages/site-monitoring"), { recursive: true })
     ]);
     await copyFile("workers/runner.ts", join(fixture, "workers/runner.ts"));
     await Promise.all([
@@ -24,7 +25,8 @@ async function main() {
       writeFile(join(fixture, "packages/platform-data/index.ts"), repositoryStub),
       writeFile(join(fixture, "packages/site-platform/workflow.ts"), workflowStub),
       writeFile(join(fixture, "packages/website-assessment/jobs.ts"), assessmentStub),
-      writeFile(join(fixture, "packages/owner-notifications/index.ts"), notificationStub)
+      writeFile(join(fixture, "packages/owner-notifications/index.ts"), notificationStub),
+      writeFile(join(fixture, "packages/site-monitoring/index.ts"), "export const siteMonitor = { async runDueChecks() { return []; } };\n")
     ]);
 
     const late = await run("late");

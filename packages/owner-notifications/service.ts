@@ -51,6 +51,17 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
         : run.status === "succeeded" && run.candidateVersionId ? "run_ready"
         : undefined;
       if (!kind) return false;
+      if (kind === "run_failed" && !run.retryableByOwner) {
+        // The owner is told Lodesta will look into it, so an operator must hear about it.
+        await deps.notifications.enqueue({
+          siteId: run.siteId,
+          kind,
+          subjectId: run.id,
+          dedupeKey: `operator:${kind}:${run.id}:${run.executionNumber}`,
+          audience: "operator",
+          test: false
+        });
+      }
       return deps.notifications.enqueue({
         siteId: run.siteId,
         kind,
@@ -88,6 +99,11 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
       const site = await deps.platform.getSite(notification.siteId);
       if (!site) {
         await deps.notifications.markSuppressed(notification.id, "site_missing", now);
+        return "suppressed";
+      }
+      if (notification.kind === "lead" && notification.audience === "operator") {
+        // Lodesta's own synthetic check: recording it proves the pipeline; nobody is emailed.
+        await deps.notifications.markSuppressed(notification.id, "synthetic_check", now);
         return "suppressed";
       }
       const recipient = notification.audience === "operator"
@@ -151,6 +167,16 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
         ].join("\n")
       };
     }
+    if (notification.kind === "site_unreachable" || notification.kind === "form_unreachable") {
+      const what = notification.kind === "site_unreachable" ? "published site" : "inquiry form";
+      return {
+        subject: `[Lodesta monitor] ${site.slug}: ${what} failing`,
+        text: [
+          `Two checks in a row failed for the ${what} of ${site.slug}.`,
+          `Details and history: ${deps.appOrigin()}/admin/sites/${encodeURIComponent(site.slug)}`
+        ].join("\n\n")
+      };
+    }
     if (notification.kind === "domain_attention") {
       const domain = await deps.domains.getDomainById(notification.subjectId);
       if (!domain || domain.status !== "attention_required") return undefined;
@@ -166,6 +192,16 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
     const run = await deps.platform.getAgentRun(notification.subjectId);
     if (!run) return undefined;
     const editor = `${workspace}/editor`;
+    if (notification.audience === "operator") {
+      return {
+        subject: `[Lodesta monitor] ${site.slug}: ${run.kind.replaceAll("_", " ")} failed (${run.failureCode ?? "unknown"})`,
+        text: [
+          `Run ${run.id} failed and the owner can't retry it.`,
+          run.failureReason ? `Reason: ${run.failureReason}` : "",
+          `Run details: ${deps.appOrigin()}/admin/runs/${encodeURIComponent(run.id)}`
+        ].filter(Boolean).join("\n\n")
+      };
+    }
     if (notification.kind === "run_ready") {
       return {
         subject: run.kind === "initial_build" ? "Your new website is ready to review" : "Your website change is ready to review",

@@ -5,6 +5,7 @@ import { siteAuthoringWorkflow } from "../packages/site-platform/workflow";
 import { sitePlatformRepository } from "../packages/platform-data";
 import { processNextWebsiteAssessmentJob } from "../packages/website-assessment/jobs";
 import { ownerNotificationService } from "../packages/owner-notifications";
+import { siteMonitor } from "../packages/site-monitoring";
 
 const localRecoveryStaleAfterMs = 5 * 60_000;
 const workerId = `site-authoring-worker-${process.pid}-${Date.now().toString(36)}`;
@@ -14,6 +15,17 @@ process.once("SIGTERM", () => { shuttingDown = true; });
 process.once("SIGINT", () => { shuttingDown = true; });
 
 const notificationTickMs = 15_000;
+
+/** Probes published sites whose checks are due. Never fatal. */
+async function monitorSites() {
+  try {
+    const checks = await siteMonitor.runDueChecks();
+    const failed = checks.filter((check) => !check.ok);
+    if (failed.length) console.error(JSON.stringify({ event: "site_monitor_failures", failed }));
+  } catch (error) {
+    console.error(JSON.stringify({ event: "site_monitor_tick_failure", message: compactErrorMessage(error) }));
+  }
+}
 
 /** Records owner notifications for run outcomes and delivers everything due. Never fatal. */
 async function notifyOwners(since: string) {
@@ -149,6 +161,7 @@ async function main() {
         if (shuttingDown || fatalError !== undefined) break;
         if (Date.now() >= nextNotificationTickAt) {
           nextNotificationTickAt = Date.now() + notificationTickMs;
+          await monitorSites();
           await notifyOwners(notificationsSince);
         }
         await sleep(inFlight.size ? idleMs : backoffMs);

@@ -9,6 +9,7 @@ import { formatProductDate, statusTone } from "@/lib/product-format";
 import { websiteSourceSnapshotPayloadSchema } from "@/packages/site-contracts";
 import { SourceRecaptureButton } from "@/components/admin/SourceRecaptureButton";
 import { ClaimLinkPanel } from "@/components/admin/ClaimLinkPanel";
+import { siteMonitorRepository } from "@/packages/site-monitoring";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { robots: { index: false, follow: false } };
@@ -18,6 +19,10 @@ export default async function AdminSitePage({ params }: { params: Promise<{ slug
   await requireAdminPageAccess(`/admin/sites/${slug}`);
   const site = await sitePlatformRepository.getSiteBySlug(slug);
   if (!site) notFound();
+  const [siteChecks, formChecks] = await Promise.all([
+    siteMonitorRepository.recent(site.id, "site", 12),
+    siteMonitorRepository.recent(site.id, "form", 6)
+  ]);
   const [state, intent, versions, runs, changes, queue] = await Promise.all([
     sitePlatformRepository.getBusinessState(site.businessId),
     sitePlatformRepository.getSiteIntent(site.id),
@@ -58,6 +63,7 @@ export default async function AdminSitePage({ params }: { params: Promise<{ slug
       <section className="panel"><h2>Versions</h2><div className="finding-list">{versions.map((version) => <article className="finding-card" key={version.id}><div className="button-row"><span className={`badge is-${statusTone(version.status)}`}>{version.status}</span><span>Version {version.number}</span></div><p>{version.artifactHash.slice(0, 28)}</p><Link className="button secondary" href={`/api/site-versions/${version.id}/artifact/`}>Open artifact</Link></article>)}{!versions.length ? <p className="muted">No versions yet.</p> : null}</div></section>
       <aside className="panel"><h2>Business authority</h2><dl className="detail-list"><dt>Owner user ID</dt><dd>{site.ownerUserId ?? "Unowned"}</dd><dt>Phone</dt><dd>{state?.contacts.phone ?? "Not recorded"}</dd><dt>Email</dt><dd>{state?.contacts.email ?? "Not recorded"}</dd><dt>Offerings</dt><dd>{state?.offerings.length ?? 0}</dd><dt>State revision</dt><dd>{state?.revision ?? "-"}</dd><dt>Intent revision</dt><dd>{intent?.revision ?? "-"}</dd><dt>Candidate versions</dt><dd>{candidates.length}</dd></dl></aside>
     </div>
+    {siteChecks.length || formChecks.length ? <section className="panel"><h2>Monitoring</h2><div className="timeline-list">{[...siteChecks, ...formChecks].sort((left, right) => right.checkedAt.localeCompare(left.checkedAt)).map((check) => <article className="timeline-item" key={check.id}><span className={`badge is-${check.ok ? "success" : "attention"}`}>{check.ok ? "ok" : "failed"}</span><div><strong>{check.kind === "site" ? "Site" : "Form"} · {check.target}</strong><small>{formatProductDate(check.checkedAt)}{Array.isArray(check.detail.problems) && check.detail.problems.length ? ` · ${(check.detail.problems as string[]).join("; ")}` : ""}</small></div></article>)}</div></section> : null}
     <section className="panel"><h2>Operator queue</h2><div className="finding-list">{openQueue.map((item) => <article className="finding-card" key={item.id}><span className={`badge is-${statusTone(item.severity)}`}>{item.reason.replaceAll("_", " ")}</span><p>{typeof item.findings[0]?.message === "string" ? item.findings[0].message : `${item.findings.length} findings`}</p><Link className="button secondary" href={`/admin/site-queue/${item.id}`}>Review</Link></article>)}{!openQueue.length ? <p className="muted">No operator action required.</p> : null}</div></section>
     <div className="admin-grid"><section className="panel"><h2>Recent runs</h2><div className="timeline-list">{runs.map((run) => <article className="timeline-item" key={run.id}><span className={`badge is-${statusTone(run.status)}`}>{run.status}</span><div><Link href={`/admin/runs/${run.id}`}>{run.kind.replaceAll("_", " ")}</Link><small>{run.stage} · {formatProductDate(run.startedAt)}</small></div></article>)}{!runs.length ? <p className="muted">No runs yet.</p> : null}</div></section><section className="panel"><h2>Control-plane changes</h2><div className="timeline-list">{changes.slice(0, 20).map((change) => <article className="timeline-item" key={change.id}><span className={`badge is-${statusTone(change.status)}`}>{change.status}</span><div><strong>{change.payload.kind.replaceAll("_", " ")}</strong><small>{change.targetAuthority} · revision {change.expectedBusinessRevision}/{change.expectedIntentRevision}</small></div></article>)}{!changes.length ? <p className="muted">No changes recorded.</p> : null}</div></section></div>
   </main>;

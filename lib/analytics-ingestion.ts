@@ -164,6 +164,11 @@ export function internalTrafficHeader(at = Date.now()) {
   return `${timestamp}.${hmacSha256Hex(`lodesta-internal-traffic-v1\n${timestamp}`)}`;
 }
 
+/** Header value Lodesta's own checks send so their traffic is labelled and never counted. */
+export function internalTrafficHeaderValue(now = Date.now()) {
+  return `${now}.${hmacSha256Hex(`lodesta-internal-traffic-v1\n${now}`)}`;
+}
+
 function hasValidInternalTrafficHeader(request: Request) {
   const [timestamp, signature] = (request.headers.get("x-lodesta-internal-traffic") ?? "").split(".");
   const at = Number(timestamp);

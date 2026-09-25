@@ -78,7 +78,8 @@ assert.deepEqual(
     "202609250001_owner_notifications.sql",
     "202609250002_site_offline.sql",
     "202609250003_site_claim_links.sql",
-    "202609250004_domain_serving_resilience.sql"
+    "202609250004_domain_serving_resilience.sql",
+    "202609250005_site_monitoring.sql"
   ],
   "The public schema must use the canonical baseline followed by the reviewed forward migrations."
 );

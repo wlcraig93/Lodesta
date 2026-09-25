@@ -53,12 +53,13 @@ try {
   assert.match(sent[0]!.text, /Ants in the kitchen\./);
   assert.match(sent[0]!.text, /https:\/\/app\.lodesta\.example\/workspace\/haynes-pest\/leads/);
 
-  // Owner tests are labelled; synthetic checks go only to the team address.
+  // Owner tests are labelled; synthetic checks are recorded but email nobody.
   await service.enqueueLead({ siteId: "site_owned", inquiryId: "inq_2", eventId: "inq_2_event", submissionKind: "owner_test" });
   await service.enqueueLead({ siteId: "site_owned", inquiryId: "inq_3", eventId: "inq_3_event", submissionKind: "synthetic" });
   await service.deliverDue({ workerId: "w", now: at(1) });
   assert.equal(sent.find((item) => item.subject.startsWith("[Test] "))?.to, "owner@account.example");
-  assert.equal(sent.filter((item) => item.to === "alerts@team.example").length, 1);
+  assert.equal(sent.filter((item) => item.to === "alerts@team.example").length, 0);
+  assert.equal((await notifications.list({ statuses: ["suppressed"] }))[0]?.suppressedReason, "synthetic_check");
 
   // Unowned prospect sites, unconfirmed accounts and an unset team address notify nobody.
   operatorEmail = undefined;
@@ -69,7 +70,7 @@ try {
   assert.deepEqual((await service.deliverDue({ workerId: "w", now: at(2) })).map((item) => item.status), ["suppressed", "suppressed", "suppressed"]);
   assert.equal(sent.length, before);
   const suppressed = await notifications.list({ statuses: ["suppressed"] });
-  assert.deepEqual(suppressed.map((item) => item.suppressedReason).sort(), ["operator_email_unset", "owner_email_unconfirmed", "site_unowned"]);
+  assert.deepEqual(suppressed.map((item) => item.suppressedReason).sort(), ["owner_email_unconfirmed", "site_unowned", "synthetic_check", "synthetic_check"]);
 
   // Provider failures retry with backoff, then fail visibly without losing the record.
   sendResult = "failed";

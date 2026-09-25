@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { configuredAppOrigin } from "./lib/app-origin";
+import { pilotRestricted, restrictedPilotHeaders } from "./lib/pilot-access";
 import { cachePolicyForPathname, cachePolicyHeaders } from "./lib/cache-policy";
 import {
   customDomainRoutedHeader,
@@ -30,6 +31,16 @@ const forwardedHostRewriteParam = "__lodesta_forwarded_host";
 const domainResolveBypassHeader = "x-lodesta-domain-resolve";
 
 export async function middleware(request: NextRequest) {
+  const response = await routeRequest(request);
+  // Restricted pilot responses must never be stored by a browser or CDN,
+  // including after a successful sign-in.
+  if (pilotRestricted(requestHostname(request.headers), request.nextUrl.pathname)) {
+    for (const [name, value] of Object.entries(restrictedPilotHeaders(response.headers.get("vary")))) response.headers.set(name, value);
+  }
+  return response;
+}
+
+async function routeRequest(request: NextRequest) {
   const { pathname } = request.nextUrl;
   // Deployment health checks may use an internal Host header that is neither
   // a Lodesta platform hostname nor a customer domain. Liveness must reach the
@@ -44,7 +55,7 @@ export async function middleware(request: NextRequest) {
   const directHostname = normalizeHostname(request.headers.get("host") ?? "");
   const hostname = requestHostname(request.headers);
   const platformHost = !hostname || isPlatformHost(hostname);
-  const accessDenied = pilotAccessDenied(request, hostname, platformHost, pathname);
+  const accessDenied = pilotAccessDenied(request, hostname, pathname);
   if (accessDenied) return accessDenied;
   const hasForwardedHostSignal = Boolean(request.headers.get("x-forwarded-host") || request.headers.get("forwarded"));
   const forwardedHostRouted =
@@ -109,26 +120,15 @@ export async function middleware(request: NextRequest) {
  * hostnames and /sites/ slugs require the team credential (HTTP Basic).
  * Monitoring sends the same credential. Unset variables restrict nothing.
  */
-function pilotAccessDenied(request: NextRequest, hostname: string, platformHost: boolean, pathname: string) {
+function pilotAccessDenied(request: NextRequest, hostname: string, pathname: string) {
   const credential = process.env.LODESTA_PILOT_ACCESS_CREDENTIAL?.trim();
-  if (!credential) return undefined;
-  const hosts = listSetting(process.env.LODESTA_PILOT_RESTRICTED_HOSTS);
-  const slugs = listSetting(process.env.LODESTA_PILOT_RESTRICTED_SLUGS);
-  const slug = pathname.match(/^\/sites\/([^/]+)/)?.[1];
-  const restricted = platformHost
-    ? Boolean(slug && slugs.includes(decodeURIComponent(slug)))
-    : hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`));
-  if (!restricted) return undefined;
+  if (!credential || !pilotRestricted(hostname, pathname)) return undefined;
   const supplied = request.headers.get("authorization")?.match(/^Basic\s+(.+)$/i)?.[1];
   if (supplied && constantTimeEqual(supplied, btoa(credential))) return undefined;
   return new NextResponse("Sign in to view this pilot site.", {
     status: 401,
     headers: { "www-authenticate": 'Basic realm="Lodesta pilot", charset="UTF-8"', "cache-control": "no-store", "x-robots-tag": "noindex" }
   });
-}
-
-function listSetting(value: string | undefined) {
-  return (value ?? "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
 }
 
 function constantTimeEqual(left: string, right: string) {
@@ -193,8 +193,10 @@ function routedRequestHeaders(request: NextRequest) {
 // Customer hostnames expose only what a published site calls: form
 // submission, analytics, public assets and the trusted runtime.
 function isPublicRuntimeSkippedPath(pathname: string) {
-  return pathname === "/api/forms/submit"
-    || pathname === "/api/analytics"
+  // trailingSlash: true redirects API calls to their slashed form, so accept both.
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  return path === "/api/forms/submit"
+    || path === "/api/analytics"
     || (pathname.startsWith("/api/assets/") && !pathname.startsWith("/api/assets/owner"))
     || pathname.startsWith("/_next/")
     || pathname.startsWith("/_lodesta/")

@@ -1,3 +1,5 @@
+import { customDomainRoutedHeader, requestHostname } from "@/lib/host-routing";
+import { pilotRestricted, restrictedPilotHeaders } from "@/lib/pilot-access";
 import { configuredArtifactBlobStore, readVerifiedArtifactFile } from "@/packages/site-artifacts";
 import { generatedSiteContentSecurityPolicy } from "@/lib/generated-site-security";
 import { sitePlatformRepository } from "@/packages/platform-data";
@@ -10,6 +12,20 @@ export const dynamic = "force-dynamic";
 
 export async function GET(
   request: Request,
+  context: { params: Promise<{ slug: string; path?: string[] }> }
+) {
+  const response = await publishedSiteResponse(request, context);
+  // Access-restricted pilot sites: nothing is stored by a browser or CDN.
+  if (pilotRestricted(requestHostname(request.headers), new URL(request.url).pathname)) {
+    const headers = new Headers(response.headers);
+    for (const [name, value] of Object.entries(restrictedPilotHeaders(headers.get("vary")))) headers.set(name, value);
+    return new Response(response.body, { status: response.status, headers });
+  }
+  return response;
+}
+
+async function publishedSiteResponse(
+  request: Request,
   { params }: { params: Promise<{ slug: string; path?: string[] }> }
 ) {
   const { slug, path } = await params;
@@ -21,7 +37,7 @@ export async function GET(
   const { site, version, artifact } = context;
   // Once a custom domain is live, it is the site's only address; the Lodesta
   // path redirects there so search engines index one copy.
-  if (request.headers.get("x-lodesta-custom-domain-routed") !== "1") {
+  if (request.headers.get(customDomainRoutedHeader) !== "1") {
     const liveDomain = (await platformOperationsRepository.listDomains(site.id)).find((domain) => domain.status === "active");
     if (liveDomain) {
       const target = new URL(`https://${liveDomain.hostname}/${path?.join("/") ?? ""}`);
@@ -101,7 +117,7 @@ function siteSitemap(request: Request, slug: string, routes: string[], lastModif
 }
 
 function siteBasePath(request: Request, slug: string) {
-  return request.headers.get("x-lodesta-custom-domain-routed") === "1" ? "" : `/sites/${encodeURIComponent(slug)}`;
+  return request.headers.get(customDomainRoutedHeader) === "1" ? "" : `/sites/${encodeURIComponent(slug)}`;
 }
 
 function normalizeRoute(value: string) {

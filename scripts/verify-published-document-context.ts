@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { customDomainRoutedHeader } from "../lib/host-routing";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,9 @@ import { buildSiteRuntimeBytes } from "../packages/trusted-runtime";
 import { bindPublishedDocumentContext } from "../packages/site-platform/public-document-context";
 import { GET } from "../app/sites/[slug]/[[...path]]/route";
 import { resolveAnalyticsServingContext } from "../lib/analytics-ingestion";
+import { NextRequest } from "next/server";
+import { middleware } from "../middleware";
+import { platformOperationsRepository } from "../packages/platform-operations";
 
 assert.notEqual(process.env.LODESTA_REPOSITORY, "supabase", "This fixture is local only.");
 const previousCwd = process.cwd();
@@ -81,7 +85,7 @@ try {
     assert(!retained.bytes.toString().includes("data-lodesta-version-id"), "Fixture bypassed the real finalizer gap.");
     for (const customDomain of [false, true]) {
       const response = await GET(new Request(`${origin}${customDomain ? "" : "/sites/context-test"}${route.path}`, {
-        headers: customDomain ? { "x-lodesta-custom-domain-routed": "1" } : {}
+        headers: customDomain ? { [customDomainRoutedHeader]: "1" } : {}
       }), { params: Promise.resolve({ slug: "context-test", path: route.path.split("/").filter(Boolean) }) });
       assert.equal(response.status, 200);
       assert.equal(response.headers.get("x-lodesta-site-version"), version.id);
@@ -114,6 +118,57 @@ try {
     host: "localhost", referer: "http://localhost/sites/context-test", "user-agent": ""
   } }), input.siteId, "version_not_current", { requireAnalytics: false, purpose: "form" });
   assert.equal(staleForm.ok && staleForm.version.id, version.id, "A lead from a page loaded before republish was rejected.");
+  // Custom domains end to end: the headers the real middleware forwards reach
+  // the real page handler, which serves the page instead of redirecting to itself.
+  {
+    const realFetch = globalThis.fetch;
+    const originalListDomains = platformOperationsRepository.listDomains;
+    globalThis.fetch = (async () => Response.json({ resolved: true, slug: "context-test", siteId: input.siteId, domainStatus: "active" })) as typeof fetch;
+    platformOperationsRepository.listDomains = async () => [{ siteId: input.siteId, hostname: "pilot.example.com", status: "active" }] as never;
+    try {
+      const routed = await middleware(new NextRequest("https://pilot.example.com/", { headers: { host: "pilot.example.com" } }));
+      const rewrite = routed.headers.get("x-middleware-rewrite");
+      assert(rewrite && new URL(rewrite).pathname === "/sites/context-test", `Custom domain was not rewritten to the site: ${rewrite}`);
+      const forwarded = new Headers();
+      for (const name of (routed.headers.get("x-middleware-override-headers") ?? "").split(",").filter(Boolean)) {
+        const value = routed.headers.get(`x-middleware-request-${name}`);
+        if (value !== null) forwarded.set(name, value);
+      }
+      const page = await GET(new Request(rewrite, { headers: forwarded }), { params: Promise.resolve({ slug: "context-test", path: [] }) });
+      assert.equal(page.status, 200, "A live custom domain redirected to itself instead of serving the page.");
+      const platformPath = await GET(new Request(`${origin}/sites/context-test/contact/`), { params: Promise.resolve({ slug: "context-test", path: ["contact"] }) });
+      assert.equal(platformPath.status, 308);
+      assert.equal(platformPath.headers.get("location"), "https://pilot.example.com/contact");
+
+      // trailingSlash: true redirects API calls to their slashed form; both must reach the handlers.
+      for (const path of ["/api/forms/submit", "/api/forms/submit/", "/api/analytics", "/api/analytics/"]) {
+        const api = await middleware(new NextRequest(`https://pilot.example.com${path}`, { method: "POST", headers: { host: "pilot.example.com" } }));
+        assert.notEqual(api.status, 404, `${path} was unreachable on a custom domain.`);
+      }
+
+      // Restricted pilot pages are never cacheable, even after a successful sign-in.
+      process.env.LODESTA_PILOT_ACCESS_CREDENTIAL = "team:pilot-secret";
+      process.env.LODESTA_PILOT_RESTRICTED_HOSTS = "pilot.example.com";
+      try {
+        const authorization = `Basic ${Buffer.from("team:pilot-secret").toString("base64")}`;
+        const signedIn = await middleware(new NextRequest("https://pilot.example.com/", { headers: { host: "pilot.example.com", authorization } }));
+        assert.equal(signedIn.headers.get("cache-control"), "private, no-store");
+        assert.match(signedIn.headers.get("vary") ?? "", /Authorization/);
+        forwarded.set("authorization", authorization);
+        const restrictedPage = await GET(new Request(rewrite, { headers: forwarded }), { params: Promise.resolve({ slug: "context-test", path: [] }) });
+        assert.equal(restrictedPage.status, 200);
+        assert.equal(restrictedPage.headers.get("cache-control"), "private, no-store", "A signed-in pilot page was publicly cacheable.");
+        const anonymous = await middleware(new NextRequest("https://pilot.example.com/", { headers: { host: "pilot.example.com" } }));
+        assert.equal(anonymous.status, 401, "An anonymous request after a signed-in one was served.");
+      } finally {
+        delete process.env.LODESTA_PILOT_ACCESS_CREDENTIAL;
+        delete process.env.LODESTA_PILOT_RESTRICTED_HOSTS;
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+      platformOperationsRepository.listDomains = originalListDomains;
+    }
+  }
   active = false;
   assert.equal((await GET(new Request(`${origin}/sites/context-test`), { params: Promise.resolve({ slug: "context-test" }) })).status, 404);
   const tricky = '<!-- <html> --><HTML data-lodesta-site-id="site_test" title="a > b &amp; c"><head></head><body>untouched</body></HTML>';

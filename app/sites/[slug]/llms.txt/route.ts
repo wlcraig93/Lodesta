@@ -1,3 +1,4 @@
+import { customDomainRoutedHeader } from "@/lib/host-routing";
 import { loadPublishedSiteContext, llmsTextForSite } from "@/packages/site-platform/public-site";
 
 export const dynamic = "force-dynamic";
@@ -6,7 +7,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ slug
   const { slug } = await params;
   const context = await loadPublishedSiteContext(slug);
   if (!context) return new Response(null, { status: 404 });
-  const customDomain = request.headers.get("x-lodesta-custom-domain-routed") === "1";
+  const customDomain = request.headers.get(customDomainRoutedHeader) === "1";
   return new Response(llmsTextForSite(context, new URL(request.url).origin, customDomain), {
     headers: {
       "content-type": "text/plain; charset=utf-8",

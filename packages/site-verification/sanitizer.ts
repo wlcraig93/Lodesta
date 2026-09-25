@@ -478,7 +478,8 @@ function sanitizeForm(element: Element, allowedFormIds: Set<string>, findings: A
 // backslash as a slash, so these spellings could navigate somewhere other than
 // the value this gate checked.
 function ambiguousHrefSyntax(value: string) {
-  return value !== value.trim() || /[\u0000-\u001f\u007f\\]/.test(value) || value.startsWith("//");
+  // Invisible and direction-control characters can make a link read differently than it resolves.
+  return value !== value.trim() || /[\u0000-\u001f\u007f\\\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/.test(value) || value.startsWith("//");
 }
 
 function hrefDisposition(value: string, input: SanitizeArtifactInput): "safe" | "factual_mismatch" | "unsafe" {

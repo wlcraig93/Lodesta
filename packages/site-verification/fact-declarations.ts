@@ -232,7 +232,9 @@ function visibleRoute(
 }
 
 function internalAuthoringArtifactFindings(route: VisibleRoute) {
-  const matches = [...route.bodyText.matchAll(/\b(?:source details?|evidence details?|first[- ]party evidence)\s*:/gi)];
+  // Provenance labels, and distinctive phrases of Lodesta's own instructions,
+  // which only appear on a page when the author was manipulated into leaking them.
+  const matches = [...route.bodyText.matchAll(/\b(?:source details?|evidence details?|first[- ]party evidence)\s*:|You are Lodesta['’]s website designer|approved-architecture\.ts|approvedSourceIndex|owner-authoritative business context|#lodesta-sdk/gi)];
   return matches.map((match) => finding(
     "fact.internal_authoring_artifact",
     `Customer-facing content exposes the internal provenance label ${JSON.stringify(match[0])}. Preserve the supported customer content without publishing authoring or verification scaffolding.`,
@@ -786,7 +788,9 @@ function factualMarkers(text: string) {
   // scanner against canonical evidence, in both body text and metadata.
   const markers: Array<{ text: string; start: number; end: number }> = [];
   // One-for-one replacement keeps offsets aligned with the rendered text.
-  text = text.replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, "-");
+  // Unicode hyphens, and invisible or direction-control characters hidden
+  // between digits, read as separators.
+  text = text.replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "-");
   for (const pattern of [
     /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi,
     /(?<![\dA-Za-z])(?:\+?1[\s.-]*)?\(?\s*[2-9]\d{2}\s*\)?[\s.-]*[2-9]\d{2}[\s.-]*\d{4}(?![\dA-Za-z])/g,

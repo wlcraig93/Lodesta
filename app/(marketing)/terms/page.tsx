@@ -1,12 +1,13 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { configuredAppOriginOrDefault } from "@/lib/app-origin";
 
 export const metadata: Metadata = {
   title: "Terms of Service | Lodesta",
   description: "Terms governing access to and use of Lodesta's pre-launch managed website and local-presence service.",
   applicationName: "Lodesta",
   alternates: {
-    canonical: "https://dev.lodesta.com/terms/"
+    canonical: `${configuredAppOriginOrDefault()}/terms/`
   },
   robots: {
     index: true,

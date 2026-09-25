@@ -1,12 +1,13 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { configuredAppOriginOrDefault } from "@/lib/app-origin";
 
 export const metadata: Metadata = {
   title: "Privacy Policy | Lodesta",
   description: "How Lodesta collects, uses, shares, and protects account, business, website, and visitor information.",
   applicationName: "Lodesta",
   alternates: {
-    canonical: "https://dev.lodesta.com/privacy/"
+    canonical: `${configuredAppOriginOrDefault()}/privacy/`
   },
   robots: {
     index: true,
@@ -16,8 +17,8 @@ export const metadata: Metadata = {
 
 const privacySections = [
   {
-    title: "1. Google sign-in and account information",
-    body: "When you sign in with Google, Lodesta receives your name, email address, profile image when available, and Google account identifier. Supabase processes the authentication flow. Lodesta uses this information to create and secure your account, provide account access, and communicate with you about the service. Lodesta does not receive your Google password or use Google account information for advertising."
+    title: "1. Sign-in and account information",
+    body: "You can sign in with Google or with a sign-in link sent to your email address. With Google, Lodesta receives your name, email address, profile image when available, and Google account identifier. Supabase processes the authentication flow. Lodesta uses this information to create and secure your account, provide account access, and send you notices about your own websites, such as new inquiries and finished website changes. These notices go only to the email address on your Lodesta account. Lodesta does not receive your Google password or use Google account information for advertising."
   },
   {
     title: "2. Business and website information",
@@ -25,7 +26,7 @@ const privacySections = [
   },
   {
     title: "3. Inquiries and visitor information",
-    body: "Lodesta-hosted websites may collect inquiry form submissions, including names, email addresses, phone numbers, messages, and other fields selected by the site owner. First-party website analytics records page views, clicks, form activity, limited performance measurements, page paths, referrer hosts, campaign fields, and broad device categories. A random identifier held in page memory connects activity only within that page load; it does not identify returning visitors or connect activity across pages. Inquiry handling and platform security may separately process user agents and IP-derived hashes for abuse prevention."
+    body: "Lodesta-hosted websites may collect inquiry form submissions, including names, email addresses, phone numbers, messages, and other fields selected by the site owner. First-party website analytics records page views, clicks, form activity, limited performance measurements, page paths, referrer hosts, campaign fields, and broad device categories. A random identifier held in page memory connects activity only within that page load; it does not identify returning visitors or connect activity across pages. Inquiry handling and platform security may separately process user agents and IP-derived hashes for abuse prevention. Each inquiry is stored in the site owner's Lodesta inbox and a copy is emailed to the email address on the site owner's Lodesta account. The site owner and Lodesta staff who operate and support the service can see inquiries; they are kept while the site owner's account exists unless the site owner or the visitor asks us to delete them. When someone requests a Website Health Report, we use the email address they enter to send the report link."
   },
   {
     title: "4. Cookies and local storage",
@@ -37,7 +38,7 @@ const privacySections = [
   },
   {
     title: "6. Service providers",
-    body: "Lodesta uses service providers to operate the platform. These currently include Supabase for authentication and database services, Railway for application hosting, Cloudflare and R2 for networking and artifact storage, OpenAI for website research and generation, OpenRouter when its optional model-routing capability is enabled, and Resend for operational email. These providers may process information only as needed to perform their respective services."
+    body: "Lodesta uses service providers to operate the platform. These currently include Supabase for authentication and database services, Railway for application hosting, Cloudflare and R2 for networking and artifact storage, OpenAI for website research and generation, OpenRouter when its optional model-routing capability is enabled, and Resend for account notices, inquiry notifications and report emails. These providers may process information only as needed to perform their respective services."
   },
   {
     title: "7. Sharing and sale of information",
@@ -66,7 +67,7 @@ export default function PrivacyPage() {
     <main className="admin-page">
       <header className="admin-header">
         <div>
-          <span className="badge">Effective September 7, 2026</span>
+          <span className="badge">Effective September 25, 2026</span>
           <h1>Privacy Policy</h1>
           <p>
             This policy explains how Lodesta collects, uses, shares, and protects information when people use the

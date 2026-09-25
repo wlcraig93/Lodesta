@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { configuredAppOriginOrDefault } from "@/lib/app-origin";
 import { WebsiteHealthReportForm } from "@/components/WebsiteHealthReportForm";
 import styles from "./homepage.module.css";
 
-const homepageUrl = "https://dev.lodesta.com/";
+// The deployment's own origin, so canonicals follow the production domain.
+const homepageUrl = `${configuredAppOriginOrDefault()}/`;
 const homepageTitle = "Lodesta | AI website manager for local businesses";
 const homepageDescription =
   "Lodesta builds, manages, and improves local-business websites to help customers find you and take the next step. Start with a free Website Health Report.";

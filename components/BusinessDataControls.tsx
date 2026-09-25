@@ -6,6 +6,9 @@ import type { BusinessState, SiteIntent } from "@/packages/site-contracts";
 import { ProductSelect } from "@/components/ProductUI";
 import { firstMissingRequired, missingRequiredMessage } from "@/lib/product-form-fields";
 
+// Several saves in a row are combined into one website update.
+const savedNotice = "Saved. Lodesta is updating your website with this change, together with any other changes you save now. Your live site keeps its current details until you review and publish the update in the editor.";
+
 export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }: { siteId: string; state: BusinessState; intent: SiteIntent; sourceSnapshotId?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string>();
@@ -31,7 +34,7 @@ export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }
       });
       const body = await response.json().catch(() => null) as { error?: string; request?: { status?: string } } | null;
       if (!response.ok) throw new Error(body?.error ?? `Change failed (${response.status})`);
-      setNotice(body?.request?.status === "pending" ? "Submitted for operator review." : "Saved. A replacement version is being prepared.");
+      setNotice(body?.request?.status === "pending" ? "Submitted for review." : savedNotice);
       router.refresh();
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(undefined); }
@@ -60,7 +63,7 @@ export function BusinessDataControls({ siteId, state, intent, sourceSnapshotId }
       const result = await response.json().catch(() => null) as { error?: string } | null;
       if (!response.ok) throw new Error(result?.error ?? `Upload failed (${response.status})`);
       form.reset();
-      setNotice("Asset retained. A replacement version is being prepared.");
+      setNotice(savedNotice);
       router.refresh();
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(undefined); }

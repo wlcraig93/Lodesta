@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 
 const privacySections = [
   {
-    title: "1. Sign-in and account information",
+    title: "1. Google sign-in, email sign-in and account information",
     body: "You can sign in with Google or with a sign-in link sent to your email address. With Google, Lodesta receives your name, email address, profile image when available, and Google account identifier. Supabase processes the authentication flow. Lodesta uses this information to create and secure your account, provide account access, and send you notices about your own websites, such as new inquiries and finished website changes. These notices go only to the email address on your Lodesta account. Lodesta does not receive your Google password or use Google account information for advertising."
   },
   {

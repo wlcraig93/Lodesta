@@ -10,6 +10,7 @@ import {
   type WorkspaceReferenceFile
 } from "./contracts";
 import { resolveApprovedSourceDocuments } from "@/packages/business-data/owner-documents";
+import { withoutInjectedSpamSourcePages } from "@/packages/business-data/source-page-classification";
 
 const maximumReferenceFileCharacters = 900_000;
 
@@ -33,7 +34,7 @@ export function createSourceWorkspace(input: {
     sourceCount += 1;
     const sourceRoot = `source-site/${snapshot.id}`;
     const manifestLines: string[] = [];
-    for (const page of pagesBySource.get(snapshot.id) ?? []) {
+    for (const page of withoutInjectedSpamSourcePages(pagesBySource.get(snapshot.id) ?? [])) {
       pageCount += 1;
       const extractedText = page.extractedText;
       const contentFiles = extractedText

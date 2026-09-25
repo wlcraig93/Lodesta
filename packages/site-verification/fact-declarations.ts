@@ -3,7 +3,7 @@ import type { AnyNode, Element } from "domhandler";
 import { canonicalSourceTokens } from "@/lib/source-text-blocks";
 import { scanSensitiveClaimText } from "@/lib/content-safety-scanners";
 import { isContinuousAvailabilityValue } from "@/packages/business-data/availability";
-import { isLegalSourcePagePath, normalizedSourcePagePath } from "@/packages/business-data/source-page-classification";
+import { isLegalSourcePagePath, normalizedSourcePagePath, withoutInjectedSpamSourcePages } from "@/packages/business-data/source-page-classification";
 import { googleAggregateRatingObservationFromSnapshot } from "@/packages/business-data/web-research";
 import {
   factBindingSchema,
@@ -395,8 +395,8 @@ function firstPartyQuotationSources(buildInput: SitePublicBuildInput, snapshots:
     if (!buildInput.sourceSnapshotIds.includes(snapshot.id) || snapshot.sourceType !== "website" || !snapshot.sourceUrl) return [];
     return [[snapshot.id, new URL(snapshot.sourceUrl).hostname.replace(/^www\./, "")] as const];
   }));
-  return pages.filter((page) => page.outcome === "fetched"
-    && hosts.get(page.sourceSnapshotId) === new URL(page.finalUrl ?? page.requestedUrl).hostname.replace(/^www\./, ""))
+  return withoutInjectedSpamSourcePages(pages.filter((page) => page.outcome === "fetched"
+    && hosts.get(page.sourceSnapshotId) === new URL(page.finalUrl ?? page.requestedUrl).hostname.replace(/^www\./, "")))
     .map((page) => page.extractedText.split(/\n+/).map((line) => line.trim()).filter(Boolean));
 }
 

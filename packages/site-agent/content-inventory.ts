@@ -1,6 +1,6 @@
 import { reviewAttributionName, reviewAttributionPageTopicWords } from "@/lib/review-attribution";
 import type { SitePublicBuildInput, SourceSnapshotPage } from "@/packages/site-contracts";
-import { classifySourcePagePath, isLegalSourcePagePath } from "@/packages/business-data/source-page-classification";
+import { classifySourcePagePath, isLegalSourcePagePath, withoutInjectedSpamSourcePages } from "@/packages/business-data/source-page-classification";
 import {
   coreFirstPartyPageRoles,
   firstPartyPageRole,
@@ -347,7 +347,7 @@ export function contentInventorySummary(inventory: FirstPartyContentInventory) {
 
 function inventoryPages(pages: readonly SourceSnapshotPage[]): InventoryPage[] {
   const byPath = new Map<string, SourceSnapshotPage>();
-  for (const page of pages) {
+  for (const page of withoutInjectedSpamSourcePages(pages)) {
     if (page.outcome !== "fetched" || !page.extractedText.trim() || page.exactDuplicateOf) continue;
     const path = canonicalPath(page.path);
     const current = byPath.get(path);

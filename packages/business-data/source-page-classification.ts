@@ -57,6 +57,15 @@ export function isLikelyInjectedSpamSourcePage(
   return !new RegExp(`\\b${topic.replace(/[^a-z0-9]/gi, ".?")}\\b`, "i").test(homepageText);
 }
 
+/** Drops injected spam pages from any first-party page set, judged against its homepage. */
+export function withoutInjectedSpamSourcePages<Page extends { path: string; title?: string | null; extractedText: string }>(pages: readonly Page[]) {
+  const homepageText = pages
+    .filter((page) => normalizedSourcePagePath(page.path) === "/")
+    .map((page) => `${page.title ?? ""}\n${page.extractedText}`)
+    .join("\n");
+  return pages.filter((page) => !isLikelyInjectedSpamSourcePage(page, homepageText));
+}
+
 export function normalizedSourcePagePath(value: string) {
   const pathname = value.split(/[?#]/, 1)[0] || "/";
   if (pathname === "/") return pathname;

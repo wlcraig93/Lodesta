@@ -13,7 +13,7 @@ import { normalizeSiteRedirectPath } from "@/packages/platform-operations/contra
 import {
   classifySourcePagePath,
   isLegalSourcePagePath,
-  isLikelyInjectedSpamSourcePage,
+  withoutInjectedSpamSourcePages,
   isMalformedSourceLinkPath
 } from "@/packages/business-data/source-page-classification";
 import type { ApprovedSourceDocument } from "@/packages/business-data/owner-documents";
@@ -172,12 +172,7 @@ export function buildSiteArchitectureInventory(
   // never become routes, so they never enter the planner's ledger.
   // Off-topic posts injected into a hacked CMS (casino, pharma) are not the
   // business's content; keep them out of the plan so they never become routes.
-  const homepageText = pages
-    .filter((page) => canonicalPathname(page.path) === "/")
-    .map((page) => `${page.title ?? ""}\n${page.extractedText}`)
-    .join("\n");
-  pages = pages.filter((page) => !isMalformedSourceLinkPath(page.path)
-    && !isLikelyInjectedSpamSourcePage(page, homepageText));
+  pages = withoutInjectedSpamSourcePages(pages).filter((page) => !isMalformedSourceLinkPath(page.path));
   const pagePathById = new Map(pages.map((page) => [page.id, canonicalPathname(page.path)]));
   const fetchedPages = pages.filter((page) => page.outcome === "fetched" && Boolean(page.extractedText));
   const evidencePageByPath = new Map<string, SourceSnapshotPage>();

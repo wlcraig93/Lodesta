@@ -287,6 +287,12 @@ const manyFaqPage = page("/faq-large", "FAQ", ["Frequently Asked Questions", ...
   `How does option number ${index + 1} work for my yard?`,
   `Option number ${index + 1} covers the front beds and the back fence line with ordinary seasonal care for plants.`
 ]).flat()]);
+// Posts injected into a hacked blog never supply testimonials or other content.
+const home = page("/", "Home", ["Tree removal and trimming in Austin."]);
+const spamReviews = { ...reviews, id: "page_spam_reviews", path: "/blog/online-casino-bonus", title: "Online casino bonus" };
+assert.ok(createFirstPartyContentInventory({ pages: [home, reviews] }).testimonials.length > 0, "control: the reviews page supplies testimonials");
+assert.equal(createFirstPartyContentInventory({ pages: [home, spamReviews] }).testimonials.length, 0, "injected spam pages must not supply testimonials");
+
 const large = createFirstPartyContentInventory({ pages: [manyFaqPage] });
 assert.equal(large.faqs.length, 20);
 assert.equal(large.omitted?.faqs, 40);

@@ -139,6 +139,7 @@ export interface PlatformOperationsRepository {
   findReusableProspectReportBySourceKey(sourceKey: string, accessPolicy: ProspectReportAccessPolicy, since: string): Promise<ProspectReportRecord | null>;
   updateProspectReport(input: UpdateProspectReportInput): Promise<ProspectReportRecord | null>;
   createProspectReportLead(input: CreateProspectReportLeadInput): Promise<ProspectReportLead | null>;
+  getProspectReportLead(leadId: string): Promise<ProspectReportLead | null>;
   createProspectReportAccessGrant(input: {
     reportId: string;
     leadId: string;
@@ -648,6 +649,7 @@ export class LocalPlatformOperationsRepository implements PlatformOperationsRepo
     });
     return result;
   }
+  async getProspectReportLead(id: string) { return structuredClone((await this.read()).leads.find((item) => item.id === id) ?? null); }
   async createProspectReportLead(input: CreateProspectReportLeadInput) {
     if (!await this.getProspectReport(input.reportId)) return null;
     let result!: ProspectReportLead;
@@ -1212,6 +1214,7 @@ class SupabasePlatformOperationsRepository implements PlatformOperationsReposito
   async findReusableProspectReportBySourceKey(sourceKey: string, accessPolicy: ProspectReportAccessPolicy, since: string) { const row = await maybe<ReportRow>(this.client.from("prospect_reports").select("*").eq("source_key", sourceKey).eq("access_policy", accessPolicy).eq("status", "completed").gte("completed_at", since).order("completed_at", { ascending: false }).limit(1).maybeSingle(), "Find reusable report"); return row ? reportFromRow(row) : null; }
   async updateProspectReport(input: UpdateProspectReportInput) { const patch: Record<string, unknown> = { updated_at: new Date().toISOString() }; const map: Record<string, string> = { status: "status", accessPolicy: "access_policy", assessmentId: "assessment_id", sourceUrl: "source_url", sourceHost: "source_host", websiteKind: "website_kind", result: "report_json", errorCode: "error_code", completedAt: "completed_at" }; for (const [key, column] of Object.entries(map)) { const value = input[key as keyof UpdateProspectReportInput]; if (value !== undefined) patch[column] = value; } if (input.clearError) patch.error_code = null; const row = await maybe<ReportRow>(this.client.from("prospect_reports").update(patch).eq("id", input.reportId).select("*").maybeSingle(), "Update report"); return row ? reportFromRow(row) : null; }
   async createProspectReportLead(input: CreateProspectReportLeadInput) { const row = await maybe<LeadRow>(this.client.rpc("create_or_reuse_prospect_report_lead", { target_report_id: input.reportId, target_email: input.email, target_contact_name: input.contactName ?? "", target_phone: input.phone ?? "", target_ip_hash: input.ipHash ?? null, target_metadata: input.metadata ?? {} }).maybeSingle(), "Create or reuse report lead"); return row ? leadFromRow(row) : null; }
+  async getProspectReportLead(id: string) { const row = await maybe<LeadRow>(this.client.from("prospect_report_leads").select("*").eq("id", id).maybeSingle(), "Get report lead"); return row ? leadFromRow(row) : null; }
   async createProspectReportAccessGrant(input: { reportId: string; leadId: string; tokenHash: string; expiresAt: string }) { const row = await data<ReportAccessGrantRow>(this.client.from("prospect_report_access_grants").insert({ id: `prospect_report_grant_${crypto.randomUUID().replaceAll("-", "")}`, report_id: input.reportId, lead_id: input.leadId, token_hash: input.tokenHash, expires_at: input.expiresAt }).select("*").single(), "Create report access grant"); return reportAccessGrantFromRow(row); }
   async findActiveProspectReportAccessGrant(reportId: string, tokenHash: string) { const row = await maybe<ReportAccessGrantRow>(this.client.from("prospect_report_access_grants").select("*").eq("report_id", reportId).eq("token_hash", tokenHash).gt("expires_at", new Date().toISOString()).maybeSingle(), "Find report access grant"); return row ? reportAccessGrantFromRow(row) : null; }
   async markProspectReportAccessGrantUsed(grantId: string) { await data(this.client.from("prospect_report_access_grants").update({ last_used_at: new Date().toISOString() }).eq("id", grantId).select("id").single(), "Mark report access grant used"); }

@@ -224,15 +224,48 @@ assert.equal(isTechnicalReleaseBlocker({ id: "route.slug_mismatch", severity: "e
   }
   const titled = prepareAfterChange([{ path: "/", bodyHtml: "<main><h1>Repairs</h1></main>", description: "Call (512) 555-0177 for repairs." }]);
   assert.ok(titled.some((finding) => finding.id === "fact.superseded_contact"), "A replaced phone in the page description passed.");
-  const legal = prepareAfterChange([
-    { path: "/", bodyHtml: "<main><h1>Repairs</h1><p>Repairs for Austin drivers.</p></main>" },
-    { path: "/privacy", title: "Privacy Policy", bodyHtml: "<main><h1>Privacy Policy</h1><p>Questions? Call (512) 555-0177.</p></main>" }
-  ]);
-  const preserved = legal.find((finding) => finding.id === "advisory.superseded_contact_preserved");
-  assert.ok(preserved && !isTechnicalReleaseBlocker(preserved) && preserved.route === "/privacy", "Legal text with an old contact must be reported, not blocked.");
-  assert.ok(!legal.some((finding) => finding.id === "fact.superseded_contact"));
   const unrelated = prepareAfterChange([{ path: "/", bodyHtml: "<main><h1>Repairs</h1><p>Serving 78701 and 78704 since 2004; license 5125550.</p></main>" }]);
   assert.ok(!unrelated.some((finding) => finding.id === "fact.superseded_contact"), "Unrelated numbers were read as the replaced phone.");
+}
+
+// A legal page's contact line follows the owner's replacement: the old value
+// blocks there too, and swapping in the current value keeps the provision
+// verbatim. A value removed with no replacement stays and is only reported.
+{
+  const provisions = [
+    "We collect the name, phone number and vehicle details you submit through our estimate form.",
+    "Questions about this policy can be sent to the shop manager by calling (512) 555-0177 during business hours.",
+    "We keep records only as long as the law and our warranty obligations require."
+  ];
+  const shell = ["Northstar Collision Repair", "Home", "Services", "Contact"];
+  const sources = [
+    page("privacy", "/privacy", [...shell, "Privacy Policy", ...provisions].join("\n"), [], "Privacy Policy"),
+    ...["/services", "/about", "/contact"].map((path, index) => page(`s${index}`, path, [...shell, `${path} page body with enough words to be a real page.`].join("\n")))
+  ];
+  const prepareLegal = (bodyHtml: string, buildInput = input) => prepareSiteArtifact({
+    authoredArtifact: agentAuthoredArtifactSchema.parse(normalizeAgentAuthoredArtifact({
+      kind: "agent-authored-artifact",
+      compilerManifest: expectedSiteSandboxManifest,
+      siteName: buildInput.business.name,
+      sharedCss: "body{font:16px Arial,sans-serif}",
+      routes: [
+        { path: "/", title: buildInput.business.name, description: "Collision repair in Austin.", bodyHtml: "<main><h1>Collision repair</h1><p>Repairs for Austin drivers.</p></main>" },
+        { path: "/privacy", title: "Privacy Policy", description: "How the shop handles information.", bodyHtml }
+      ]
+    })),
+    buildInput,
+    runtimeSeriesId: "site-runtime-v4",
+    sourcePages: sources,
+    supersededContacts: { phones: ["(512) 555-0177"], emails: [] }
+  }).findings.map(withReleaseSeverity).filter(isTechnicalReleaseBlocker).map((finding) => finding.id);
+  const legalHtml = (lines: string[]) => `<main><h1>Privacy Policy</h1>${lines.map((line) => `<p>${line}</p>`).join("")}</main>`;
+  const replaced = provisions.map((line) => line.replace("(512) 555-0177", "(512) 555-0142"));
+  assert.deepEqual(prepareLegal(legalHtml(replaced)), [], "A legal page carrying the owner's current phone was blocked.");
+  assert.ok(prepareLegal(legalHtml(provisions)).includes("fact.superseded_contact"), "A legal page kept a replaced phone.");
+  assert.ok(!prepareLegal(legalHtml(provisions)).includes("fact.legal_source_preservation"), "The verbatim legal text itself was reported as changed.");
+  assert.ok(prepareLegal(legalHtml(replaced.slice(1))).includes("fact.legal_source_preservation"), "A dropped provision passed alongside the phone swap.");
+  const noPhone = { ...input, business: { ...input.business, contacts: {} } };
+  assert.deepEqual(prepareLegal(legalHtml(provisions), noPhone), [], "A removed phone with no replacement blocked the verbatim legal text.");
 }
 
 console.log("First-party gate verification passed.");

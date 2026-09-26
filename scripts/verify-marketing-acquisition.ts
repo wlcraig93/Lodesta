@@ -178,8 +178,8 @@ try {
             accepted: true,
             report: unlockedReport,
             emailDelivery: {
-              status: "sent",
-              message: "The complete report is unlocked and a secure access link was sent."
+              status: "queued",
+              message: "The complete report is unlocked, and we're emailing a secure access link."
             }
           })
         });

@@ -1,15 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { appOriginFromRequest } from "@/lib/app-origin";
-import { sendProspectReportAccessEmail } from "@/lib/prospect-report-email";
 import { ipHashForRequest, sanitizeAnalyticsMetadata } from "@/lib/privacy";
 import { applyRateLimitHeaders, rateLimit } from "@/lib/rate-limit";
-import {
-  issueProspectReportAccessGrant,
-  prospectReportEmailLink,
-  setProspectReportAccessCookie
-} from "@/packages/acquisition/report-access";
+import { issueProspectReportAccessGrant, setProspectReportAccessCookie } from "@/packages/acquisition/report-access";
 import { publicProspectReport } from "@/packages/acquisition/prospect-reports";
+import { ownerNotificationService } from "@/packages/owner-notifications";
 import { platformOperationsRepository as repository } from "@/packages/platform-operations";
 
 export const runtime = "nodejs";
@@ -76,11 +71,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ rep
   }
 
   const issued = await issueProspectReportAccessGrant({ reportId, leadId: lead.id });
-  const delivery = await sendProspectReportAccessEmail({
-    email: lead.email,
-    businessName: report.result.siteUnderstanding.businessName,
-    reportUrl: prospectReportEmailLink(appOriginFromRequest(request), report.id, issued.secret)
+  // The worker sends the access email from the outbox with its own link; this
+  // response unlocks the report here either way.
+  const queued = await ownerNotificationService.enqueueReportAccess(lead.id).catch((error) => {
+    console.error(JSON.stringify({ event: "report_access_enqueue_failed", reportId, error: String(error) }));
+    return false;
   });
+  const delivery = queued
+    ? { status: "queued" as const, message: `The complete report is unlocked, and we're emailing a secure access link to ${lead.email}.` }
+    : { status: "failed" as const, message: "The report is unlocked here, but the access email could not be queued. You can resend it." };
   const response = NextResponse.json({
     accepted: true,
     report: publicProspectReport(report, { accessGranted: true }),

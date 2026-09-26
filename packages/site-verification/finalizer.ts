@@ -48,8 +48,9 @@ export type PreparedSiteArtifact = {
   };
   /**
    * Phones and emails the rendered site may show. The browser gate checks the
-   * text as rendered (including CSS generated content) against it. Replaced
-   * values stay allowed only in legal documents, which keep verbatim text.
+   * text as rendered (including CSS generated content) against it. A value the
+   * owner removed without a replacement stays allowed only in legal documents,
+   * which keep verbatim text.
    */
   contactPolicy?: RenderedContactPolicy;
 };
@@ -78,7 +79,7 @@ export function prepareSiteArtifact(input: {
   supersededContacts?: SupersededContacts;
 }) {
   const authored = agentAuthoredArtifactSchema.parse(input.authoredArtifact);
-  const superseded = normalizedSupersededContacts(input.supersededContacts);
+  const superseded = normalizedSupersededContacts(input.supersededContacts, input.buildInput.business.contacts);
   const routes = new Set(authored.routes.map((route) => normalizeRoutePath(route.path)));
   const allowedFormIds = new Set(input.buildInput.forms.map((form) => form.id));
   // Links, phone numbers and email addresses the business itself shows on its
@@ -125,7 +126,7 @@ export function prepareSiteArtifact(input: {
   findings.push(...validateCapabilityBindings(authored, input.buildInput));
   findings.push(...validateLeadForms(sanitized, input.buildInput));
   const approvedDocuments = resolveApprovedSourceDocuments({ buildInput: input.buildInput, snapshots: input.sourceSnapshots ?? [], pages: input.sourcePages ?? [] });
-  findings.push(...validateSourceSensitiveLegalRoutes(sanitized, input.sourcePages ?? [], approvedDocuments));
+  findings.push(...validateSourceSensitiveLegalRoutes(sanitized, input.sourcePages ?? [], approvedDocuments, superseded));
   const factBindings = new FactBindingValidator().validate({
     routes: sanitized.map((route) => ({ path: route.path, html: route.bodyHtml, title: route.title, description: route.description })),
     buildInput: input.buildInput,
@@ -200,8 +201,8 @@ export function prepareSiteArtifact(input: {
     contactPolicy: {
       phones: [...allowedPhoneNumbers],
       emails: [...allowedEmailAddresses],
-      legalOnlyPhones: [...superseded.phones],
-      legalOnlyEmails: [...superseded.emails]
+      legalOnlyPhones: superseded.currentPhone ? [] : [...superseded.phones],
+      legalOnlyEmails: superseded.currentEmail ? [] : [...superseded.emails]
     }
   } satisfies PreparedSiteArtifact;
 }
@@ -474,7 +475,8 @@ function visibleBodyText(html: string) {
 function validateSourceSensitiveLegalRoutes(
   routes: Array<{ path: string; bodyHtml: string }>,
   sourcePages: SourceSnapshotPage[],
-  approvedDocuments: ApprovedSourceDocument[] = []
+  approvedDocuments: ApprovedSourceDocument[] = [],
+  superseded?: NormalizedSupersededContacts
 ) {
   const findings: ArtifactGateFinding[] = [];
   const authoredByPath = new Map(routes.map((route) => [normalizedSourcePagePath(route.path), route]));
@@ -549,10 +551,12 @@ function validateSourceSensitiveLegalRoutes(
     // Binary completeness: every substantive provision of the legal body
     // (site shell and boilerplate such as "last updated" removed) must appear
     // in the rendered page. Whitespace, punctuation, case and markup are
-    // normalized; wording is not.
+    // normalized; wording is not. A contact value the owner replaced may carry
+    // the owner's current value instead.
     const rendered = ` ${renderedTokens.join(" ")} `;
     const missing = (legalProvisionsByPath.get(path) ?? []).filter((provision) => {
-      const variants = [provision, provision.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")]
+      const current = superseded ? withCurrentContacts(provision, superseded) : provision;
+      const variants = [provision, provision.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2"), current, current.replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")]
         .map((text) => canonicalSourceTokens(text).map((token) => token.value));
       if (variants[0]!.length < legalProvisionMinimumTokens) return false;
       return !variants.some((tokens) => rendered.includes(` ${tokens.join(" ")} `));
@@ -993,41 +997,75 @@ function dedupeFindings(findings: ArtifactGateFinding[]) {
 
 export type SupersededContacts = { phones: string[]; emails: string[] };
 
-function normalizedSupersededContacts(value: SupersededContacts | undefined) {
+function normalizedSupersededContacts(value: SupersededContacts | undefined, current: SitePublicBuildInput["business"]["contacts"]) {
+  const phone = current.phone ? comparablePhone(current.phone) : "";
+  const email = current.email?.trim().toLowerCase();
   return {
     phones: new Set((value?.phones ?? []).map(comparablePhone).filter((phone) => phone.length === 10)),
-    emails: new Set((value?.emails ?? []).map((email) => email.trim().toLowerCase()).filter(Boolean))
+    emails: new Set((value?.emails ?? []).map((email) => email.trim().toLowerCase()).filter(Boolean)),
+    /** The owner's current value that takes the old one's place, when there is one. */
+    currentPhone: phone.length === 10 ? phone : undefined,
+    currentEmail: email || undefined
   };
 }
 
+type NormalizedSupersededContacts = ReturnType<typeof normalizedSupersededContacts>;
+
 /**
- * After an owner replaces a phone or email, every operational use must carry
- * the new value. Legal documents keep their verbatim text, so an old value
- * there is reported for the owner instead of blocking.
+ * Legal source text with each replaced contact value swapped for the owner's
+ * current one. The phone keeps its source formatting; only its digits change.
+ */
+function withCurrentContacts(text: string, superseded: NormalizedSupersededContacts) {
+  let result = text;
+  if (superseded.currentPhone) {
+    const current = superseded.currentPhone;
+    result = result.replace(/(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g, (match) => {
+      if (!superseded.phones.has(comparablePhone(match))) return match;
+      let digit = 10;
+      return [...match].reverse().map((character) => /\d/.test(character) && digit > 0 ? current[--digit] : character).reverse().join("");
+    });
+  }
+  if (superseded.currentEmail) {
+    for (const email of superseded.emails) {
+      result = result.replace(new RegExp(email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), superseded.currentEmail);
+    }
+  }
+  return result;
+}
+
+/**
+ * After an owner replaces a phone or email, every use must carry the new
+ * value, including the contact lines of legal documents. Only when the owner
+ * removed a value without a replacement does a legal page keep the old one
+ * verbatim, and that is reported for the owner instead of blocking.
  */
 function supersededContactFindings(
   routes: Array<{ path: string; bodyHtml: string; title: string; description: string }>,
-  superseded: ReturnType<typeof normalizedSupersededContacts>
+  superseded: NormalizedSupersededContacts
 ): ArtifactGateFinding[] {
   if (!superseded.phones.size && !superseded.emails.size) return [];
   return routes.flatMap((route) => {
     const text = `${route.title}\n${route.description}\n${route.bodyHtml}`;
     const digits = text.replace(/&#8209;|[\u2010-\u2015\u2212]/g, "-").replace(/[^\d]+/g, " ");
     const lower = text.toLowerCase();
-    const stale = [
-      ...[...superseded.phones].filter((phone) => new RegExp(`(?:^|\\D)1?\\s*${phone.slice(0, 3)}\\s*${phone.slice(3, 6)}\\s*${phone.slice(6)}(?:\\D|$)`).test(digits)),
-      ...[...superseded.emails].filter((email) => lower.includes(email))
-    ];
-    if (!stale.length) return [];
+    const stalePhones = [...superseded.phones].filter((phone) => new RegExp(`(?:^|\\D)1?\\s*${phone.slice(0, 3)}\\s*${phone.slice(3, 6)}\\s*${phone.slice(6)}(?:\\D|$)`).test(digits));
+    const staleEmails = [...superseded.emails].filter((email) => lower.includes(email));
+    if (!stalePhones.length && !staleEmails.length) return [];
     const legal = isLegalSourcePagePath(route.path);
-    return [gateFinding(
-      legal ? "advisory.superseded_contact_preserved" : "fact.superseded_contact",
-      "claim",
-      legal
-        ? `The legal page keeps the old contact detail ${stale.join(", ")} verbatim. Leave the legal text as it is and tell the owner this page still shows it.`
-        : `This page still shows the replaced contact detail ${stale.join(", ")}. Every phone, email, link, title, description and label must use the owner's current contact details.`,
-      route.path,
-      legal ? "warning" : "error"
-    )];
+    const replaceable = [...(superseded.currentPhone ? stalePhones : []), ...(superseded.currentEmail ? staleEmails : [])];
+    const kept = [...(superseded.currentPhone ? [] : stalePhones), ...(superseded.currentEmail ? [] : staleEmails)];
+    if (!legal) {
+      return [gateFinding("fact.superseded_contact", "claim",
+        `This page still shows the replaced contact detail ${[...stalePhones, ...staleEmails].join(", ")}. Every phone, email, link, title, description and label must use the owner's current contact details.`,
+        route.path, "error")];
+    }
+    return [
+      ...(replaceable.length ? [gateFinding("fact.superseded_contact", "claim",
+        `This legal page still shows the replaced contact detail ${replaceable.join(", ")}. Replace only that detail with the owner's current ${[superseded.currentPhone && stalePhones.length ? `phone ${superseded.currentPhone}` : "", superseded.currentEmail && staleEmails.length ? `email ${superseded.currentEmail}` : ""].filter(Boolean).join(" and ")}; keep every other word of the legal text verbatim.`,
+        route.path, "error")] : []),
+      ...(kept.length ? [gateFinding("advisory.superseded_contact_preserved", "claim",
+        `The legal page keeps the removed contact detail ${kept.join(", ")} verbatim because the owner has no replacement. Leave the legal text as it is and tell the owner this page still shows it.`,
+        route.path, "warning")] : [])
+    ];
   });
 }

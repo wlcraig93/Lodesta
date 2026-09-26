@@ -7,6 +7,7 @@ import {
   normalizeCampaignValue,
   normalizeReferrerHost
 } from "./analytics";
+import { hasPlatformAdminRole } from "./auth-policy";
 import { hmacSha256Hex } from "./hash-secret";
 import { isCustomDomainRequest, isPlatformHost, requestHostname } from "./host-routing";
 import { sanitizeAnalyticsMetadata } from "./privacy";
@@ -92,7 +93,7 @@ export async function resolveAnalyticsServingContext(
 
   if (form && trafficClass === "lodesta_internal") return { ok: true, site, version, buildInput, trafficClass, submissionKind: "synthetic" };
   const auth = await getCurrentUser();
-  if (auth.user?.id && (site.ownerUserId === auth.user.id || auth.user.app_metadata?.role === "platform_admin")) {
+  if (auth.user?.id && (site.ownerUserId === auth.user.id || hasPlatformAdminRole(auth.user))) {
     return form
       ? { ok: true, site, version, buildInput, trafficClass, submissionKind: "owner_test" }
       : { ok: false, status: 202, reason: "internal", site };

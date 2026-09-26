@@ -375,7 +375,7 @@ function instructionFor(payload: ControlPlaneChangePayload) {
   switch (payload.kind) {
     case "confirm_facts": return "Recompile the existing design against the owner-confirmed business facts.";
     case "confirm_identity": return "Use BusinessName for every visible identity mention and update the website to the owner-confirmed business name.";
-    case "update_contact": return "Recompile the existing design against the confirmed contact update.";
+    case "update_contact": return "Recompile the existing design against the confirmed contact update. Replace the old phone or email everywhere it appears, including the contact lines of legal pages; there, change only the contact detail and keep the rest of the legal text verbatim.";
     case "update_hours": return "Recompile the existing design against the confirmed hours update.";
     case "add_offering": return `Reflect the owner-confirmed ${payload.name} service wherever it is useful. Decide whether any route change improves the site; service confirmation alone does not require a page.`;
     case "set_offering": return `${payload.enabled ? "Reflect" : "Remove"} the selected service wherever relevant. Preserve or change routes based on the site's information architecture, not the offering record alone.`;

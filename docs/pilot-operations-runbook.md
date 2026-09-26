@@ -11,8 +11,9 @@ For the internal pilot: five Lodesta-built sites, no outreach, Lodesta staff act
 | Live domain stopped pointing to Lodesta for 24 hours | The site owner's account sign-in email | kind `domain_attention` |
 | Site or form failing two checks in a row | `LODESTA_OPERATOR_ALERT_EMAIL` | kinds `site_unreachable`, `form_unreachable` |
 | Run failed and the owner can't retry | `LODESTA_OPERATOR_ALERT_EMAIL` | kind `run_failed`, audience `operator` |
+| Website Health Report access link | The address the requester typed into the report form | kind `report_access`, audience `requester`, no site |
 
-Email never goes to a business contact or scraped address. A site without an owner produces no email. Synthetic monitor inquiries are recorded and suppressed.
+Every email is sent by the worker from `owner_notifications`; the web service never calls Resend, so only the worker needs `RESEND_API_KEY`. Email never goes to a business contact or scraped address. A site without an owner produces no email. Synthetic monitor inquiries are recorded and suppressed.
 
 A notification that fails five times ends as `failed` and logs `owner_notification_failed`. Find them with:
 

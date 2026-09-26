@@ -189,7 +189,7 @@ export const prospectReportLeadResponseSchema = z.object({
   ignored: z.boolean().optional(),
   report: publicProspectReportSchema.optional(),
   emailDelivery: z.object({
-    status: z.enum(["sent", "skipped", "failed"]),
+    status: z.enum(["queued", "failed"]),
     message: z.string()
   }).strict().optional()
 }).strict();

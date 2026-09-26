@@ -3,20 +3,23 @@ import { dirname, resolve } from "node:path";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
 import { configuredRepositoryMode } from "@/packages/execution-environment";
 
-export type OwnerNotificationKind = "lead" | "run_ready" | "run_failed" | "run_needs_input" | "domain_attention" | "site_unreachable" | "form_unreachable";
+export type OwnerNotificationKind = "lead" | "run_ready" | "run_failed" | "run_needs_input" | "domain_attention" | "site_unreachable" | "form_unreachable" | "report_access";
 export type OwnerNotificationStatus = "pending" | "sending" | "sent" | "failed" | "suppressed";
 
 /**
  * A delivery record for something the inbox or run history already holds.
- * `audience: "operator"` is used only for Lodesta's synthetic checks.
+ * `audience: "operator"` goes to Lodesta's alert address. `audience: "requester"`
+ * is a report access email with no site, sent to the address typed into the
+ * report form.
  */
 export type OwnerNotification = {
   id: string;
-  siteId: string;
+  /** Absent only for requester report access emails. */
+  siteId?: string;
   kind: OwnerNotificationKind;
   subjectId: string;
   dedupeKey: string;
-  audience: "owner" | "operator";
+  audience: "owner" | "operator" | "requester";
   test: boolean;
   status: OwnerNotificationStatus;
   attempts: number;
@@ -129,8 +132,8 @@ class LocalOwnerNotificationRepository implements OwnerNotificationRepository {
 }
 
 type OwnerNotificationRow = {
-  id: string; site_id: string; kind: OwnerNotificationKind; subject_id: string; dedupe_key: string;
-  audience: "owner" | "operator"; test: boolean; status: OwnerNotificationStatus; attempts: number;
+  id: string; site_id: string | null; kind: OwnerNotificationKind; subject_id: string; dedupe_key: string;
+  audience: "owner" | "operator" | "requester"; test: boolean; status: OwnerNotificationStatus; attempts: number;
   next_attempt_at: string; claimed_by: string | null; claimed_at: string | null; last_error: string | null;
   suppressed_reason: string | null; sent_at: string | null; created_at: string; updated_at: string;
 };
@@ -141,7 +144,7 @@ class SupabaseOwnerNotificationRepository implements OwnerNotificationRepository
   async enqueue(input: EnqueueOwnerNotification, now = new Date()) {
     const at = now.toISOString();
     const { data, error } = await this.client.from("owner_notifications").upsert({
-      id: `notification_${crypto.randomUUID()}`, site_id: input.siteId, kind: input.kind, subject_id: input.subjectId,
+      id: `notification_${crypto.randomUUID()}`, site_id: input.siteId ?? null, kind: input.kind, subject_id: input.subjectId,
       dedupe_key: input.dedupeKey, audience: input.audience, test: input.test, status: "pending",
       next_attempt_at: at, created_at: at, updated_at: at
     }, { onConflict: "dedupe_key", ignoreDuplicates: true }).select("id");
@@ -188,7 +191,7 @@ class SupabaseOwnerNotificationRepository implements OwnerNotificationRepository
 
 function rowToNotification(row: OwnerNotificationRow): OwnerNotification {
   return {
-    id: row.id, siteId: row.site_id, kind: row.kind, subjectId: row.subject_id, dedupeKey: row.dedupe_key,
+    id: row.id, siteId: row.site_id ?? undefined, kind: row.kind, subjectId: row.subject_id, dedupeKey: row.dedupe_key,
     audience: row.audience, test: row.test, status: row.status, attempts: row.attempts, nextAttemptAt: row.next_attempt_at,
     ...(row.claimed_by ? { claimedBy: row.claimed_by } : {}),
     ...(row.claimed_at ? { claimedAt: row.claimed_at } : {}),

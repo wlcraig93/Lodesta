@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/client";
 import { sendTransactionalEmail, type TransactionalEmailResult } from "@/lib/transactional-email";
 import { siteCapabilityRepository, type SiteCapabilityRepository } from "@/packages/site-capabilities";
 import { sitePlatformRepository, type SitePlatformRepository } from "@/packages/platform-data";
+import { issueProspectReportAccessGrant, prospectReportEmailLink } from "@/packages/acquisition/report-access";
 import { platformOperationsRepository, type PlatformOperationsRepository } from "@/packages/platform-operations";
 import type { PlatformSiteRecord, SiteAgentRun } from "@/packages/site-contracts";
 import { ownerNotificationRepository, type OwnerNotification, type OwnerNotificationRepository } from "./repository";
@@ -15,6 +16,9 @@ export type OwnerNotificationDependencies = {
   platform: Pick<SitePlatformRepository, "getSite" | "getAgentRun">;
   capabilities: Pick<SiteCapabilityRepository, "getInquiry" | "listInquiryEvents" | "listRecentFormSubmissions">;
   domains: Pick<PlatformOperationsRepository, "getDomainById">;
+  reports: Pick<PlatformOperationsRepository, "getProspectReport" | "getProspectReportLead">;
+  /** A fresh report access link for a lead; the secret exists only in the email. */
+  reportAccessLink(reportId: string, leadId: string): Promise<string>;
   /** The confirmed sign-in email of an account, or undefined when it has none. */
   accountEmail(userId: string): Promise<string | undefined>;
   send(input: { to: string; subject: string; text: string }): Promise<TransactionalEmailResult>;
@@ -24,6 +28,20 @@ export type OwnerNotificationDependencies = {
 
 export function createOwnerNotificationService(deps: OwnerNotificationDependencies) {
   return {
+    /**
+     * Records a report access email for the address a requester typed into the
+     * report form. Each request is its own email, so a resend always sends.
+     */
+    enqueueReportAccess(leadId: string, now = new Date()) {
+      return deps.notifications.enqueue({
+        kind: "report_access",
+        subjectId: leadId,
+        dedupeKey: `report_access:${leadId}:${crypto.randomUUID()}`,
+        audience: "requester",
+        test: false
+      }, now);
+    },
+
     /**
      * Records a lead notification. Never throws: the inquiry is already saved,
      * and a notification problem must not change what the visitor sees.
@@ -61,7 +79,8 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
     async enqueueRun(run: SiteAgentRun, now = new Date()) {
       const kind = run.status === "needs_input" ? "run_needs_input"
         : run.status === "failed" ? "run_failed"
-        : run.status === "succeeded" && run.candidateVersionId ? "run_ready"
+        // An edit that kept the parent revision changed nothing; there is nothing new to review.
+        : run.status === "succeeded" && run.candidateVersionId && !(run.outputRevisionId && run.outputRevisionId === run.exactParentRevisionId) ? "run_ready"
         : undefined;
       if (!kind) return false;
       if (kind === "run_failed" && !run.retryableByOwner) {
@@ -121,7 +140,8 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
 
   async function deliver(notification: OwnerNotification, now: Date): Promise<"sent" | "suppressed" | "retry" | "failed"> {
     try {
-      const site = await deps.platform.getSite(notification.siteId);
+      if (notification.audience === "requester") return await deliverReportAccess(notification, now);
+      const site = notification.siteId ? await deps.platform.getSite(notification.siteId) : undefined;
       if (!site) {
         await deps.notifications.markSuppressed(notification.id, "site_missing", now);
         return "suppressed";
@@ -145,6 +165,38 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
         await deps.notifications.markSuppressed(notification.id, "subject_missing", now);
         return "suppressed";
       }
+      return await send(notification, recipient, message, now);
+    } catch (error) {
+      return scheduleRetry(notification, error instanceof Error ? error.message : String(error), now);
+    }
+  }
+
+  /** The recipient is the address typed into the report form, never business contact data. */
+  async function deliverReportAccess(notification: OwnerNotification, now: Date) {
+    const lead = await deps.reports.getProspectReportLead(notification.subjectId);
+    const report = lead ? await deps.reports.getProspectReport(lead.reportId) : null;
+    if (!lead || !report || report.status !== "completed" || !report.result) {
+      await deps.notifications.markSuppressed(notification.id, "subject_missing", now);
+      return "suppressed" as const;
+    }
+    const businessName = report.result.siteUnderstanding.businessName;
+    return send(notification, lead.email, {
+      subject: `Your Website Health Report${businessName ? ` for ${businessName}` : ""}`,
+      text: [
+        "Your Lodesta Website Health Report is ready.",
+        "",
+        "Open the complete report on any device:",
+        await deps.reportAccessLink(report.id, lead.id),
+        "",
+        "This email delivers the report you requested. It does not subscribe you to marketing messages.",
+        "",
+        "The access link expires in 30 days."
+      ].join("\n")
+    }, now);
+  }
+
+  async function send(notification: OwnerNotification, recipient: string, message: { subject: string; text: string }, now: Date): Promise<"sent" | "suppressed" | "retry" | "failed"> {
+    try {
       const result = await deps.send({ to: recipient, ...message });
       if (result.status === "sent") {
         await deps.notifications.markSent(notification.id, now);
@@ -269,6 +321,8 @@ export const ownerNotificationService = createOwnerNotificationService({
   platform: sitePlatformRepository,
   capabilities: siteCapabilityRepository,
   domains: platformOperationsRepository,
+  reports: platformOperationsRepository,
+  reportAccessLink: async (reportId, leadId) => prospectReportEmailLink(configuredAppOriginOrDefault(), reportId, (await issueProspectReportAccessGrant({ reportId, leadId })).secret),
   accountEmail: confirmedAccountEmail,
   send: sendTransactionalEmail,
   appOrigin: configuredAppOriginOrDefault,

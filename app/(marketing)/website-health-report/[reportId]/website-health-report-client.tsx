@@ -144,7 +144,7 @@ export function WebsiteHealthReportClient({ reportId }: { reportId: string }) {
       const payload = await parseJsonResponse(response, prospectReportLeadResponseSchema);
       if (!response.ok || !payload.report) throw new Error(payload.error ?? "The plan could not be unlocked.");
       setReport(payload.report);
-      setEmailDeliveryFailed(Boolean(payload.emailDelivery && payload.emailDelivery.status !== "sent"));
+      setEmailDeliveryFailed(payload.emailDelivery?.status === "failed");
       setLeadStatus(
         payload.ignored
           ? "Please try again."

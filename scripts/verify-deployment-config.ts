@@ -220,5 +220,6 @@ for (const [name, page] of [["Privacy", privacyPage], ["Terms", termsPage]] as c
 assert(termsPage.includes("does not offer a paid plan"), "Terms must disclose the current pre-launch commercial status.");
 assert(termsPage.includes("must be reviewed by qualified legal counsel"), "Terms must require counsel review before a paid launch.");
 assert(sitemap.includes('`${baseUrl}/privacy/`') && sitemap.includes('`${baseUrl}/terms/`'), "Sitemap must include the canonical public legal pages.");
+assert(sitemap.includes("pilotRestricted("), "Sitemap must never list access-restricted internal sites.");
 
 process.stdout.write(`${JSON.stringify({ ok: true, web: "railway.toml", watchdog: "workers/recovery-watchdog/wrangler.jsonc", localWorker: "workers/runner.ts", generation: "site-authoring" }, null, 2)}\n`);

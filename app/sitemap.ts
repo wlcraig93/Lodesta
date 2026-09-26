@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { configuredAppOriginOrDefault } from "@/lib/app-origin";
+import { pilotRestricted } from "@/lib/pilot-access";
 import { sitePlatformRepository } from "@/packages/platform-data";
 import { platformOperationsRepository } from "@/packages/platform-operations";
 
@@ -15,7 +16,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ];
   // A site with a live custom domain is indexed there, not under /sites/.
   const liveDomainSiteIds = new Set((await platformOperationsRepository.listDomains()).filter((domain) => domain.status === "active").map((domain) => domain.siteId));
-  const sites = (await sitePlatformRepository.listSites()).filter((site) => site.status === "active" && site.publishedVersionId && !liveDomainSiteIds.has(site.id));
+  // Access-restricted internal sites are private: never advertise them.
+  const sites = (await sitePlatformRepository.listSites()).filter((site) => site.status === "active" && site.publishedVersionId
+    && !liveDomainSiteIds.has(site.id) && !pilotRestricted("", `/sites/${site.slug}/`));
   const sitePages = (await Promise.all(sites.map(async (site) => {
     const version = site.publishedVersionId ? await sitePlatformRepository.getSiteVersion(site.publishedVersionId) : undefined;
     const artifact = version ? await sitePlatformRepository.getBuildArtifact(version.artifactId) : undefined;

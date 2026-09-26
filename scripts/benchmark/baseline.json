@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-26",
+  "note": "Known failures and unsupported behavior at the start of the benchmark. A later report marks each as still failing or fixed; nothing here blocks a release.",
+  "known": [
+    { "id": "chat_business_facts", "phase": 2, "description": "Chat cannot change a business fact (phone, email, hours, address); only Business details can." },
+    { "id": "owner_pages", "phase": 2, "description": "Adding, removing or renaming a page on the owner's request fails at finish (page list frozen on edits)." },
+    { "id": "owner_links", "phase": 2, "description": "An owner-given link (Facebook, Yelp, booking) is rejected unless it was on the old site." },
+    { "id": "owner_claims", "phase": 2, "description": "Owner-stated prices, specials, years in business, warranties and ratings are blocked." },
+    { "id": "second_contact_or_location", "phase": 2, "description": "A second phone, email or location cannot be represented; a replaced value is banned site-wide." },
+    { "id": "legal_pages_locked", "phase": 2, "description": "Legal pages cannot be edited, moved or removed on the owner's request." },
+    { "id": "required_links_locked", "phase": 2, "description": "Booking, payment and portal links cannot be retired and must appear on every page." },
+    { "id": "phone_with_extension", "phase": 1, "description": "A phone saved with an extension or two numbers makes the site unable to show its own number." },
+    { "id": "gallery_clipping_false_positive", "phase": 1, "description": "Horizontal scrolling galleries are flagged as clipped content and block release." },
+    { "id": "dead_operator_review", "phase": 1, "description": "Proof toggles and link updates wait for an operator approval no screen can give." },
+    { "id": "chat_send_latency", "phase": 1, "description": "The owner's chat message appears only after the send request and a full workspace reload." },
+    { "id": "overlapping_edits", "phase": 0, "description": "Behavior of a second chat message while an edit is running is undefined; the benchmark records what happens." },
+    { "id": "photo_replace_from_chat", "phase": 2, "description": "Replacing a photo requires uploading it in Business details; chat has no upload." }
+  ]
+}

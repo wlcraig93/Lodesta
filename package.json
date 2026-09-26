@@ -30,6 +30,7 @@
     "configure:r2-lifecycle": "node --env-file=.env.local --import tsx scripts/configure-r2-lifecycle.ts",
     "deploy:artifact-broker": "wrangler deploy --config workers/artifact-broker/wrangler.jsonc",
     "deploy:recovery-watchdog": "wrangler deploy --config workers/recovery-watchdog/wrangler.jsonc",
+    "benchmark:report": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/benchmark-report.ts",
     "canary:owner-journey": "LODESTA_REPOSITORY=supabase node --env-file=.env.local --import tsx scripts/canary-owner-journey.ts",
     "generate:site-sandbox-manifest": "node --import tsx scripts/generate-site-sandbox-manifest.ts",
     "maintenance:site-authoring": "node --import tsx scripts/site-authoring-maintenance.ts",

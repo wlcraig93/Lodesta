@@ -164,9 +164,19 @@ try {
         assert.equal(restrictedPage.headers.get("cache-control"), "private, no-store", "A signed-in pilot page was publicly cacheable.");
         const anonymous = await middleware(new NextRequest("https://pilot.example.com/", { headers: { host: "pilot.example.com" } }));
         assert.equal(anonymous.status, 401, "An anonymous request after a signed-in one was served.");
+        // `*` keeps every internal site private: any Lodesta address and any custom domain.
+        process.env.LODESTA_PILOT_RESTRICTED_HOSTS = "*";
+        process.env.LODESTA_PILOT_RESTRICTED_SLUGS = "*";
+        const anyHost = await middleware(new NextRequest("https://other-business.example/", { headers: { host: "other-business.example" } }));
+        assert.equal(anyHost.status, 401, "A wildcard-restricted custom domain was served anonymously.");
+        const anySlug = await middleware(new NextRequest("http://localhost:3000/sites/any-business/", { headers: { host: "localhost:3000" } }));
+        assert.equal(anySlug.status, 401, "A wildcard-restricted Lodesta address was served anonymously.");
+        const app = await middleware(new NextRequest("http://localhost:3000/account/", { headers: { host: "localhost:3000" } }));
+        assert.notEqual(app.status, 401, "The wildcard restricted the Lodesta app itself.");
       } finally {
         delete process.env.LODESTA_PILOT_ACCESS_CREDENTIAL;
         delete process.env.LODESTA_PILOT_RESTRICTED_HOSTS;
+        delete process.env.LODESTA_PILOT_RESTRICTED_SLUGS;
       }
     } finally {
       globalThis.fetch = realFetch;

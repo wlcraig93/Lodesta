@@ -28,6 +28,12 @@ assert(/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmail), "LODESTA_OWNER_CANARY_EMAI
 const supabaseUrl = required("SUPABASE_URL");
 const serviceRoleKey = required("SUPABASE_SERVICE_ROLE_KEY");
 const anonKey = publicAnonKey();
+// Internal sites stay private: every request to a published page carries the
+// pilot credential, and an anonymous request must be refused.
+const pilotCredential = process.env.LODESTA_PILOT_ACCESS_CREDENTIAL?.trim() || undefined;
+const pilotHttpCredentials = pilotCredential
+  ? { username: pilotCredential.slice(0, pilotCredential.indexOf(":")), password: pilotCredential.slice(pilotCredential.indexOf(":") + 1), origin: origin.origin }
+  : undefined;
 const buildTimeoutMs = positiveInteger(process.env.LODESTA_OWNER_CANARY_BUILD_TIMEOUT_MS, 45 * 60_000);
 const editTimeoutMs = positiveInteger(process.env.LODESTA_OWNER_CANARY_EDIT_TIMEOUT_MS, 30 * 60_000);
 const ownerCanaryFetchTimeoutMs = 30_000;
@@ -97,7 +103,8 @@ try {
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1100 },
-    timezoneId: "America/Chicago"
+    timezoneId: "America/Chicago",
+    httpCredentials: pilotHttpCredentials
   });
   await context.addCookies(sessionCookies.map((cookie) => ({
     name: cookie.name,
@@ -373,9 +380,15 @@ try {
     viewport: { width: 1440, height: 1100 },
     // Emulate an ordinary visitor explicitly. Default HeadlessChrome is
     // correctly rejected as bot traffic by the unchanged production endpoint.
-    userAgent: devices["Desktop Chrome"].userAgent
+    userAgent: devices["Desktop Chrome"].userAgent,
+    httpCredentials: pilotHttpCredentials
   });
   evidence.visitorProfile = "anonymous_playwright_desktop_chrome";
+  if (pilotCredential) {
+    const anonymous = await fetch(new URL(`/sites/${encodeURIComponent(slug)}/`, origin), { redirect: "manual" });
+    assert.equal(anonymous.status, 401, "An internal published site was served to an anonymous visitor.");
+    step("anonymous_denied", { status: "passed", publicStatus: anonymous.status });
+  }
   const livePage = await visitorContext.newPage();
   try {
     const visitorResponse = await livePage.goto(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { waitUntil: "networkidle" });

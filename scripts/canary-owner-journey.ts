@@ -794,7 +794,7 @@ async function waitForCandidatePreview(targetPage: Page, input: { versionId: str
     return true;
   }, { expectedUrl, routeTitle: input.routeTitle }, { timeout: 60_000, polling: 100 }).catch(async (error: unknown) => {
     // Name the unmet condition so a timeout is diagnosable from the evidence.
-    const state = await targetPage.evaluate(({ expectedUrl, routeTitle }) => {
+    const state = await Promise.resolve().then(() => targetPage.evaluate(({ expectedUrl, routeTitle }) => {
       const frame = document.querySelector('iframe[title="Website preview"]');
       if (!(frame instanceof HTMLIFrameElement)) return { frame: "missing" };
       const doc = frame.contentDocument;
@@ -806,7 +806,7 @@ async function waitForCandidatePreview(targetPage: Page, input: { versionId: str
         pendingImages: doc ? [...doc.images].filter((image) => !image.complete).length : undefined,
         heading: Boolean(doc?.querySelector("main h1"))
       };
-    }, { expectedUrl, routeTitle: input.routeTitle }).catch(() => ({ frame: "unreadable" }));
+    }, { expectedUrl, routeTitle: input.routeTitle })).catch(() => ({ frame: "unreadable" }));
     throw new Error(`Candidate preview did not settle: ${JSON.stringify(state)} (${error instanceof Error ? error.message : String(error)})`);
   });
   const heading = targetPage.frameLocator('iframe[title="Website preview"]').locator("main h1:visible").first();

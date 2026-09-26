@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { getSupabaseAdminClient } from "@/lib/supabase/client";
 import { configuredRepositoryMode } from "@/packages/execution-environment";
 
-export type OwnerNotificationKind = "lead" | "run_ready" | "run_failed" | "run_needs_input" | "domain_attention" | "site_unreachable" | "form_unreachable" | "report_access";
+export type OwnerNotificationKind = "lead" | "run_failed" | "domain_attention" | "site_unreachable" | "form_unreachable" | "report_access";
 export type OwnerNotificationStatus = "pending" | "sending" | "sent" | "failed" | "suppressed";
 
 /**

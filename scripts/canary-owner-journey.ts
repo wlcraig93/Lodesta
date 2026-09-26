@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { chromium, devices, type Page } from "playwright";
+import { chromium, devices, type BrowserContext, type Page } from "playwright";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { isFinalOwnerCanaryPostResponse } from "./owner-canary-response";
@@ -31,9 +31,16 @@ const anonKey = publicAnonKey();
 // Internal sites stay private: every request to a published page carries the
 // pilot credential, and an anonymous request must be refused.
 const pilotCredential = process.env.LODESTA_PILOT_ACCESS_CREDENTIAL?.trim() || undefined;
-const pilotHttpCredentials = pilotCredential
-  ? { username: pilotCredential.slice(0, pilotCredential.indexOf(":")), password: pilotCredential.slice(pilotCredential.indexOf(":") + 1), origin: origin.origin }
-  : undefined;
+// Sent up front and only to published-site paths on the Lodesta origin, never
+// to Supabase or any other host.
+function pilotHeaders(): Record<string, string> {
+  return pilotCredential ? { authorization: `Basic ${Buffer.from(pilotCredential).toString("base64")}` } : {};
+}
+async function passPilotGate(context: BrowserContext) {
+  if (!pilotCredential) return;
+  const authorization = `Basic ${Buffer.from(pilotCredential).toString("base64")}`;
+  await context.route(`${origin.origin}/sites/**`, (route) => route.continue({ headers: { ...route.request().headers(), authorization } }));
+}
 const buildTimeoutMs = positiveInteger(process.env.LODESTA_OWNER_CANARY_BUILD_TIMEOUT_MS, 45 * 60_000);
 const editTimeoutMs = positiveInteger(process.env.LODESTA_OWNER_CANARY_EDIT_TIMEOUT_MS, 30 * 60_000);
 const ownerCanaryFetchTimeoutMs = 30_000;
@@ -103,9 +110,9 @@ try {
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1100 },
-    timezoneId: "America/Chicago",
-    httpCredentials: pilotHttpCredentials
+    timezoneId: "America/Chicago"
   });
+  await passPilotGate(context);
   await context.addCookies(sessionCookies.map((cookie) => ({
     name: cookie.name,
     value: cookie.value,
@@ -311,7 +318,7 @@ try {
     "The published comparison exposed the unconfirmed post-live candidate.");
   await screenshot("05-live-before-republish-compare");
 
-  const publicBeforeRepublish = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString());
+  const publicBeforeRepublish = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { headers: pilotHeaders() });
   const publicBeforeRepublishIdentity = publishedResponseEvidence(publicBeforeRepublish);
   evidence.publicBeforeRepublish = publicBeforeRepublishIdentity;
   assert.equal(publicBeforeRepublishIdentity.status, 200, "The initial published public route is unavailable before re-publication.");
@@ -351,7 +358,7 @@ try {
   60_000);
   const finalPublishedVersionId = republishedWorkspace.site?.publishedVersionId;
   assert.equal(finalPublishedVersionId, postLiveCandidateId, "Re-publication did not promote the post-live candidate.");
-  const publicAfterRepublish = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString());
+  const publicAfterRepublish = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { headers: pilotHeaders() });
   const publicAfterRepublishIdentity = publishedResponseEvidence(publicAfterRepublish);
   evidence.publicAfterRepublish = publicAfterRepublishIdentity;
   assert.equal(publicAfterRepublishIdentity.status, 200, "The public route is unavailable after re-publication.");
@@ -380,9 +387,9 @@ try {
     viewport: { width: 1440, height: 1100 },
     // Emulate an ordinary visitor explicitly. Default HeadlessChrome is
     // correctly rejected as bot traffic by the unchanged production endpoint.
-    userAgent: devices["Desktop Chrome"].userAgent,
-    httpCredentials: pilotHttpCredentials
+    userAgent: devices["Desktop Chrome"].userAgent
   });
+  await passPilotGate(visitorContext);
   evidence.visitorProfile = "anonymous_playwright_desktop_chrome";
   if (pilotCredential) {
     const anonymous = await fetch(new URL(`/sites/${encodeURIComponent(slug)}/`, origin), { redirect: "manual" });
@@ -446,7 +453,7 @@ try {
     0,
     "The disposed site remains in the owner inventory."
   );
-  const publicResponse = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString());
+  const publicResponse = await context.request.get(new URL(`/sites/${encodeURIComponent(slug)}`, origin).toString(), { headers: pilotHeaders() });
   assert.equal(publicResponse.status(), 404, "The disposed public route remains available.");
   step("disposal", { status: "passed", publicStatus: publicResponse.status() });
 
@@ -785,7 +792,23 @@ async function waitForCandidatePreview(targetPage: Page, input: { versionId: str
       if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || Number.parseFloat(style.opacity) === 0) return false;
     }
     return true;
-  }, { expectedUrl, routeTitle: input.routeTitle }, { timeout: 60_000, polling: 100 });
+  }, { expectedUrl, routeTitle: input.routeTitle }, { timeout: 60_000, polling: 100 }).catch(async (error: unknown) => {
+    // Name the unmet condition so a timeout is diagnosable from the evidence.
+    const state = await targetPage.evaluate(({ expectedUrl, routeTitle }) => {
+      const frame = document.querySelector('iframe[title="Website preview"]');
+      if (!(frame instanceof HTMLIFrameElement)) return { frame: "missing" };
+      const doc = frame.contentDocument;
+      return {
+        srcMatches: frame.src === expectedUrl, src: frame.src,
+        hrefMatches: frame.contentWindow?.location.href === expectedUrl,
+        titleMatches: doc?.title === routeTitle, title: doc?.title,
+        readyState: doc?.readyState,
+        pendingImages: doc ? [...doc.images].filter((image) => !image.complete).length : undefined,
+        heading: Boolean(doc?.querySelector("main h1"))
+      };
+    }, { expectedUrl, routeTitle: input.routeTitle }).catch(() => ({ frame: "unreadable" }));
+    throw new Error(`Candidate preview did not settle: ${JSON.stringify(state)} (${error instanceof Error ? error.message : String(error)})`);
+  });
   const heading = targetPage.frameLocator('iframe[title="Website preview"]').locator("main h1:visible").first();
   await heading.waitFor({ state: "visible", timeout: 60_000 });
   const h1Text = (await heading.innerText()).trim();

@@ -75,31 +75,21 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
       }
     },
 
-    /** Records the notification a run's current state calls for, once per state. */
+    /**
+     * Owners start builds and edits themselves and see the outcome in the
+     * editor, so no run outcome is ever emailed to them. The one run email is
+     * the operator alert for a failure the owner cannot retry, because the
+     * owner is told Lodesta will look into it. Re-engaging owners who left an
+     * unpublished site is a separate lifecycle feature, not a builder email.
+     */
     async enqueueRun(run: SiteAgentRun, now = new Date()) {
-      const kind = run.status === "needs_input" ? "run_needs_input"
-        : run.status === "failed" ? "run_failed"
-        // An edit that kept the parent revision changed nothing; there is nothing new to review.
-        : run.status === "succeeded" && run.candidateVersionId && !(run.outputRevisionId && run.outputRevisionId === run.exactParentRevisionId) ? "run_ready"
-        : undefined;
-      if (!kind) return false;
-      if (kind === "run_failed" && !run.retryableByOwner) {
-        // The owner is told Lodesta will look into it, so an operator must hear about it.
-        await deps.notifications.enqueue({
-          siteId: run.siteId,
-          kind,
-          subjectId: run.id,
-          dedupeKey: `operator:${kind}:${run.id}:${run.executionNumber}`,
-          audience: "operator",
-          test: false
-        }, now);
-      }
+      if (run.status !== "failed" || run.retryableByOwner) return false;
       return deps.notifications.enqueue({
         siteId: run.siteId,
-        kind,
+        kind: "run_failed",
         subjectId: run.id,
-        dedupeKey: `${kind}:${run.id}:${run.executionNumber}`,
-        audience: "owner",
+        dedupeKey: `operator:run_failed:${run.id}:${run.executionNumber}`,
+        audience: "operator",
         test: false
       }, now);
     },
@@ -266,38 +256,16 @@ export function createOwnerNotificationService(deps: OwnerNotificationDependenci
         ].join("\n\n")
       };
     }
-    const run = await deps.platform.getAgentRun(notification.subjectId);
+    // Run outcomes reach only the operator; owners see them in the editor.
+    const run = notification.audience === "operator" ? await deps.platform.getAgentRun(notification.subjectId) : undefined;
     if (!run) return undefined;
-    const editor = `${workspace}/editor`;
-    if (notification.audience === "operator") {
-      return {
-        subject: `[Lodesta monitor] ${site.slug}: ${run.kind.replaceAll("_", " ")} failed (${run.failureCode ?? "unknown"})`,
-        text: [
-          `Run ${run.id} failed and the owner can't retry it.`,
-          run.failureReason ? `Reason: ${run.failureReason}` : "",
-          `Run details: ${deps.appOrigin()}/admin/runs/${encodeURIComponent(run.id)}`
-        ].filter(Boolean).join("\n\n")
-      };
-    }
-    if (notification.kind === "run_ready") {
-      return {
-        subject: run.kind === "initial_build" ? "Your new website is ready to review" : "Your website change is ready to review",
-        text: [`Your ${run.kind === "initial_build" ? "website" : "requested change"} is ready. Review it and publish when you're happy:`, editor].join("\n\n")
-      };
-    }
-    if (notification.kind === "run_needs_input") {
-      return {
-        subject: "Your website needs a quick answer",
-        text: [run.inputQuestion ?? "We need one detail from you to continue.", `Answer here: ${editor}`].join("\n\n")
-      };
-    }
     return {
-      subject: "Your website change didn't finish",
+      subject: `[Lodesta monitor] ${site.slug}: ${run.kind.replaceAll("_", " ")} failed (${run.failureCode ?? "unknown"})`,
       text: [
-        "Your live website has not changed.",
-        run.retryableByOwner ? "You can try again from the editor:" : "We're looking into it. You can check the editor for details:",
-        editor
-      ].join("\n\n")
+        `Run ${run.id} failed and the owner can't retry it.`,
+        run.failureReason ? `Reason: ${run.failureReason}` : "",
+        `Run details: ${deps.appOrigin()}/admin/runs/${encodeURIComponent(run.id)}`
+      ].filter(Boolean).join("\n\n")
     };
   }
 

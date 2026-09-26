@@ -99,26 +99,27 @@ try {
   assert.equal((await service.deliverDue({ workerId: "w", now: at(202) })).length, 0);
   assert.deepEqual((await service.deliverDue({ workerId: "w", now: at(206) })).map((item) => item.status), ["sent"]);
 
-  // Each run outcome notifies once; in-progress runs notify nobody.
+  // Owners start builds and edits and watch them in the editor: no run outcome
+  // is emailed to them. Only a failure the owner can't retry alerts the operator, once.
+  operatorEmail = "alerts@team.example";
   const run = (id: string, patch: Partial<SiteAgentRun>) => (runs[id] = { id, siteId: "site_owned", kind: "edit", executionNumber: 1, ...patch }) as SiteAgentRun;
-  assert.equal(await service.enqueueRun(run("run_ready", { status: "succeeded", candidateVersionId: "version_1" }), at(299)), true);
-  assert.equal(await service.enqueueRun(run("run_ready", { status: "succeeded", candidateVersionId: "version_1" }), at(299)), false);
-  assert.equal(await service.enqueueRun(run("run_noop", { status: "succeeded", candidateVersionId: "version_1", kind: "edit", exactParentRevisionId: "revision_1", outputRevisionId: "revision_1" }), at(299)), false,
-    "An edit that changed nothing announced a change to review.");
-  assert.equal(await service.enqueueRun(run("run_question", { status: "needs_input", inputQuestion: "Which phone number should customers call?" }), at(299)), true);
-  assert.equal(await service.enqueueRun(run("run_failed", { status: "failed", retryableByOwner: true }), at(299)), true);
-  assert.equal(await service.enqueueRun(run("run_active", { status: "running" }), at(299)), false);
+  for (const kind of ["initial_build", "edit"] as const) {
+    for (const [id, patch] of [
+      [`${kind}_ready`, { status: "succeeded", candidateVersionId: "version_2" }],
+      [`${kind}_question`, { status: "needs_input", inputQuestion: "Which page?" }],
+      [`${kind}_retryable`, { status: "failed", retryableByOwner: true }],
+      [`${kind}_active`, { status: "running" }]
+    ] as const) {
+      assert.equal(await service.enqueueRun(run(id, { ...patch, kind }), at(299)), false, `A ${kind} outcome (${id}) produced a notification.`);
+    }
+  }
+  assert.equal(await service.enqueueRun(run("run_stuck", { status: "failed", retryableByOwner: false, kind: "initial_build" }), at(299)), true);
+  assert.equal(await service.enqueueRun(run("run_stuck", { status: "failed", retryableByOwner: false, kind: "initial_build" }), at(299)), false);
   const runSent = sent.length;
   await service.deliverDue({ workerId: "w", now: at(300) });
   const runMessages = sent.slice(runSent);
-  assert.deepEqual(runMessages.map((item) => item.subject).sort(), [
-    "Your website change didn't finish",
-    "Your website change is ready to review",
-    "Your website needs a quick answer"
-  ]);
-  assert(runMessages.every((item) => item.to === "owner@account.example"));
-  assert.match(runMessages.find((item) => item.subject.includes("answer"))!.text, /Which phone number should customers call\?/);
-  assert.match(runMessages.find((item) => item.subject.includes("didn't"))!.text, /Your live website has not changed\./);
+  assert.deepEqual(runMessages.map((item) => item.to), ["alerts@team.example"], "A run outcome emailed someone other than the operator.");
+  assert.match(runMessages[0]!.subject, /^\[Lodesta monitor\] haynes-pest: initial build failed/);
 
   // A saved inquiry whose notification was never recorded is picked up by reconciliation, once.
   savedSubmissions.push({ id: "inq_9_event", siteId: "site_owned", inquiryId: "inq_9", metadata: {} });
